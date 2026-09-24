@@ -4,10 +4,20 @@
 //! multi-dozen-variant event enum for ~25 knobs. Enum/bool controls
 //! (waveform, filter type, sync, voice mode, held keys) get their own
 //! variants since they aren't naturally a knob position.
+//!
+//! This model also owns the real-time bridge to the engine's voice
+//! renderer: every tick it pushes a fresh [`SynthParams`] snapshot and
+//! drains the engine's own peak meter; note on/off (from a mouse click on
+//! the on-screen keyboard, or a mapped computer-keyboard key) go straight
+//! through as they happen.
+
+use std::collections::HashMap;
 
 use vizia::prelude::*;
 
-use shared::synth::{seed_synth, FilterType, SynthState, VoiceMode, Waveform};
+use shared::synth::{
+    seed_synth, FilterType, LfoTarget, NoteEvent, SynthParams, SynthState, SynthTelemetry, VoiceMode, Waveform,
+};
 
 pub enum SynthEvent {
     Update(Box<dyn Fn(&mut SynthState) + Send>),
@@ -17,33 +27,124 @@ pub enum SynthEvent {
     SetFilterType(FilterType),
     ToggleLfo1Sync,
     ToggleLfo2Sync,
+    SetLfo1Target(LfoTarget),
+    SetLfo2Target(LfoTarget),
     SetVoiceMode(VoiceMode),
+    /// Mouse click on the on-screen keyboard: on if it wasn't held, off if
+    /// it was.
     ToggleKey(u8),
-    /// Advances the LFO scope's animated phase; `dt` in seconds.
+    ToggleHelp,
+    /// Advances the LFO scope's animated phase, pushes the latest params
+    /// snapshot to the engine and drains its peak meter; `dt` in seconds.
     Tick(f32),
+}
+
+/// The computer-keyboard "typing piano": one row of white keys (Z through
+/// Slash) plus their black keys, `+`/`-` shift the whole row by an octave.
+const KEYBOARD_BASE_NOTE: i32 = 60; // C4, centred in the on-screen keyboard's 3-octave span.
+const MAX_OCTAVE_SHIFT: i8 = 4;
+
+fn key_semitone_offset(code: Code) -> Option<i32> {
+    use Code::*;
+    Some(match code {
+        KeyZ => 0,
+        KeyS => 1,
+        KeyX => 2,
+        KeyD => 3,
+        KeyC => 4,
+        KeyV => 5,
+        KeyG => 6,
+        KeyB => 7,
+        KeyH => 8,
+        KeyN => 9,
+        KeyJ => 10,
+        KeyM => 11,
+        Comma => 12,
+        KeyL => 13,
+        Period => 14,
+        Semicolon => 15,
+        Slash => 16,
+        _ => return None,
+    })
+}
+
+const METER_FLOOR_DB: f32 = -60.0;
+const METER_DECAY_DB_PER_SEC: f32 = 20.0;
+
+fn gain_to_db(gain: f32) -> f32 {
+    if gain <= 0.0001 {
+        -100.0
+    } else {
+        20.0 * gain.log10()
+    }
+}
+
+fn db_to_meter_fraction(db: f32) -> f32 {
+    ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0)
 }
 
 pub struct SynthModel {
     pub state: Signal<SynthState>,
     pub lfo_scope_phase: Signal<f32>,
+    pub octave_shift: Signal<i8>,
+    pub meter_l: Signal<f32>,
+    pub meter_r: Signal<f32>,
+    pub help_open: Signal<bool>,
+
+    // Engine bridge (not reactive).
+    params_tx: rtrb::Producer<SynthParams>,
+    note_tx: rtrb::Producer<NoteEvent>,
+    telemetry_rx: rtrb::Consumer<SynthTelemetry>,
+    meter_db_l: f32,
+    meter_db_r: f32,
+
+    /// Physical keys currently held, mapped to the note they triggered -
+    /// so a mid-hold octave shift doesn't change an already-sounding note,
+    /// and OS key-repeat doesn't retrigger it.
+    held_computer_keys: HashMap<Code, u8>,
 }
 
 impl SynthModel {
-    pub fn new() -> Self {
-        Self { state: Signal::new(seed_synth()), lfo_scope_phase: Signal::new(0.0) }
+    pub fn new(
+        params_tx: rtrb::Producer<SynthParams>,
+        note_tx: rtrb::Producer<NoteEvent>,
+        telemetry_rx: rtrb::Consumer<SynthTelemetry>,
+    ) -> Self {
+        Self {
+            state: Signal::new(seed_synth()),
+            lfo_scope_phase: Signal::new(0.0),
+            octave_shift: Signal::new(0),
+            meter_l: Signal::new(0.0),
+            meter_r: Signal::new(0.0),
+            help_open: Signal::new(false),
+            params_tx,
+            note_tx,
+            telemetry_rx,
+            meter_db_l: METER_FLOOR_DB,
+            meter_db_r: METER_FLOOR_DB,
+            held_computer_keys: HashMap::new(),
+        }
     }
-}
 
-impl Default for SynthModel {
-    fn default() -> Self {
-        Self::new()
+    fn note_on(&mut self, note: u8) {
+        self.state.update(|s| {
+            if !s.held_notes.contains(&note) {
+                s.held_notes.push(note);
+            }
+        });
+        let _ = self.note_tx.push(NoteEvent { note, on: true });
+    }
+
+    fn note_off(&mut self, note: u8) {
+        self.state.update(|s| s.held_notes.retain(|n| *n != note));
+        let _ = self.note_tx.push(NoteEvent { note, on: false });
     }
 }
 
 const LFO_SCOPE_HZ: f32 = 0.5;
 
 impl Model for SynthModel {
-    fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
             SynthEvent::Update(f) => self.state.update(|s| f(s)),
             SynthEvent::SetOsc1Waveform(w) => self.state.update(|s| s.osc1.waveform = *w),
@@ -52,19 +153,66 @@ impl Model for SynthModel {
             SynthEvent::SetFilterType(t) => self.state.update(|s| s.filter.filter_type = *t),
             SynthEvent::ToggleLfo1Sync => self.state.update(|s| s.lfo1.sync = !s.lfo1.sync),
             SynthEvent::ToggleLfo2Sync => self.state.update(|s| s.lfo2.sync = !s.lfo2.sync),
+            SynthEvent::SetLfo1Target(t) => self.state.update(|s| s.lfo1.target = *t),
+            SynthEvent::SetLfo2Target(t) => self.state.update(|s| s.lfo2.target = *t),
             SynthEvent::SetVoiceMode(m) => self.state.update(|s| s.voice_mode = *m),
-            SynthEvent::ToggleKey(note) => self.state.update(|s| {
-                if let Some(pos) = s.held_notes.iter().position(|n| n == note) {
-                    s.held_notes.remove(pos);
+            SynthEvent::ToggleKey(note) => {
+                if self.state.get().held_notes.contains(note) {
+                    self.note_off(*note);
                 } else {
-                    s.held_notes.push(*note);
+                    self.note_on(*note);
                 }
-            }),
+            }
+            SynthEvent::ToggleHelp => self.help_open.update(|v| *v = !*v),
             SynthEvent::Tick(dt) => {
                 self.lfo_scope_phase.update(|p| {
                     *p = (*p + LFO_SCOPE_HZ * std::f32::consts::TAU * dt) % std::f32::consts::TAU;
                 });
+
+                let mut peak_l = 0.0f32;
+                let mut peak_r = 0.0f32;
+                while let Ok(SynthTelemetry { peak_l: l, peak_r: r }) = self.telemetry_rx.pop() {
+                    peak_l = peak_l.max(l);
+                    peak_r = peak_r.max(r);
+                }
+                let decay = METER_DECAY_DB_PER_SEC * dt;
+                let target_l = gain_to_db(peak_l).max(METER_FLOOR_DB);
+                let target_r = gain_to_db(peak_r).max(METER_FLOOR_DB);
+                self.meter_db_l = if target_l > self.meter_db_l { target_l } else { (self.meter_db_l - decay).max(target_l) };
+                self.meter_db_r = if target_r > self.meter_db_r { target_r } else { (self.meter_db_r - decay).max(target_r) };
+                self.meter_l.set(db_to_meter_fraction(self.meter_db_l));
+                self.meter_r.set(db_to_meter_fraction(self.meter_db_r));
+
+                let snapshot = SynthParams::from_state(&self.state.get());
+                let _ = self.params_tx.push(snapshot);
             }
+        });
+
+        event.map(|window_event, _| match window_event {
+            WindowEvent::KeyDown(code, _) if cx.modifiers().is_empty() => match code {
+                Code::Equal => {
+                    self.octave_shift.update(|o| *o = (*o + 1).min(MAX_OCTAVE_SHIFT));
+                }
+                Code::Minus => {
+                    self.octave_shift.update(|o| *o = (*o - 1).max(-MAX_OCTAVE_SHIFT));
+                }
+                _ => {
+                    if let Some(offset) = key_semitone_offset(*code) {
+                        if !self.held_computer_keys.contains_key(code) {
+                            let note = (KEYBOARD_BASE_NOTE + self.octave_shift.get() as i32 * 12 + offset)
+                                .clamp(0, 127) as u8;
+                            self.held_computer_keys.insert(*code, note);
+                            self.note_on(note);
+                        }
+                    }
+                }
+            },
+            WindowEvent::KeyUp(code, _) => {
+                if let Some(note) = self.held_computer_keys.remove(code) {
+                    self.note_off(note);
+                }
+            }
+            _ => {}
         });
     }
 }

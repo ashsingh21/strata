@@ -25,6 +25,15 @@ pub enum VoiceMode {
     Poly,
 }
 
+/// What an LFO's output is patched to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LfoTarget {
+    /// Filter cutoff, in octaves either side of the Cutoff knob's setting.
+    Cutoff,
+    /// Pitch (vibrato), in cents either side of the played note.
+    Pitch,
+}
+
 /// An oscillator's three knobs mean different things per-oscillator (Tune
 /// vs Detune, Shape vs PW, Drift vs FM); the UI labels them, this just
 /// stores the three normalized/physical values uniformly.
@@ -58,9 +67,6 @@ pub struct Filter {
     pub drive_db: f32,
     pub env_amount_oct: f32,
     pub key_track: f32,
-    /// Modulation ring on the Cutoff knob: depth in the knob's own 0..1
-    /// space (not Hz), matching `Knob::modulation`'s convention.
-    pub cutoff_mod_depth: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -77,6 +83,7 @@ pub struct Lfo {
     pub rate_norm: f32,
     pub depth: f32,
     pub sync: bool,
+    pub target: LfoTarget,
     pub target_count: u32,
 }
 
@@ -104,6 +111,22 @@ pub struct SynthState {
     pub output: Output,
     /// MIDI-style note numbers currently held, for the keyboard strip.
     pub held_notes: Vec<u8>,
+}
+
+/// How much LFO modulation currently reaches the filter cutoff, in the
+/// Cutoff knob's own 0..1 space - the sum of any LFO patched to
+/// `LfoTarget::Cutoff`. Drives both the Cutoff knob's modulation ring and
+/// the filter response display's dashed band, so they always match what's
+/// actually being applied.
+pub fn cutoff_mod_depth(s: &SynthState) -> f32 {
+    let mut depth = 0.0;
+    if s.lfo1.target == LfoTarget::Cutoff {
+        depth += s.lfo1.depth;
+    }
+    if s.lfo2.target == LfoTarget::Cutoff {
+        depth += s.lfo2.depth;
+    }
+    depth.clamp(0.0, 1.0)
 }
 
 pub fn seed_synth() -> SynthState {
@@ -135,12 +158,11 @@ pub fn seed_synth() -> SynthState {
             drive_db: 4.5,
             env_amount_oct: 2.4,
             key_track: 0.5,
-            cutoff_mod_depth: 0.15,
         },
         filter_env: Envelope { attack_ms: 4.0, decay_ms: 320.0, sustain: 0.35, release_ms: 280.0 },
         amp_env: Envelope { attack_ms: 2.0, decay_ms: 140.0, sustain: 0.80, release_ms: 220.0 },
-        lfo1: Lfo { rate_label: "1/8", rate_norm: 0.45, depth: 0.6, sync: true, target_count: 1 },
-        lfo2: Lfo { rate_label: "3.2 Hz", rate_norm: 0.3, depth: 0.4, sync: false, target_count: 1 },
+        lfo1: Lfo { rate_label: "1/8", rate_norm: 0.45, depth: 0.6, sync: true, target: LfoTarget::Cutoff, target_count: 1 },
+        lfo2: Lfo { rate_label: "3.2 Hz", rate_norm: 0.3, depth: 0.4, sync: false, target: LfoTarget::Pitch, target_count: 1 },
         output: Output { glide_ms: 40.0, volume_db: -3.0, meter_l: 0.62, meter_r: 0.58 },
         held_notes: vec![60, 64, 67],
     }

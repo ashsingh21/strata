@@ -22,8 +22,15 @@ use timeline::state::{TimelineEvent, TimelineState};
 
 fn main() -> Result<(), ApplicationError> {
     let (params, telemetry_tx, telemetry_rx) = shared::bridge();
-    let engine_handle = engine::start(params.clone(), telemetry_tx)
-        .expect("failed to start audio engine");
+    let synth_bridge = shared::synth::synth_bridge();
+    let engine_handle = engine::start(
+        params.clone(),
+        telemetry_tx,
+        synth_bridge.params_rx,
+        synth_bridge.note_rx,
+        synth_bridge.telemetry_tx,
+    )
+    .expect("failed to start audio engine");
 
     Application::new(move |cx| {
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");
@@ -54,9 +61,13 @@ fn main() -> Result<(), ApplicationError> {
 
         timeline_state.build(cx);
 
-        let synth_model = SynthModel::new();
+        let synth_model = SynthModel::new(synth_bridge.params_tx, synth_bridge.note_tx, synth_bridge.telemetry_rx);
         let synth_state = synth_model.state;
         let synth_lfo_phase = synth_model.lfo_scope_phase;
+        let synth_octave_shift = synth_model.octave_shift;
+        let synth_meter_l = synth_model.meter_l;
+        let synth_meter_r = synth_model.meter_r;
+        let synth_help_open = synth_model.help_open;
         synth_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
@@ -150,7 +161,16 @@ fn main() -> Result<(), ApplicationError> {
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
-            synth::synth_view(cx, theme, synth_state, synth_lfo_phase);
+            synth::synth_view(
+                cx,
+                theme,
+                synth_state,
+                synth_lfo_phase,
+                synth_octave_shift,
+                synth_meter_l,
+                synth_meter_r,
+                synth_help_open,
+            );
         })
         .class("app")
         .toggle_class("theme-daylight", is_daylight)

@@ -1,15 +1,17 @@
-//! Carve: the subtractive synth device panel. Visual + interactive only
-//! (see README) - every control here reads/writes `SynthState` but nothing
-//! is wired to the audio engine yet.
+//! Carve: the subtractive synth device panel. Every control here reads/
+//! writes `SynthState`, which is mirrored to the engine's real-time voice
+//! renderer (see `engine::synth` and `shared::synth::bridge`) - so turning
+//! a knob or playing a note here makes real sound.
 
 pub mod display;
+pub mod help;
 pub mod keyboard;
 pub mod segmented;
 pub mod state;
 
 use vizia::prelude::*;
 
-use shared::synth::{FilterType, SynthState, VoiceMode, Waveform};
+use shared::synth::{FilterType, LfoTarget, SynthState, VoiceMode, Waveform};
 
 use crate::knob::Knob;
 use crate::pill::modulator_pill;
@@ -251,7 +253,7 @@ fn filter_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<The
                 |s| format!("{:.2} kHz", s.filter.cutoff_hz / 1000.0),
                 |s, p| s.filter.cutoff_hz = log(p, 20.0, 20_000.0),
                 |s| log_inv(s.filter.cutoff_hz, 20.0, 20_000.0),
-                |s| s.filter.cutoff_mod_depth);
+                shared::synth::cutoff_mod_depth);
             knob(cx, state, theme, "Reso", 0.62,
                 |s| s.filter.resonance,
                 |s| format!("{:.0}%", s.filter.resonance * 100.0),
@@ -343,8 +345,22 @@ fn amp_env_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Th
     });
 }
 
+fn lfo_target_label(target: LfoTarget) -> &'static str {
+    match target {
+        LfoTarget::Cutoff => "\u{2192} Cutoff",
+        LfoTarget::Pitch => "\u{2192} Pitch",
+    }
+}
+
+fn lfo_target_next(target: LfoTarget) -> LfoTarget {
+    match target {
+        LfoTarget::Cutoff => LfoTarget::Pitch,
+        LfoTarget::Pitch => LfoTarget::Cutoff,
+    }
+}
+
 fn mod_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>, lfo_phase: Signal<f32>) {
-    section(cx, "Mod", "drag to a knob", move |cx| {
+    section(cx, "Mod", "click target to reassign", move |cx| {
         HStack::new(cx, move |cx| {
             let count1 = state.map(|s| s.lfo1.target_count);
             let count2 = state.map(|s| s.lfo2.target_count);
@@ -366,6 +382,11 @@ fn mod_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeI
                 .class("sm")
                 .toggle_class("is-mute", sync)
                 .on_press(|cx| cx.emit(SynthEvent::ToggleLfo1Sync));
+            let target_text = state.map(|s| lfo_target_label(s.lfo1.target));
+            Button::new(cx, |cx| Label::new(cx, target_text).class("mono"))
+                .class("btn")
+                .class("sm")
+                .on_press(move |cx| cx.emit(SynthEvent::SetLfo1Target(lfo_target_next(state.get().lfo1.target))));
         })
         .gap(Pixels(tokens::SPACE_2))
         .width(Auto)
@@ -380,6 +401,11 @@ fn mod_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeI
                 .class("sm")
                 .toggle_class("is-mute", sync)
                 .on_press(|cx| cx.emit(SynthEvent::ToggleLfo2Sync));
+            let target_text = state.map(|s| lfo_target_label(s.lfo2.target));
+            Button::new(cx, |cx| Label::new(cx, target_text).class("mono"))
+                .class("btn")
+                .class("sm")
+                .on_press(move |cx| cx.emit(SynthEvent::SetLfo2Target(lfo_target_next(state.get().lfo2.target))));
         })
         .gap(Pixels(tokens::SPACE_2))
         .width(Auto)
@@ -387,7 +413,13 @@ fn mod_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeI
     });
 }
 
-fn out_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn out_section(
+    cx: &mut Context,
+    state: Signal<SynthState>,
+    theme: Signal<ThemeId>,
+    meter_l: Signal<f32>,
+    meter_r: Signal<f32>,
+) {
     section(cx, "Out", "", move |cx| {
         HStack::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
@@ -404,15 +436,7 @@ fn out_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeI
             .width(Auto)
             .height(Auto);
 
-            crate::meter::Meter::new(
-                cx,
-                state.map(|s| s.output.meter_l),
-                state.map(|s| s.output.meter_r),
-                Signal::new(false),
-                Signal::new(false),
-                theme,
-                |_cx| {},
-            )
+            crate::meter::Meter::new(cx, meter_l, meter_r, Signal::new(false), Signal::new(false), theme, |_cx| {})
             .width(Pixels(10.0))
             .height(Pixels(88.0));
         })
@@ -422,7 +446,17 @@ fn out_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeI
     });
 }
 
-pub fn synth_view(cx: &mut Context, theme: Signal<ThemeId>, state: Signal<SynthState>, lfo_phase: Signal<f32>) {
+#[allow(clippy::too_many_arguments)]
+pub fn synth_view(
+    cx: &mut Context,
+    theme: Signal<ThemeId>,
+    state: Signal<SynthState>,
+    lfo_phase: Signal<f32>,
+    octave_shift: Signal<i8>,
+    meter_l: Signal<f32>,
+    meter_r: Signal<f32>,
+    help_open: Signal<bool>,
+) {
     VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
             Element::new(cx).class("swatch").background_color(CLIP_VIOLET);
@@ -430,6 +464,10 @@ pub fn synth_view(cx: &mut Context, theme: Signal<ThemeId>, state: Signal<SynthS
             Label::new(cx, "subtractive").class("meta");
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
             Label::new(cx, "Osc \u{2192} Mix \u{2192} Filter \u{2192} Amp \u{2192} Out").class("meta");
+            Button::new(cx, |cx| Label::new(cx, "?"))
+                .class("btn")
+                .class("sm")
+                .on_press(|cx| cx.emit(SynthEvent::ToggleHelp));
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
             let preset = state.map(|s| s.name.to_string());
             Label::new(cx, preset).class("readout").size(Auto);
@@ -467,13 +505,23 @@ pub fn synth_view(cx: &mut Context, theme: Signal<ThemeId>, state: Signal<SynthS
             filter_env_section(cx, state, theme);
             amp_env_section(cx, state, theme);
             mod_section(cx, state, theme, lfo_phase);
-            out_section(cx, state, theme);
+            out_section(cx, state, theme, meter_l, meter_r);
         })
         .gap(Pixels(tokens::SPACE_2))
         .width(Auto)
         .height(Auto);
 
-        Keyboard::new(cx, state, theme).class("synth-keys").width(Stretch(1.0)).height(Pixels(48.0));
+        HStack::new(cx, move |cx| {
+            Keyboard::new(cx, state, theme).class("synth-keys").width(Stretch(1.0)).height(Pixels(48.0));
+            let octave_text = octave_shift.map(|o| format!("Oct {o:+}"));
+            Label::new(cx, octave_text).class("mono").width(Auto);
+        })
+        .gap(Pixels(tokens::SPACE_2))
+        .alignment(Alignment::Center)
+        .width(Stretch(1.0))
+        .height(Auto);
+
+        help::help_overlay(cx, help_open);
     })
     .class("panel")
     .gap(Pixels(tokens::SPACE_2))

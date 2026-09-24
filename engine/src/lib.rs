@@ -5,12 +5,16 @@
 //! Everything in the audio callback ([`write_block`]) is allocation-, lock-
 //! and syscall-free: only atomic loads and a lock-free ring-buffer push.
 
+mod synth;
+
 use std::fmt;
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Error as CpalError, FromSample, OutputCallbackInfo, Sample, SampleFormat, SizedSample, StreamConfig};
+use shared::synth::{NoteEvent, SynthParams, SynthTelemetry};
 use shared::{Params, Position, Telemetry};
+use synth::SynthEngine;
 
 const TEST_TONE_HZ: f32 = 220.0;
 /// -18 dBFS.
@@ -54,10 +58,16 @@ impl From<CpalError> for EngineError {
 impl std::error::Error for EngineError {}
 
 /// Starts the audio engine. `params` is shared with the UI; `telemetry` is
-/// the producing end of the engine -> UI ring buffer.
+/// the producing end of the engine -> UI ring buffer. `synth_params`/
+/// `note_events` feed Carve's voice engine; `synth_telemetry` reports its
+/// post-mix peak level back to the UI.
+#[allow(clippy::too_many_arguments)]
 pub fn start(
     params: Arc<Params>,
     telemetry: rtrb::Producer<Telemetry>,
+    synth_params: rtrb::Consumer<SynthParams>,
+    note_events: rtrb::Consumer<NoteEvent>,
+    synth_telemetry: rtrb::Producer<SynthTelemetry>,
 ) -> Result<EngineHandle, EngineError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or(EngineError::NoOutputDevice)?;
@@ -67,9 +77,15 @@ pub fn start(
     let stream_config: StreamConfig = config.into();
 
     let stream = match sample_format {
-        SampleFormat::F32 => build_stream::<f32>(&device, stream_config, params, telemetry)?,
-        SampleFormat::I16 => build_stream::<i16>(&device, stream_config, params, telemetry)?,
-        SampleFormat::U16 => build_stream::<u16>(&device, stream_config, params, telemetry)?,
+        SampleFormat::F32 => {
+            build_stream::<f32>(&device, stream_config, params, telemetry, synth_params, note_events, synth_telemetry)?
+        }
+        SampleFormat::I16 => {
+            build_stream::<i16>(&device, stream_config, params, telemetry, synth_params, note_events, synth_telemetry)?
+        }
+        SampleFormat::U16 => {
+            build_stream::<u16>(&device, stream_config, params, telemetry, synth_params, note_events, synth_telemetry)?
+        }
         other => return Err(EngineError::UnsupportedSampleFormat(other)),
     };
 
@@ -78,11 +94,15 @@ pub fn start(
     Ok(EngineHandle { _stream: stream, sample_rate })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_stream<T>(
     device: &cpal::Device,
     config: StreamConfig,
     params: Arc<Params>,
     mut telemetry: rtrb::Producer<Telemetry>,
+    mut synth_params: rtrb::Consumer<SynthParams>,
+    mut note_events: rtrb::Consumer<NoteEvent>,
+    mut synth_telemetry: rtrb::Producer<SynthTelemetry>,
 ) -> Result<cpal::Stream, EngineError>
 where
     T: SizedSample + FromSample<f32>,
@@ -101,6 +121,7 @@ where
     let smoothing_coeff = 1.0 - (-1.0 / (SMOOTHING_MS * 0.001 * sample_rate)).exp();
 
     let mut sample_counter: u64 = 0;
+    let mut synth_engine = SynthEngine::new();
 
     let err_fn = |err: CpalError| eprintln!("audio stream error: {err}");
 
@@ -108,6 +129,15 @@ where
         .build_output_stream(
             config,
             move |data: &mut [T], _info: &OutputCallbackInfo| {
+                // Latest-wins: only the most recent params snapshot matters.
+                while let Ok(next) = synth_params.pop() {
+                    synth_engine.set_params(next);
+                }
+                // Ordered: every note on/off matters.
+                while let Ok(event) = note_events.pop() {
+                    synth_engine.handle_note_event(event);
+                }
+
                 write_block(
                     data,
                     channels,
@@ -121,6 +151,8 @@ where
                     smoothing_coeff,
                     &mut sample_counter,
                     sample_rate,
+                    &mut synth_engine,
+                    &mut synth_telemetry,
                 );
             },
             err_fn,
@@ -144,6 +176,8 @@ fn write_block<T>(
     smoothing_coeff: f32,
     sample_counter: &mut u64,
     sample_rate: f32,
+    synth_engine: &mut SynthEngine,
+    synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
 ) where
     T: Sample + FromSample<f32>,
 {
@@ -156,6 +190,8 @@ fn write_block<T>(
 
     let mut peak_l = 0.0f32;
     let mut peak_r = 0.0f32;
+    let mut synth_peak_l = 0.0f32;
+    let mut synth_peak_r = 0.0f32;
     let mut frames = 0u64;
 
     for frame in output.chunks_mut(channels) {
@@ -175,8 +211,12 @@ fn write_block<T>(
         let left_gain = angle.cos() * *smoothed_gain;
         let right_gain = angle.sin() * *smoothed_gain;
 
-        let out_l = tone * left_gain;
-        let out_r = tone * right_gain;
+        let (synth_l, synth_r) = synth_engine.process(sample_rate);
+        synth_peak_l = synth_peak_l.max(synth_l.abs());
+        synth_peak_r = synth_peak_r.max(synth_r.abs());
+
+        let out_l = tone * left_gain + synth_l;
+        let out_r = tone * right_gain + synth_r;
 
         peak_l = peak_l.max(out_l.abs());
         peak_r = peak_r.max(out_r.abs());
@@ -202,6 +242,7 @@ fn write_block<T>(
     // Best-effort: if the UI hasn't drained recently the ring buffer may be
     // full. Dropping a telemetry frame is harmless; never block.
     let _ = telemetry.push(Telemetry { peak_l, peak_r, position });
+    let _ = synth_telemetry.push(SynthTelemetry { peak_l: synth_peak_l, peak_r: synth_peak_r });
 }
 
 fn position_from_samples(sample_counter: u64, sample_rate: f32) -> Position {

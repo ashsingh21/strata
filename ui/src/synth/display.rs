@@ -122,7 +122,8 @@ impl View for FilterDisplay {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let bounds = cx.bounds();
         let palette = self.theme.get().palette();
-        let filter = self.state.get().filter;
+        let state = self.state.get();
+        let filter = state.filter;
 
         // Grid lines at 1/4, 1/2, 3/4 width (~octave markers), matching the
         // preview's three vertical `grid-beat` lines.
@@ -144,7 +145,7 @@ impl View for FilterDisplay {
         let log_min = 20f32.ln();
         let log_max = 20_000f32.ln();
         let cutoff_frac = ((filter.cutoff_hz.max(1.0).ln() - log_min) / (log_max - log_min)).clamp(0.0, 1.0);
-        let depth = filter.cutoff_mod_depth;
+        let depth = shared::synth::cutoff_mod_depth(&state);
         let band_lo = (cutoff_frac - depth).clamp(0.0, 1.0);
         let band_hi = (cutoff_frac + depth).clamp(0.0, 1.0);
         let mut band_paint = vg::Paint::default();

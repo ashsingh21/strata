@@ -242,6 +242,15 @@ fn render_base_css(scalars: &ScalarMap) -> String {
   border-radius: {radius_sm}px;
   border-width: 1px;
 }}
+.synth-help-panel {{
+  border-radius: {radius_md}px;
+  border-width: 1px;
+  z-index: 100;
+}}
+
+.hidden {{
+  display: none;
+}}
 
 .clip-coral {{ background-color: #ff8a5c; }}
 .clip-amber {{ background-color: #f5c84c; }}
