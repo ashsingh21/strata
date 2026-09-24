@@ -1,7 +1,7 @@
 //! The demo arrangement used until a project can be loaded/saved: Drums
-//! (audio, 3 clips), Bass (MIDI, 2), Lead (audio, 1 + a Filter Cutoff
-//! automation lane, plus a short recording clip), Pad (MIDI, 1 long clip);
-//! 16 bars at 128 BPM, loop bars 5-13, a "Drop" marker at bar 9.
+//! (audio, 3 clips), Bass (MIDI, 2), Lead (audio, 2 clips + a Filter
+//! Cutoff automation lane), Pad (MIDI, 1 long clip); 16 bars at 128 BPM,
+//! loop bars 5-13, a "Drop" marker at bar 9.
 
 use super::model::{
     Arrangement, AutomationLane, Breakpoint, Clip, ClipColor, ClipContent, LoopRange, Marker,
@@ -129,7 +129,12 @@ pub fn seed_arrangement() -> Arrangement {
             peaks: None,
             source_offset_samples: 0,
         },
-        recording: true,
+        // Not `recording: true` - that makes a clip's rendered length grow
+        // to chase the live playhead (see lanes.rs), which is correct for
+        // a clip actively being recorded right now but there's no engine
+        // support for that yet, so it would just grow forever once
+        // playback passed it. This is a finished (fixed-length) take.
+        recording: false,
     });
 
     let cutoff_lane = arr.alloc_id();
