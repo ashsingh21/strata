@@ -8,10 +8,11 @@ use vizia::prelude::*;
 use vizia::vg;
 
 use shared::arrangement::{
-    snap, Arrangement, AutomationLaneId, Breakpoint, ClipContent, ClipId, SnapGrid,
+    snap, Arrangement, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId, SnapGrid,
     TimeSignature, Ticks, TrackId, ViewTransform,
 };
 
+use crate::recorder::RecordingPreview;
 use crate::timeline::header::clip_color_to_rgb;
 use crate::timeline::state::{Selection, TimelineEvent};
 use crate::tokens::{self, ThemeId};
@@ -93,11 +94,13 @@ pub struct LaneArea {
     selection: Signal<Selection>,
     playhead: Signal<Ticks>,
     theme: Signal<ThemeId>,
+    recording_preview: Signal<Option<RecordingPreview>>,
     drag: Option<Drag>,
     last_click: Option<(Instant, f32, f32)>,
 }
 
 impl LaneArea {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cx: &mut Context,
         arrangement: Signal<Arrangement>,
@@ -105,14 +108,16 @@ impl LaneArea {
         selection: Signal<Selection>,
         playhead: Signal<Ticks>,
         theme: Signal<ThemeId>,
+        recording_preview: Signal<Option<RecordingPreview>>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, transform, selection, playhead, theme, drag: None, last_click: None }
+        Self { arrangement, transform, selection, playhead, theme, recording_preview, drag: None, last_click: None }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(transform, |mut h| h.needs_redraw())
             .bind(selection, |mut h| h.needs_redraw())
             .bind(playhead, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
+            .bind(recording_preview, |mut h| h.needs_redraw())
     }
 }
 
@@ -572,6 +577,33 @@ impl LaneArea {
 
                 let selected = selection.clips.contains(&clip.id);
                 self.draw_clip(canvas, &palette, clip, track_color, x0, y0, x1, y1, selected);
+            }
+
+            // The in-progress take, if this is its track - a transient
+            // preview, never a real `Arrangement` clip (see
+            // `crate::recorder`), reusing `draw_clip` for a consistent
+            // look via a throwaway `Clip` that's never inserted anywhere.
+            if let Some(preview) = self.recording_preview.get() {
+                if preview.track == track_id {
+                    let x0_raw = bounds.x + transform.tick_to_x(preview.start) as f32;
+                    let x1_raw = bounds.x + transform.tick_to_x(preview.start + preview.length) as f32;
+                    if x1_raw >= bounds.x && x0_raw <= bounds.x + bounds.w {
+                        let x0 = x0_raw.max(bounds.x);
+                        let x1 = x1_raw.min(bounds.x + bounds.w);
+                        let y0 = bounds.y + top + CLIP_INSET;
+                        let y1 = bounds.y + top + row.height - CLIP_INSET;
+                        let preview_clip = Clip {
+                            id: 0,
+                            track: preview.track,
+                            start: preview.start,
+                            length: preview.length,
+                            name: "Recording".to_string(),
+                            content: ClipContent::Audio { source: "".into(), peaks: None, source_offset_samples: 0 },
+                            recording: true,
+                        };
+                        self.draw_clip(canvas, &palette, &preview_clip, track_color, x0, y0, x1, y1, false);
+                    }
+                }
             }
         }
 

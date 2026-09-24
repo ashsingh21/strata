@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    seed_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint,
+    seed_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipContent, ClipId, Command, CommandStack, LoopRange, MidiNote, PeakPyramid, SnapGrid, Ticks,
     TrackId, TrackKind, ViewTransform, PPQ,
 };
@@ -170,6 +170,10 @@ pub enum TimelineEvent {
     /// `DeleteSelected` instead, batched into one undo step).
     AddMidiNoteAt { clip: ClipId, note: MidiNote },
     RemoveMidiNoteAt { clip: ClipId, start: Ticks, pitch: u8 },
+
+    /// A finished guitar/mic take: insert it as a real clip on `track`,
+    /// one undo step, same as any other clip insertion.
+    InsertRecordedClip { track: TrackId, start: Ticks, length: Ticks, source: Arc<str> },
 }
 
 impl Model for TimelineState {
@@ -377,6 +381,21 @@ impl Model for TimelineState {
             }
             TimelineEvent::RemoveMidiNoteAt { clip, start, pitch } => {
                 self.do_command(Command::RemoveMidiNote { clip: *clip, start: *start, pitch: *pitch });
+            }
+            TimelineEvent::InsertRecordedClip { track, start, length, source } => {
+                self.with_arrangement(|arr, stack| {
+                    let id = arr.alloc_id();
+                    let clip = Clip {
+                        id,
+                        track: *track,
+                        start: *start,
+                        length: *length,
+                        name: "Take".to_string(),
+                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+                        recording: false,
+                    };
+                    stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
+                });
             }
             TimelineEvent::PeaksLoaded { source, peaks } => {
                 self.with_arrangement(|arr, _| {

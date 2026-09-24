@@ -44,6 +44,7 @@ pub fn timeline_view(
     snap: Signal<SnapGrid>,
     selection: Signal<Selection>,
     playhead: Signal<Ticks>,
+    recording_preview: Signal<Option<crate::recorder::RecordingPreview>>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -88,7 +89,7 @@ pub fn timeline_view(
                 .height(Pixels(tokens::SIZE_RULER))
                 .width(Stretch(1.0));
 
-            LaneArea::new(cx, arrangement, transform, selection, playhead, theme)
+            LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview)
                 .height(Stretch(1.0))
                 .width(Stretch(1.0));
         })

@@ -14,19 +14,22 @@ use shared::playback::DecodedSource;
 
 use crate::timeline::state::TimelineEvent;
 
-/// Spawns one background loader per unique audio source referenced by
-/// `arrangement`'s clips.
-pub fn spawn_peak_loaders(cx: &Context, assets_dir: &Path, arrangement: &Arrangement) {
-    let sources: HashSet<Arc<str>> = arrangement
+/// Every unique audio source referenced by `arrangement`'s clips.
+fn audio_sources(arrangement: &Arrangement) -> HashSet<Arc<str>> {
+    arrangement
         .clips
         .iter()
         .filter_map(|clip| match &clip.content {
             ClipContent::Audio { source, .. } => Some(source.clone()),
             ClipContent::Midi { .. } => None,
         })
-        .collect();
+        .collect()
+}
 
-    for source in sources {
+/// Spawns one background loader per unique audio source referenced by
+/// `arrangement`'s clips.
+pub fn spawn_peak_loaders(cx: &Context, assets_dir: &Path, arrangement: &Arrangement) {
+    for source in audio_sources(arrangement) {
         let path = assets_dir.join(&*source);
         cx.spawn(move |proxy| {
             if let Some(pyramid) = load_and_build(&path) {
@@ -62,38 +65,33 @@ fn decode_wav(path: &Path) -> Option<(Vec<f32>, hound::WavSpec)> {
     Some((samples, spec))
 }
 
-/// Spawns one background loader per unique audio source referenced by
-/// `arrangement`'s clips that fully decodes the source and pushes it to
-/// the engine for playback, via `decode_tx` - see `shared::playback`.
-/// Sequential (one thread, not one per source) since `rtrb::Producer` is
-/// single-producer; decoding is fast enough that this isn't a concern at
-/// this project's scale.
-pub fn spawn_audio_decoders(
-    cx: &Context,
+/// Spawns one persistent background thread (never the UI or audio
+/// thread) that fully decodes whatever audio source names are sent to
+/// it and pushes each result to the engine via `decode_tx` - see
+/// `shared::playback`. One long-lived thread, not one per source or per
+/// call, because `rtrb::Producer` is single-producer: only one thread
+/// can ever hold `decode_tx`. Returns the sending half; call it once at
+/// startup with the initial arrangement's sources, then keep the sender
+/// around to request a freshly recorded clip's source later (see
+/// `crate::recorder::RecordingCoordinator`).
+pub fn spawn_audio_decoder_worker(
     assets_dir: &Path,
     arrangement: &Arrangement,
     mut decode_tx: rtrb::Producer<DecodedSource>,
-) {
-    let sources: HashSet<Arc<str>> = arrangement
-        .clips
-        .iter()
-        .filter_map(|clip| match &clip.content {
-            ClipContent::Audio { source, .. } => Some(source.clone()),
-            ClipContent::Midi { .. } => None,
-        })
-        .collect();
-    if sources.is_empty() {
-        return;
+) -> std::sync::mpsc::Sender<Arc<str>> {
+    let (request_tx, request_rx) = std::sync::mpsc::channel::<Arc<str>>();
+    for source in audio_sources(arrangement) {
+        let _ = request_tx.send(source);
     }
 
     let assets_dir = assets_dir.to_path_buf();
-    cx.spawn(move |_proxy| {
-        for source in sources {
+    std::thread::spawn(move || {
+        for source in request_rx {
             let path = assets_dir.join(&*source);
             match decode_wav(&path) {
                 Some((samples, spec)) => {
                     let decoded = DecodedSource {
-                        source: source.clone(),
+                        source,
                         sample_rate: spec.sample_rate,
                         channels: spec.channels,
                         samples: Arc::from(samples),
@@ -104,4 +102,6 @@ pub fn spawn_audio_decoders(
             }
         }
     });
+
+    request_tx
 }

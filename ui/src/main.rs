@@ -8,6 +8,7 @@ mod meter;
 mod mixer;
 mod piano_roll;
 mod pill;
+mod recorder;
 mod synth;
 mod timeline;
 mod tokens;
@@ -20,6 +21,7 @@ use vizia::prelude::*;
 use app::{AppData, AppEvent};
 use interval_input::state::IntervalInputModel;
 use piano_roll::state::{PianoRollEvent, PianoRollModel};
+use recorder::{RecorderModel, RecordingCoordinator};
 use shared::arrangement::position_to_ticks;
 use synth::state::{SynthEvent, SynthModel};
 use timeline::state::{TimelineEvent, TimelineState};
@@ -44,10 +46,8 @@ fn main() -> Result<(), ApplicationError> {
     let engine_sample_rate = engine_handle.sample_rate;
     let playback_plan_tx = std::cell::RefCell::new(playback_bridge.plan_tx);
     let playback_decode_tx = playback_bridge.decode_tx;
-    // Held for the recording coordinator (not built yet): command_tx sends
-    // Start/Stop to the engine's writer thread, telemetry_rx drains the
-    // input peak meter.
-    let _record_command_tx = recorder_bridge.command_tx;
+    let record_command_tx = std::cell::RefCell::new(recorder_bridge.command_tx);
+    // Held for Phase 5's input meter, not consumed yet.
     let _input_telemetry_rx = recorder_bridge.telemetry_rx;
 
     Application::new(move |cx| {
@@ -84,18 +84,21 @@ fn main() -> Result<(), ApplicationError> {
             &timeline::assets_dir(),
             &tl_arrangement.get(),
         );
-        // One-shot: decodes every audio source referenced by the starting
-        // arrangement so it's audible from the first Play. A freshly
-        // recorded clip's source needs its own trigger later - see the
-        // recording coordinator.
-        timeline::peaks_loader::spawn_audio_decoders(
-            cx,
+        // Decodes every audio source referenced by the starting
+        // arrangement so it's audible from the first Play, and keeps the
+        // request sender around so a freshly recorded take can be
+        // decoded too, without restarting the app.
+        let decode_request_tx = timeline::peaks_loader::spawn_audio_decoder_worker(
             &timeline::assets_dir(),
             &tl_arrangement.get(),
             playback_decode_tx,
         );
 
         timeline_state.build(cx);
+
+        let recorder_model = RecorderModel::new();
+        let recording_preview = recorder_model.preview;
+        recorder_model.build(cx);
 
         let synth_model = SynthModel::new(synth_bridge.params_tx, synth_bridge.note_tx, synth_bridge.telemetry_rx);
         let synth_state = synth_model.state;
@@ -118,6 +121,7 @@ fn main() -> Result<(), ApplicationError> {
         // schedules Carve to play whatever MIDI notes the playhead crossed.
         let last_tick = std::cell::Cell::new(Instant::now());
         let midi_scheduler = timeline::scheduler::MidiScheduler::new();
+        let recording_coordinator = RecordingCoordinator::new();
         let render_timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
             if let TimerAction::Tick(_) = action {
                 let now = Instant::now();
@@ -135,6 +139,16 @@ fn main() -> Result<(), ApplicationError> {
                 // needing to dirty-track arrangement changes separately.
                 let plan = shared::playback::PlaybackPlan::from_arrangement(&tl_arrangement.get(), engine_sample_rate);
                 let _ = playback_plan_tx.borrow_mut().push(plan);
+
+                recording_coordinator.advance(
+                    cx,
+                    &tl_arrangement.get(),
+                    record_armed.get(),
+                    is_playing,
+                    ticks,
+                    &record_command_tx,
+                    &decode_request_tx,
+                );
             }
         });
         cx.start_timer(render_timer);
@@ -212,6 +226,7 @@ fn main() -> Result<(), ApplicationError> {
                 tl_snap,
                 tl_selection,
                 tl_playhead,
+                recording_preview,
             );
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
