@@ -546,11 +546,17 @@ impl LaneArea {
                     }
                 }
 
-                let x0 = bounds.x + transform.tick_to_x(start) as f32;
-                let x1 = bounds.x + transform.tick_to_x(start + length) as f32;
-                if x1 < bounds.x || x0 > bounds.x + bounds.w {
+                let x0_raw = bounds.x + transform.tick_to_x(start) as f32;
+                let x1_raw = bounds.x + transform.tick_to_x(start + length) as f32;
+                if x1_raw < bounds.x || x0_raw > bounds.x + bounds.w {
                     continue;
                 }
+                // Skia doesn't clip to this view's own layout bounds, so a
+                // clip scrolled off-screen to the left (or one stretched far
+                // past it, like the still-"recording" demo clip) would
+                // otherwise paint straight across the track header sidebar.
+                let x0 = x0_raw.max(bounds.x);
+                let x1 = x1_raw.min(bounds.x + bounds.w);
                 let y0 = bounds.y + track_row_top + CLIP_INSET;
                 let y1 = bounds.y + track_row_top + row.height - CLIP_INSET;
 
