@@ -27,14 +27,20 @@ use timeline::state::{TimelineEvent, TimelineState};
 fn main() -> Result<(), ApplicationError> {
     let (params, telemetry_tx, telemetry_rx) = shared::bridge();
     let synth_bridge = shared::synth::synth_bridge();
+    let playback_bridge = shared::playback::playback_bridge();
     let engine_handle = engine::start(
         params.clone(),
         telemetry_tx,
         synth_bridge.params_rx,
         synth_bridge.note_rx,
         synth_bridge.telemetry_tx,
+        playback_bridge.plan_rx,
+        playback_bridge.decode_rx,
     )
     .expect("failed to start audio engine");
+    let engine_sample_rate = engine_handle.sample_rate;
+    let playback_plan_tx = std::cell::RefCell::new(playback_bridge.plan_tx);
+    let playback_decode_tx = playback_bridge.decode_tx;
 
     Application::new(move |cx| {
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");
@@ -69,6 +75,16 @@ fn main() -> Result<(), ApplicationError> {
             cx,
             &timeline::assets_dir(),
             &tl_arrangement.get(),
+        );
+        // One-shot: decodes every audio source referenced by the starting
+        // arrangement so it's audible from the first Play. A freshly
+        // recorded clip's source needs its own trigger later - see the
+        // recording coordinator.
+        timeline::peaks_loader::spawn_audio_decoders(
+            cx,
+            &timeline::assets_dir(),
+            &tl_arrangement.get(),
+            playback_decode_tx,
         );
 
         timeline_state.build(cx);
@@ -106,6 +122,11 @@ fn main() -> Result<(), ApplicationError> {
                 cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: is_playing });
                 midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing);
                 cx.emit(SynthEvent::Tick(dt));
+
+                // Latest-wins: cheap to rebuild every tick, and avoids
+                // needing to dirty-track arrangement changes separately.
+                let plan = shared::playback::PlaybackPlan::from_arrangement(&tl_arrangement.get(), engine_sample_rate);
+                let _ = playback_plan_tx.borrow_mut().push(plan);
             }
         });
         cx.start_timer(render_timer);

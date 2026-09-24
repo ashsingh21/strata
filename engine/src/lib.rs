@@ -1,9 +1,14 @@
-//! The audio engine: a 220 Hz test tone through a gain/pan stage, driven by
-//! [`shared::Params`], with post-fader peak metering and transport position
-//! reported back through a [`shared::Telemetry`] ring buffer.
+//! The audio engine: a 220 Hz test tone, Carve's synth voices, the
+//! arrangement's audio clips and a metronome click, mixed through a
+//! gain/pan stage driven by [`shared::Params`], with post-fader peak
+//! metering and transport position reported back through a
+//! [`shared::Telemetry`] ring buffer.
 //!
 //! Everything in the audio callback ([`write_block`]) is allocation-, lock-
-//! and syscall-free: only atomic loads and a lock-free ring-buffer push.
+//! and syscall-free, with one deliberate, bounded exception: swapping in a
+//! new [`PlaybackPlan`] (only on the rare block where the arrangement's
+//! clip layout actually changed) drops the previous one's `Vec`. See
+//! `shared::playback` for why that's an acceptable trade here.
 
 mod synth;
 
@@ -12,6 +17,7 @@ use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Error as CpalError, FromSample, OutputCallbackInfo, Sample, SampleFormat, SizedSample, StreamConfig};
+use shared::playback::{DecodedSource, PlaybackPlan, DECODED_SOURCE_CAPACITY};
 use shared::synth::{NoteEvent, SynthParams, SynthTelemetry};
 use shared::{Params, Position, Telemetry};
 use synth::SynthEngine;
@@ -66,7 +72,9 @@ impl std::error::Error for EngineError {}
 /// Starts the audio engine. `params` is shared with the UI; `telemetry` is
 /// the producing end of the engine -> UI ring buffer. `synth_params`/
 /// `note_events` feed Carve's voice engine; `synth_telemetry` reports its
-/// post-mix peak level back to the UI.
+/// post-mix peak level back to the UI. `playback_plan`/`decoded_sources`
+/// feed the arrangement's audio clips into the mix - see
+/// `shared::playback`.
 #[allow(clippy::too_many_arguments)]
 pub fn start(
     params: Arc<Params>,
@@ -74,6 +82,8 @@ pub fn start(
     synth_params: rtrb::Consumer<SynthParams>,
     note_events: rtrb::Consumer<NoteEvent>,
     synth_telemetry: rtrb::Producer<SynthTelemetry>,
+    playback_plan: rtrb::Consumer<PlaybackPlan>,
+    decoded_sources: rtrb::Consumer<DecodedSource>,
 ) -> Result<EngineHandle, EngineError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or(EngineError::NoOutputDevice)?;
@@ -83,15 +93,39 @@ pub fn start(
     let stream_config: StreamConfig = config.into();
 
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            build_stream::<f32>(&device, stream_config, params, telemetry, synth_params, note_events, synth_telemetry)?
-        }
-        SampleFormat::I16 => {
-            build_stream::<i16>(&device, stream_config, params, telemetry, synth_params, note_events, synth_telemetry)?
-        }
-        SampleFormat::U16 => {
-            build_stream::<u16>(&device, stream_config, params, telemetry, synth_params, note_events, synth_telemetry)?
-        }
+        SampleFormat::F32 => build_stream::<f32>(
+            &device,
+            stream_config,
+            params,
+            telemetry,
+            synth_params,
+            note_events,
+            synth_telemetry,
+            playback_plan,
+            decoded_sources,
+        )?,
+        SampleFormat::I16 => build_stream::<i16>(
+            &device,
+            stream_config,
+            params,
+            telemetry,
+            synth_params,
+            note_events,
+            synth_telemetry,
+            playback_plan,
+            decoded_sources,
+        )?,
+        SampleFormat::U16 => build_stream::<u16>(
+            &device,
+            stream_config,
+            params,
+            telemetry,
+            synth_params,
+            note_events,
+            synth_telemetry,
+            playback_plan,
+            decoded_sources,
+        )?,
         other => return Err(EngineError::UnsupportedSampleFormat(other)),
     };
 
@@ -109,6 +143,8 @@ fn build_stream<T>(
     mut synth_params: rtrb::Consumer<SynthParams>,
     mut note_events: rtrb::Consumer<NoteEvent>,
     mut synth_telemetry: rtrb::Producer<SynthTelemetry>,
+    mut playback_plan: rtrb::Consumer<PlaybackPlan>,
+    mut decoded_sources: rtrb::Consumer<DecodedSource>,
 ) -> Result<cpal::Stream, EngineError>
 where
     T: SizedSample + FromSample<f32>,
@@ -133,6 +169,9 @@ where
     let mut click_hz = CLICK_HZ_BEAT;
     let click_decay_coeff = (-1.0 / (CLICK_DECAY_MS * 0.001 * sample_rate)).exp();
 
+    let mut current_plan = PlaybackPlan::default();
+    let mut current_sources: Vec<DecodedSource> = Vec::with_capacity(DECODED_SOURCE_CAPACITY);
+
     let err_fn = |err: CpalError| eprintln!("audio stream error: {err}");
 
     let stream = device
@@ -146,6 +185,18 @@ where
                 // Ordered: every note on/off matters.
                 while let Ok(event) = note_events.pop() {
                     synth_engine.handle_note_event(event);
+                }
+                // Latest-wins: the clip layout only, not any one sample.
+                while let Ok(next) = playback_plan.pop() {
+                    current_plan = next;
+                }
+                // Ordered: each newly decoded source matters.
+                while let Ok(decoded) = decoded_sources.pop() {
+                    if let Some(existing) = current_sources.iter_mut().find(|d| d.source == decoded.source) {
+                        *existing = decoded;
+                    } else if current_sources.len() < current_sources.capacity() {
+                        current_sources.push(decoded);
+                    }
                 }
 
                 write_block(
@@ -167,6 +218,8 @@ where
                     &mut click_env,
                     &mut click_hz,
                     click_decay_coeff,
+                    &current_plan,
+                    &current_sources,
                 );
             },
             err_fn,
@@ -196,6 +249,8 @@ fn write_block<T>(
     click_env: &mut f32,
     click_hz: &mut f32,
     click_decay_coeff: f32,
+    plan: &PlaybackPlan,
+    sources: &[DecodedSource],
 ) where
     T: Sample + FromSample<f32>,
 {
@@ -252,8 +307,14 @@ fn write_block<T>(
         }
         *click_env *= click_decay_coeff;
 
-        let out_l = tone * left_gain + synth_l + click;
-        let out_r = tone * right_gain + synth_r + click;
+        let (clip_l, clip_r) = if playing {
+            mix_audio_clips(plan, sources, *sample_counter as i64)
+        } else {
+            (0.0, 0.0)
+        };
+
+        let out_l = tone * left_gain + synth_l + click + clip_l;
+        let out_r = tone * right_gain + synth_r + click + clip_r;
 
         peak_l = peak_l.max(out_l.abs());
         peak_r = peak_r.max(out_r.abs());
@@ -280,6 +341,40 @@ fn write_block<T>(
     // full. Dropping a telemetry frame is harmless; never block.
     let _ = telemetry.push(Telemetry { peak_l, peak_r, position });
     let _ = synth_telemetry.push(SynthTelemetry { peak_l: synth_peak_l, peak_r: synth_peak_r });
+}
+
+/// Sums every clip in `plan` that's currently sounding at `pos` (samples
+/// since playback started) against its decoded source in `sources`. A
+/// clip whose source hasn't finished decoding yet, or whose source's
+/// sample rate doesn't match the engine's output, is silently skipped -
+/// no resampling in this pass (see `shared::playback`).
+fn mix_audio_clips(plan: &PlaybackPlan, sources: &[DecodedSource], pos: i64) -> (f32, f32) {
+    let mut out_l = 0.0f32;
+    let mut out_r = 0.0f32;
+    for clip in &plan.clips {
+        if pos < clip.start_sample || pos >= clip.start_sample + clip.length_samples {
+            continue;
+        }
+        let Some(source) = sources.iter().find(|s| s.source == clip.source) else { continue };
+        let channels = source.channels.max(1) as i64;
+        let frame_index = clip.source_offset_samples as i64 + (pos - clip.start_sample);
+        let frame_count = source.samples.len() as i64 / channels;
+        if frame_index < 0 || frame_index >= frame_count {
+            continue;
+        }
+        let base = (frame_index * channels) as usize;
+        if source.channels <= 1 {
+            let s = source.samples[base];
+            out_l += s;
+            out_r += s;
+        } else {
+            let l = source.samples[base];
+            let r = source.samples.get(base + 1).copied().unwrap_or(l);
+            out_l += l;
+            out_r += r;
+        }
+    }
+    (out_l, out_r)
 }
 
 fn position_from_samples(sample_counter: u64, sample_rate: f32) -> Position {
