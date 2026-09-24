@@ -110,6 +110,14 @@ pub fn track_header<'a>(
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
+                // No confirmation dialog: like every other destructive
+                // edit here (DeleteClip, DeleteSelected, ...), undo is
+                // the safety net, not a modal.
+                Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
+                    .class("btn")
+                    .class("sm")
+                    .on_press(move |cx| cx.emit(TimelineEvent::RemoveTrack(track_id)));
+
                 Label::new(cx, gain_text).class("meta");
             })
             .gap(Pixels(2.0))

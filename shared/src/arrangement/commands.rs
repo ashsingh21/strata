@@ -4,8 +4,8 @@
 //! a plain stack of inverses.
 
 use super::model::{
-    Arrangement, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId, LoopRange, MidiNote,
-    TrackId,
+    Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
+    LoopRange, MidiNote, Track, TrackId,
 };
 use super::time::Ticks;
 
@@ -28,6 +28,14 @@ pub enum Command {
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
     SetLoopRange { range: Option<LoopRange> },
+    /// Inserts `track` at `index` in the track list, along with any
+    /// `clips`/`automation` it should already own - used both for a
+    /// fresh "add track" (both empty) and as `DeleteTrack`'s inverse
+    /// (restoring everything that was on it).
+    InsertTrack { track: Box<Track>, index: usize, clips: Vec<Clip>, automation: Vec<AutomationLane> },
+    /// Removes `track` and cascades to every clip and automation lane on
+    /// it, so nothing is left pointing at a track that no longer exists.
+    DeleteTrack { track: TrackId },
 }
 
 impl Command {
@@ -149,6 +157,37 @@ impl Command {
                 let index = arr.clips.iter().position(|c| c.id == clip_id).expect("DeleteClip: unknown clip");
                 let removed = arr.clips.remove(index);
                 Command::InsertClip { clip: Box::new(removed) }
+            }
+
+            Command::InsertTrack { track, index, clips, automation } => {
+                let id = track.id;
+                let index = index.min(arr.tracks.len());
+                arr.tracks.insert(index, *track);
+                arr.clips.extend(clips);
+                arr.automation.extend(automation);
+                Command::DeleteTrack { track: id }
+            }
+
+            Command::DeleteTrack { track: track_id } => {
+                let index = arr.tracks.iter().position(|t| t.id == track_id).expect("DeleteTrack: unknown track");
+                let track = arr.tracks.remove(index);
+                let mut clips = Vec::new();
+                arr.clips.retain(|c| {
+                    let keep = c.track != track_id;
+                    if !keep {
+                        clips.push(c.clone());
+                    }
+                    keep
+                });
+                let mut automation = Vec::new();
+                arr.automation.retain(|a| {
+                    let keep = a.track != track_id;
+                    if !keep {
+                        automation.push(a.clone());
+                    }
+                    keep
+                });
+                Command::InsertTrack { track: Box::new(track), index, clips, automation }
             }
 
             Command::DuplicateClip { clip: clip_id, new_id, offset } => {
@@ -463,5 +502,66 @@ mod tests {
 
         stack.do_command(Command::MoveClip { clip: 1, track: 1, start: PPQ * 8 }, &mut arr);
         assert!(!stack.can_redo());
+    }
+
+    fn new_track(id: TrackId) -> Track {
+        Track {
+            id,
+            name: "Mic".into(),
+            color: ClipColor::Teal,
+            kind: TrackKind::Audio,
+            mute: false,
+            solo: false,
+            arm: false,
+            gain_db: 0.0,
+            height: 56.0,
+        }
+    }
+
+    #[test]
+    fn insert_track_appends_and_undo_removes() {
+        let mut arr = test_arrangement();
+        let mut stack = CommandStack::new();
+
+        stack.do_command(
+            Command::InsertTrack { track: Box::new(new_track(2)), index: 1, clips: vec![], automation: vec![] },
+            &mut arr,
+        );
+        assert_eq!(arr.tracks.len(), 2);
+        assert_eq!(arr.tracks[1].id, 2);
+
+        assert!(stack.undo(&mut arr));
+        assert_eq!(arr.tracks.len(), 1);
+        assert!(arr.track(2).is_none());
+    }
+
+    #[test]
+    fn delete_track_cascades_to_clips_and_automation_then_undo_restores_everything() {
+        let mut arr = test_arrangement();
+        arr.tracks.push(new_track(2));
+        arr.clips.push(audio_clip(1, 2, 0, PPQ * 4));
+        arr.automation.push(AutomationLane {
+            id: 1,
+            track: 2,
+            parameter_name: "Gain".into(),
+            display_value: "0 dB".into(),
+            breakpoints: vec![Breakpoint { tick: 0, value: 0.5 }],
+        });
+        // An untouched clip on the other track shouldn't be affected.
+        arr.clips.push(audio_clip(2, 1, 0, PPQ * 4));
+        let mut stack = CommandStack::new();
+
+        stack.do_command(Command::DeleteTrack { track: 2 }, &mut arr);
+        assert!(arr.track(2).is_none());
+        assert!(arr.clip(1).is_none());
+        assert!(arr.automation_lane(1).is_none());
+        assert!(arr.clip(2).is_some());
+
+        assert!(stack.undo(&mut arr));
+        assert!(arr.track(2).is_some());
+        assert_eq!(arr.tracks[1].id, 2);
+        assert_eq!(arr.clip(1).unwrap().track, 2);
+        assert_eq!(arr.automation_lane(1).unwrap().track, 2);
+        assert_eq!(arr.clip(2).unwrap().track, 1);
     }
 }

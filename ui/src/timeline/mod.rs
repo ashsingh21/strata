@@ -69,13 +69,40 @@ pub fn timeline_view(
             // (Vizia stack layout quirk this session couldn't pin down).
             // This trades "fills the window" for "is definitely correct".
             VStack::new(cx, move |cx| {
-                let arr = arrangement.get();
-                for track in arr.tracks.clone() {
-                    track_header(cx, arrangement, theme, track.id);
-                    for lane in arr.automation.iter().filter(|a| a.track == track.id) {
-                        automation_header(cx, arrangement, lane.id);
+                // A plain loop only builds this once, at startup: it
+                // won't pick up a track being added or removed later.
+                // `Binding` rebuilds its contents whenever `arrangement`
+                // changes, which - unlike a live clip drag, which stays
+                // canvas-local until it commits - is exactly as often as
+                // the track list itself can actually change.
+                Binding::new(cx, arrangement, move |cx| {
+                    let arr = arrangement.get();
+                    for track in arr.tracks.clone() {
+                        track_header(cx, arrangement, theme, track.id);
+                        for lane in arr.automation.iter().filter(|a| a.track == track.id) {
+                            automation_header(cx, arrangement, lane.id);
+                        }
                     }
-                }
+                });
+
+                HStack::new(cx, move |cx| {
+                    Button::new(cx, |cx| Label::new(cx, "+ Audio"))
+                        .class("btn")
+                        .class("sm")
+                        .on_press(|cx| {
+                            cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Audio))
+                        });
+                    Button::new(cx, |cx| Label::new(cx, "+ MIDI"))
+                        .class("btn")
+                        .class("sm")
+                        .on_press(|cx| {
+                            cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi))
+                        });
+                })
+                .gap(Pixels(tokens::SPACE_2))
+                .padding(Pixels(tokens::SPACE_2))
+                .height(Auto)
+                .width(Pixels(HEAD_WIDTH));
             })
             .class("tl-heads")
             .width(Pixels(HEAD_WIDTH))

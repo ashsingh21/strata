@@ -10,8 +10,8 @@ use vizia::prelude::*;
 
 use shared::arrangement::{
     seed_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
-    ClipContent, ClipId, Command, CommandStack, LoopRange, MidiNote, PeakPyramid, SnapGrid, Ticks,
-    TrackId, TrackKind, ViewTransform, PPQ,
+    ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, MidiNote, PeakPyramid,
+    SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
 };
 
 /// The lane area's viewport width isn't known to the model (Vizia only
@@ -174,6 +174,9 @@ pub enum TimelineEvent {
     /// A finished guitar/mic take: insert it as a real clip on `track`,
     /// one undo step, same as any other clip insertion.
     InsertRecordedClip { track: TrackId, start: Ticks, length: Ticks, source: Arc<str> },
+
+    AddTrack(TrackKind),
+    RemoveTrack(TrackId),
 }
 
 impl Model for TimelineState {
@@ -396,6 +399,44 @@ impl Model for TimelineState {
                     };
                     stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
                 });
+            }
+            TimelineEvent::AddTrack(kind) => {
+                const COLORS: [ClipColor; 6] = [
+                    ClipColor::Coral,
+                    ClipColor::Amber,
+                    ClipColor::Teal,
+                    ClipColor::Blue,
+                    ClipColor::Violet,
+                    ClipColor::Pink,
+                ];
+                self.with_arrangement(|arr, stack| {
+                    let id = arr.alloc_id();
+                    let index = arr.tracks.len();
+                    let color = COLORS[index % COLORS.len()];
+                    let name = match kind {
+                        TrackKind::Audio => format!("Audio {id}"),
+                        TrackKind::Midi => format!("MIDI {id}"),
+                    };
+                    let track = Track {
+                        id,
+                        name,
+                        color,
+                        kind: *kind,
+                        mute: false,
+                        solo: false,
+                        arm: false,
+                        gain_db: 0.0,
+                        height: 56.0,
+                    };
+                    stack.do_command(
+                        Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] },
+                        arr,
+                    );
+                });
+            }
+            TimelineEvent::RemoveTrack(track) => {
+                self.do_command(Command::DeleteTrack { track: *track });
+                self.selection.set(Selection::default());
             }
             TimelineEvent::PeaksLoaded { source, peaks } => {
                 self.with_arrangement(|arr, _| {
