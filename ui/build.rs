@@ -247,6 +247,11 @@ fn render_base_css(scalars: &ScalarMap) -> String {
   border-width: 1px;
   z-index: 100;
 }}
+.interval-overlay {{
+  border-radius: {radius_md}px;
+  border-width: 1px;
+  z-index: 200;
+}}
 
 .hidden {{
   display: none;

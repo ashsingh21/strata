@@ -5,14 +5,17 @@ use vizia::prelude::*;
 use shared::Position;
 
 use crate::app::AppEvent;
+use crate::interval_input::state::IntervalInputEvent;
 use crate::tokens::{SPACE_2, SPACE_3};
 
+#[allow(clippy::too_many_arguments)]
 pub fn transport_bar(
     cx: &mut Context,
     playing: Signal<bool>,
     loop_on: Signal<bool>,
     record_armed: Signal<bool>,
     position: Signal<Position>,
+    interval_open: Signal<bool>,
 ) {
     HStack::new(cx, move |cx| {
         Button::new(cx, |cx| Label::new(cx, "\u{25A0}")).class("btn").on_press(|cx| cx.emit(AppEvent::Stop));
@@ -50,6 +53,14 @@ pub fn transport_bar(
         Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
 
         Label::new(cx, "CPU 0%").class("meta");
+
+        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+
+        Button::new(cx, |cx| Label::new(cx, "Intervals"))
+            .class("btn")
+            .class("sm")
+            .toggle_class("is-mod", interval_open)
+            .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
     })
     .class("transport")
     .gap(Pixels(SPACE_2))

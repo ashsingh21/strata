@@ -21,12 +21,14 @@ use ring::Ring;
 use spacing::Spacing;
 use state::{scale_name, IntervalInputEvent};
 
+#[allow(clippy::too_many_arguments)]
 pub fn interval_input_view(
     cx: &mut Context,
     theme: Signal<ThemeId>,
     synth_state: Signal<SynthState>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
+    open: Signal<bool>,
 ) {
     VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
@@ -59,6 +61,11 @@ pub fn interval_input_view(
             })
             .class("synth-seg")
             .size(Auto);
+
+            Button::new(cx, |cx| Label::new(cx, "Close"))
+                .class("btn")
+                .class("sm")
+                .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
         })
         .class("synth-devhead")
         .gap(Pixels(tokens::SPACE_2))
@@ -91,8 +98,13 @@ pub fn interval_input_view(
         .height(Auto);
     })
     .class("panel")
+    .class("interval-overlay")
+    .toggle_class("hidden", open.map(|o| !*o))
     .gap(Pixels(tokens::SPACE_2))
     .padding(Pixels(tokens::SPACE_2))
+    .position_type(PositionType::Absolute)
+    .top(Pixels(48.0))
+    .left(Pixels(260.0))
     .width(Auto)
     .height(Auto);
 }

@@ -75,6 +75,7 @@ fn main() -> Result<(), ApplicationError> {
         let interval_model = IntervalInputModel::new();
         let interval_key = interval_model.key;
         let interval_scale_mask = interval_model.scale_mask;
+        let interval_open = interval_model.open;
         interval_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
@@ -158,7 +159,7 @@ fn main() -> Result<(), ApplicationError> {
         .build(cx);
 
         VStack::new(cx, move |cx| {
-            transport::transport_bar(cx, playing, loop_on, record_armed, position);
+            transport::transport_bar(cx, playing, loop_on, record_armed, position, interval_open);
 
             timeline::timeline_view(
                 cx,
@@ -185,7 +186,7 @@ fn main() -> Result<(), ApplicationError> {
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
-            interval_input::interval_input_view(cx, theme, synth_state, interval_key, interval_scale_mask);
+            interval_input::interval_input_view(cx, theme, synth_state, interval_key, interval_scale_mask, interval_open);
         })
         .class("app")
         .toggle_class("theme-daylight", is_daylight)
@@ -193,7 +194,7 @@ fn main() -> Result<(), ApplicationError> {
         .width(Stretch(1.0));
     })
     .title("Strata")
-    .inner_size((1600, 1900))
+    .inner_size((1600, 1360))
     .ignore_default_theme()
     .run()
 }

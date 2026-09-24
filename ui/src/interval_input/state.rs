@@ -15,12 +15,16 @@ pub struct IntervalInputModel {
     pub key: Signal<u8>,
     /// Bit `n` set means semitone `n` above the root is in scale.
     pub scale_mask: Signal<u16>,
+    /// Whether the (large, three-panel) overlay is showing. Off by default
+    /// so it doesn't crowd the timeline/Carve until asked for.
+    pub open: Signal<bool>,
 }
 
 pub enum IntervalInputEvent {
     SetKey(u8),
     ToggleDegree(u8),
     CyclePreset,
+    ToggleOpen,
 }
 
 impl IntervalInputModel {
@@ -29,6 +33,7 @@ impl IntervalInputModel {
         Self {
             key: Signal::new(9), // A
             scale_mask: Signal::new(minor_pentatonic.mask),
+            open: Signal::new(false),
         }
     }
 }
@@ -57,6 +62,7 @@ impl Model for IntervalInputModel {
                     .unwrap_or(0);
                 self.scale_mask.set(SCALE_PRESETS[next_index].mask);
             }
+            IntervalInputEvent::ToggleOpen => self.open.update(|v| *v = !*v),
         });
     }
 }
