@@ -117,6 +117,7 @@ fn main() -> Result<(), ApplicationError> {
         let interval_key = interval_model.key;
         let interval_scale_mask = interval_model.scale_mask;
         let interval_open = interval_model.open;
+        let interval_show_note_names = interval_model.show_note_names;
         interval_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
@@ -261,7 +262,15 @@ fn main() -> Result<(), ApplicationError> {
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
-            interval_input::interval_input_view(cx, theme, synth_state, interval_key, interval_scale_mask, interval_open);
+            interval_input::interval_input_view(
+                cx,
+                theme,
+                synth_state,
+                interval_key,
+                interval_scale_mask,
+                interval_open,
+                interval_show_note_names,
+            );
 
             piano_roll::piano_roll_view(
                 cx,

@@ -13,8 +13,33 @@ pub const DEGREE_NAMES: [&str; 12] =
 pub const NOTE_NAMES: [&str; 12] =
     ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
+/// Same pitch classes, spelled with flats instead.
+pub const NOTE_NAMES_FLAT: [&str; 12] =
+    ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+
 pub fn note_name(pitch_class: u8) -> &'static str {
     NOTE_NAMES[(pitch_class % 12) as usize]
+}
+
+/// Whether `root` (a pitch class, 0..12) conventionally spells its own
+/// scale with flats rather than sharps - the standard circle-of-fifths
+/// choice (F, Bb, Eb, Ab, Db; everything else, including the
+/// enharmonically ambiguous F#/Gb, goes with sharps).
+fn prefers_flats(root: u8) -> bool {
+    matches!(root % 12, 1 | 3 | 5 | 8 | 10)
+}
+
+/// Note name for `pitch_class`, spelled with sharps or flats depending on
+/// which convention `root` itself uses - unlike `note_name`, which always
+/// picks sharps regardless of key. Meant for displaying a whole scale's
+/// notes together (e.g. Interval Input's note-name labels), where showing
+/// "Db" for an Eb-major-ish scale reads far more naturally than "C#".
+pub fn note_name_for_key(pitch_class: u8, root: u8) -> &'static str {
+    if prefers_flats(root) {
+        NOTE_NAMES_FLAT[(pitch_class % 12) as usize]
+    } else {
+        NOTE_NAMES[(pitch_class % 12) as usize]
+    }
 }
 
 pub fn degree_name(semitones_from_root: u8) -> &'static str {
@@ -51,6 +76,20 @@ pub const SCALE_PRESETS: &[ScalePreset] = &[
     ScalePreset { name: "Locrian", mask: mask(&[0, 1, 3, 5, 6, 8, 10]) },
     ScalePreset { name: "Harmonic minor", mask: mask(&[0, 2, 3, 5, 7, 8, 11]) },
     ScalePreset { name: "Chromatic", mask: mask(&[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]) },
+    // Hindustani ragas - their note SET only (the "that"/parent scale a
+    // raga draws from), as a bitmask like everything else here. Real raga
+    // grammar (arohana/avarohana asymmetry, vadi/samvadi, vakra movement,
+    // gamak ornamentation) is far beyond what a note-set mask can express;
+    // this just gets the right notes highlighted to play/explore with.
+    // Several ragas (Bilawal, Khamaj, Kafi, Asavari, Bhairavi, Kalyan,
+    // Bhoopali) share an exact note set with a Western mode already above
+    // and so aren't duplicated here.
+    ScalePreset { name: "Raga Bhairav", mask: mask(&[0, 1, 4, 5, 7, 8, 11]) },
+    ScalePreset { name: "Raga Todi", mask: mask(&[0, 1, 3, 6, 7, 8, 11]) },
+    ScalePreset { name: "Raga Marwa", mask: mask(&[0, 1, 4, 6, 7, 9, 11]) },
+    ScalePreset { name: "Raga Purvi", mask: mask(&[0, 1, 4, 6, 7, 8, 11]) },
+    ScalePreset { name: "Raga Malkauns", mask: mask(&[0, 3, 5, 8, 10]) },
+    ScalePreset { name: "Raga Hindol", mask: mask(&[0, 4, 6, 9, 11]) },
 ];
 
 /// Semitone offsets (0..12, ascending, always including 0) that are set in
@@ -103,5 +142,31 @@ mod tests {
     fn note_name_wraps_at_the_octave() {
         assert_eq!(note_name(9), "A");
         assert_eq!(note_name(21), "A");
+    }
+
+    #[test]
+    fn raga_bhairav_has_the_expected_degrees() {
+        let preset = SCALE_PRESETS.iter().find(|p| p.name == "Raga Bhairav").unwrap();
+        assert_eq!(degrees_in_mask(preset.mask), vec![0, 1, 4, 5, 7, 8, 11]);
+    }
+
+    #[test]
+    fn every_preset_has_a_unique_name() {
+        let mut names: Vec<&str> = SCALE_PRESETS.iter().map(|p| p.name).collect();
+        let before = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), before, "duplicate preset name");
+    }
+
+    #[test]
+    fn note_name_for_key_follows_the_root_convention() {
+        // F, Bb, Eb, Ab, Db roots spell their own scale with flats.
+        assert_eq!(note_name_for_key(1, 5), "Db"); // in F, C# reads as Db
+        assert_eq!(note_name_for_key(8, 10), "Ab"); // in Bb, G# reads as Ab
+        // Everything else, including the ambiguous F#/Gb root itself,
+        // keeps sharps.
+        assert_eq!(note_name_for_key(1, 0), "C#"); // in C
+        assert_eq!(note_name_for_key(6, 6), "F#"); // root F# spells itself F#, not Gb
     }
 }

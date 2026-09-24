@@ -18,6 +18,12 @@ pub struct IntervalInputModel {
     /// Whether the (large, three-panel) overlay is showing. Off by default
     /// so it doesn't crowd the timeline/Carve until asked for.
     pub open: Signal<bool>,
+    /// The degree-selector row's labels: note names (e.g. "Eb"), spelled
+    /// for the current key via `note_name_for_key`, or scale-degree
+    /// intervals (e.g. "b3"). Defaults to note names - seeing the actual
+    /// notes, sharps and flats included, is the more legible default for
+    /// picking out an unfamiliar scale/raga by ear.
+    pub show_note_names: Signal<bool>,
 }
 
 pub enum IntervalInputEvent {
@@ -25,6 +31,7 @@ pub enum IntervalInputEvent {
     ToggleDegree(u8),
     CyclePreset,
     ToggleOpen,
+    ToggleLabelMode,
 }
 
 impl IntervalInputModel {
@@ -34,6 +41,7 @@ impl IntervalInputModel {
             key: Signal::new(9), // A
             scale_mask: Signal::new(minor_pentatonic.mask),
             open: Signal::new(false),
+            show_note_names: Signal::new(true),
         }
     }
 }
@@ -63,6 +71,7 @@ impl Model for IntervalInputModel {
                 self.scale_mask.set(SCALE_PRESETS[next_index].mask);
             }
             IntervalInputEvent::ToggleOpen => self.open.update(|v| *v = !*v),
+            IntervalInputEvent::ToggleLabelMode => self.show_note_names.update(|v| *v = !*v),
         });
     }
 }

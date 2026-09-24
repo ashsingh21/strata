@@ -13,7 +13,7 @@ pub mod state;
 use vizia::prelude::*;
 
 use shared::synth::SynthState;
-use shared::theory::{degree_name, note_name};
+use shared::theory::{degree_name, note_name, note_name_for_key};
 
 use crate::tokens::{self, ThemeId};
 use lattice::Lattice;
@@ -29,6 +29,7 @@ pub fn interval_input_view(
     key: Signal<u8>,
     scale_mask: Signal<u16>,
     open: Signal<bool>,
+    show_note_names: Signal<bool>,
 ) {
     VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
@@ -47,11 +48,23 @@ pub fn interval_input_view(
                 .class("sm")
                 .on_press(|cx| cx.emit(IntervalInputEvent::CyclePreset));
 
+            let label_mode_text = show_note_names.map(|s| if *s { "Notes" } else { "Intervals" });
+            Button::new(cx, move |cx| Label::new(cx, label_mode_text))
+                .class("btn")
+                .class("sm")
+                .on_press(|cx| cx.emit(IntervalInputEvent::ToggleLabelMode));
+
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
             HStack::new(cx, move |cx| {
                 for degree in 0u8..12 {
-                    let name = degree_name(degree);
+                    let name = key.map(move |k| {
+                        if show_note_names.get() {
+                            note_name_for_key((*k + degree) % 12, *k).to_string()
+                        } else {
+                            degree_name(degree).to_string()
+                        }
+                    });
                     let on = scale_mask.map(move |m| m & (1 << degree) != 0);
                     Button::new(cx, move |cx| Label::new(cx, name).class("mono"))
                         .class("synth-seg-btn")
