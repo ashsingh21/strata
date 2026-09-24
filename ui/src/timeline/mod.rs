@@ -45,6 +45,7 @@ pub fn timeline_view(
     selection: Signal<Selection>,
     playhead: Signal<Ticks>,
     recording_preview: Signal<Option<crate::recorder::RecordingPreview>>,
+    tool: Signal<crate::timeline::state::TimelineTool>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -54,6 +55,21 @@ pub fn timeline_view(
                 Button::new(cx, move |cx| Label::new(cx, snap_label))
                     .class("readout")
                     .on_press(|cx| cx.emit(TimelineEvent::CycleSnap));
+
+                // Select (default: rubber-band selection, drag clips) vs
+                // Draw (click/drag empty space on a MIDI track to create
+                // a clip there directly, instead of only via step-entry).
+                let is_draw = tool.map(|t| *t == crate::timeline::state::TimelineTool::Draw);
+                let tool_label = tool.map(|t| match t {
+                    crate::timeline::state::TimelineTool::Select => "Select",
+                    crate::timeline::state::TimelineTool::Draw => "Draw",
+                });
+                Button::new(cx, move |cx| Label::new(cx, tool_label))
+                    .class("btn")
+                    .class("sm")
+                    .toggle_class("is-mod", is_draw)
+                    .on_press(|cx| cx.emit(TimelineEvent::ToggleTool));
+
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, "16 bars").class("meta");
             })
@@ -121,7 +137,7 @@ pub fn timeline_view(
             // force a full redraw of every clip/waveform/grid line every
             // frame - see PlayheadOverlay's own doc comment.
             ZStack::new(cx, move |cx| {
-                LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview)
+                LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview, tool)
                     .position_type(PositionType::Absolute)
                     .height(Stretch(1.0))
                     .width(Stretch(1.0));

@@ -28,6 +28,18 @@ pub struct Selection {
     pub breakpoint: Option<(AutomationLaneId, Ticks)>,
 }
 
+/// Which thing a click/drag on empty track space does - mirrors the piano
+/// roll's own Select/Draw toggle. `Select` is every existing behavior
+/// (rubber-band selection); `Draw` is new: click or drag empty space on a
+/// MIDI track to create a clip there directly, instead of the only route
+/// being step-entry recording.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TimelineTool {
+    #[default]
+    Select,
+    Draw,
+}
+
 /// One 16th note at 4/4 - the step-entry recorder's fixed grid.
 const STEP_TICKS: Ticks = PPQ / 4;
 
@@ -37,6 +49,7 @@ pub struct TimelineState {
     pub snap: Signal<SnapGrid>,
     pub selection: Signal<Selection>,
     pub follow: Signal<bool>,
+    pub tool: Signal<TimelineTool>,
     pub playhead_ticks: Signal<Ticks>,
     command_stack: CommandStack,
 
@@ -70,6 +83,7 @@ impl TimelineState {
             snap: Signal::new(SnapGrid::Sixteenth),
             selection: Signal::new(Selection::default()),
             follow: Signal::new(true),
+            tool: Signal::new(TimelineTool::default()),
             playhead_ticks: Signal::new(0),
             command_stack: CommandStack::new(),
             record_armed,
@@ -138,6 +152,10 @@ pub enum TimelineEvent {
     Redo,
     CycleSnap,
     ToggleFollow,
+    ToggleTool,
+    /// A clip drawn directly on empty MIDI-track space (Draw tool), rather
+    /// than built up via step-entry recording.
+    InsertMidiClip { track: TrackId, start: Ticks, length: Ticks },
     ToggleMute(TrackId),
     ToggleSolo(TrackId),
     ToggleArm(TrackId),
@@ -296,6 +314,36 @@ impl Model for TimelineState {
             }
             TimelineEvent::ToggleFollow => {
                 self.follow.update(|f| *f = !*f);
+            }
+            TimelineEvent::ToggleTool => {
+                self.tool.update(|t| *t = if *t == TimelineTool::Select { TimelineTool::Draw } else { TimelineTool::Select });
+            }
+            TimelineEvent::InsertMidiClip { track, start, length } => {
+                let bypass = cx.modifiers().alt();
+                let snap_grid = self.snap.get();
+                let raw_start = *start;
+                let raw_end = *start + *length;
+                let snapped_start = snap(raw_start, snap_grid, bypass).max(0);
+                let snapped_end = snap(raw_end, snap_grid, bypass).max(snapped_start + 1);
+
+                let mut new_id = 0;
+                self.with_arrangement(|arr, stack| {
+                    new_id = arr.alloc_id();
+                    let clip = Clip {
+                        id: new_id,
+                        track: *track,
+                        start: snapped_start,
+                        length: snapped_end - snapped_start,
+                        name: "Clip".to_string(),
+                        content: ClipContent::Midi { notes: vec![] },
+                        recording: false,
+                    };
+                    stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
+                });
+                self.selection.set(Selection { clips: std::iter::once(new_id).collect(), ..Default::default() });
+                // Straight into note entry - drawing an empty clip is
+                // only useful as a step toward putting notes in it.
+                cx.emit(crate::piano_roll::state::PianoRollEvent::Open(new_id));
             }
             TimelineEvent::ToggleMute(track) => {
                 self.with_arrangement(|arr, _| {

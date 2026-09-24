@@ -79,6 +79,7 @@ fn main() -> Result<(), ApplicationError> {
         let tl_snap = timeline_state.snap;
         let tl_selection = timeline_state.selection;
         let tl_playhead = timeline_state.playhead_ticks;
+        let tl_tool = timeline_state.tool;
 
         timeline::peaks_loader::spawn_peak_loaders(
             cx,
@@ -242,6 +243,7 @@ fn main() -> Result<(), ApplicationError> {
                 tl_selection,
                 tl_playhead,
                 recording_preview,
+                tl_tool,
             );
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));

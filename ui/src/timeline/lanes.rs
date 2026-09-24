@@ -9,13 +9,17 @@ use vizia::vg;
 
 use shared::arrangement::{
     snap, Arrangement, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId, SnapGrid,
-    TimeSignature, Ticks, TrackId, ViewTransform,
+    TimeSignature, Ticks, TrackId, TrackKind, ViewTransform,
 };
 
 use crate::recorder::RecordingPreview;
 use crate::timeline::header::clip_color_to_rgb;
-use crate::timeline::state::{Selection, TimelineEvent};
+use crate::timeline::state::{Selection, TimelineEvent, TimelineTool};
 use crate::tokens::{self, ThemeId};
+
+/// One bar at 4/4 - the default length for a clip created with a plain
+/// click (rather than a drag) in Draw mode.
+const DEFAULT_DRAWN_CLIP_LENGTH: Ticks = shared::arrangement::PPQ * 4;
 
 const CLIP_HEADER_H: f32 = 14.0;
 const CLIP_INSET: f32 = 2.0;
@@ -86,6 +90,14 @@ enum Drag {
         original: Breakpoint,
         current: Breakpoint,
     },
+    /// Draw tool: dragging out a new MIDI clip on empty track space.
+    DrawClip {
+        track: TrackId,
+        row_top: f32,
+        row_height: f32,
+        anchor_tick: Ticks,
+        current_tick: Ticks,
+    },
 }
 
 pub struct LaneArea {
@@ -95,6 +107,7 @@ pub struct LaneArea {
     playhead: Signal<Ticks>,
     theme: Signal<ThemeId>,
     recording_preview: Signal<Option<RecordingPreview>>,
+    tool: Signal<TimelineTool>,
     drag: Option<Drag>,
     last_click: Option<(Instant, f32, f32)>,
 }
@@ -109,6 +122,7 @@ impl LaneArea {
         playhead: Signal<Ticks>,
         theme: Signal<ThemeId>,
         recording_preview: Signal<Option<RecordingPreview>>,
+        tool: Signal<TimelineTool>,
     ) -> Handle<'_, Self> {
         // Deliberately not bound to `playhead`: it changes every frame
         // during playback, and redrawing every clip/waveform/grid line
@@ -117,8 +131,9 @@ impl LaneArea {
         // is the only thing that redraws at playback rate. `self.playhead`
         // stays a field only for the dead `clip.recording` chase-length
         // branch above, which nothing currently triggers.
-        Self { arrangement, transform, selection, playhead, theme, recording_preview, drag: None, last_click: None }
+        Self { arrangement, transform, selection, playhead, theme, recording_preview, tool, drag: None, last_click: None }
             .build(cx, |_| {})
+            .bind(tool, |mut h| h.needs_redraw())
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(transform, |mut h| h.needs_redraw())
             .bind(selection, |mut h| h.needs_redraw())
@@ -255,10 +270,22 @@ impl LaneArea {
                         row_delta: 0,
                     });
                 } else {
-                    if !cx.modifiers().shift() {
-                        cx.emit(TimelineEvent::ClearSelection);
+                    let is_midi = arr.track(track_id).map(|t| t.kind) == Some(TrackKind::Midi);
+                    if self.tool.get() == TimelineTool::Draw && is_midi {
+                        let anchor = tick.max(0);
+                        self.drag = Some(Drag::DrawClip {
+                            track: track_id,
+                            row_top: row.top,
+                            row_height: row.height,
+                            anchor_tick: anchor,
+                            current_tick: anchor,
+                        });
+                    } else {
+                        if !cx.modifiers().shift() {
+                            cx.emit(TimelineEvent::ClearSelection);
+                        }
+                        self.drag = Some(Drag::RubberBand { anchor: (lx, ly), current: (lx, ly) });
                     }
-                    self.drag = Some(Drag::RubberBand { anchor: (lx, ly), current: (lx, ly) });
                 }
             }
 
@@ -338,6 +365,10 @@ impl LaneArea {
             }
             Drag::RubberBand { current, .. } => {
                 *current = (lx, ly);
+                cx.needs_redraw();
+            }
+            Drag::DrawClip { current_tick, .. } => {
+                *current_tick = snap(tick.max(0), snap_grid, bypass);
                 cx.needs_redraw();
             }
             Drag::MoveBreakpoint { lane, current, .. } => {
@@ -439,6 +470,17 @@ impl LaneArea {
                     });
                 }
             }
+            Drag::DrawClip { track, anchor_tick, current_tick, .. } => {
+                let (start, end) = if current_tick == anchor_tick {
+                    // A plain click, not a drag: a default one-bar clip
+                    // rather than nothing, so Draw mode always produces
+                    // something to open into the piano roll.
+                    (anchor_tick, anchor_tick + DEFAULT_DRAWN_CLIP_LENGTH)
+                } else {
+                    (anchor_tick.min(current_tick), anchor_tick.max(current_tick))
+                };
+                cx.emit(TimelineEvent::InsertMidiClip { track, start, length: (end - start).max(1) });
+            }
         }
     }
 
@@ -454,15 +496,18 @@ impl LaneArea {
         let ticks_per_bar = sig.ticks_per_bar();
         let ticks_per_beat = sig.ticks_per_beat();
 
-        let (drag_move, drag_trim, rubber_band) = match &self.drag {
+        let (drag_move, drag_trim, rubber_band, draw_clip) = match &self.drag {
             Some(Drag::MoveClips { clips, delta_ticks, row_delta, .. }) => {
-                (Some((clips.as_slice(), *delta_ticks, *row_delta)), None, None)
+                (Some((clips.as_slice(), *delta_ticks, *row_delta)), None, None, None)
             }
             Some(Drag::TrimClip { clip, edge, original_start, original_length, delta_ticks }) => {
-                (None, Some((*clip, *edge, *original_start, *original_length, *delta_ticks)), None)
+                (None, Some((*clip, *edge, *original_start, *original_length, *delta_ticks)), None, None)
             }
-            Some(Drag::RubberBand { anchor, current }) => (None, None, Some((*anchor, *current))),
-            _ => (None, None, None),
+            Some(Drag::RubberBand { anchor, current }) => (None, None, Some((*anchor, *current)), None),
+            Some(Drag::DrawClip { row_top, row_height, anchor_tick, current_tick, .. }) => {
+                (None, None, None, Some((*row_top, *row_height, *anchor_tick, *current_tick)))
+            }
+            _ => (None, None, None, None),
         };
         let track_ids: Vec<TrackId> = arr.tracks.iter().map(|t| t.id).collect();
 
@@ -678,6 +723,30 @@ impl LaneArea {
             border.set_stroke_width(1.0);
             border.set_anti_alias(true);
             canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, x1, y1), None), &border);
+        }
+
+        if let Some((row_top, row_height, anchor_tick, current_tick)) = draw_clip {
+            let (start, end) = if current_tick == anchor_tick {
+                (anchor_tick, anchor_tick + DEFAULT_DRAWN_CLIP_LENGTH)
+            } else {
+                (anchor_tick.min(current_tick), anchor_tick.max(current_tick))
+            };
+            let x0 = (bounds.x + transform.tick_to_x(start) as f32).max(bounds.x);
+            let x1 = (bounds.x + transform.tick_to_x(end) as f32).min(bounds.x + bounds.w);
+            if x1 > x0 {
+                let y0 = bounds.y + row_top - scroll_y + CLIP_INSET;
+                let y1 = bounds.y + row_top - scroll_y + row_height - CLIP_INSET;
+                let mut fill = vg::Paint::default();
+                fill.set_color(Color::rgba(palette.volt.r(), palette.volt.g(), palette.volt.b(), 130));
+                fill.set_anti_alias(true);
+                canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, x1, y1), None), &fill);
+                let mut border = vg::Paint::default();
+                border.set_color(palette.volt);
+                border.set_style(vg::PaintStyle::Stroke);
+                border.set_stroke_width(1.5);
+                border.set_anti_alias(true);
+                canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, x1, y1), None), &border);
+            }
         }
     }
 
