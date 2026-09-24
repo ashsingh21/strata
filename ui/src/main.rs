@@ -28,6 +28,7 @@ fn main() -> Result<(), ApplicationError> {
     let (params, telemetry_tx, telemetry_rx) = shared::bridge();
     let synth_bridge = shared::synth::synth_bridge();
     let playback_bridge = shared::playback::playback_bridge();
+    let recorder_bridge = shared::recorder::recorder_bridge();
     let engine_handle = engine::start(
         params.clone(),
         telemetry_tx,
@@ -36,11 +37,18 @@ fn main() -> Result<(), ApplicationError> {
         synth_bridge.telemetry_tx,
         playback_bridge.plan_rx,
         playback_bridge.decode_rx,
+        recorder_bridge.command_rx,
+        recorder_bridge.telemetry_tx,
     )
     .expect("failed to start audio engine");
     let engine_sample_rate = engine_handle.sample_rate;
     let playback_plan_tx = std::cell::RefCell::new(playback_bridge.plan_tx);
     let playback_decode_tx = playback_bridge.decode_tx;
+    // Held for the recording coordinator (not built yet): command_tx sends
+    // Start/Stop to the engine's writer thread, telemetry_rx drains the
+    // input peak meter.
+    let _record_command_tx = recorder_bridge.command_tx;
+    let _input_telemetry_rx = recorder_bridge.telemetry_rx;
 
     Application::new(move |cx| {
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");

@@ -10,6 +10,7 @@
 //! clip layout actually changed) drops the previous one's `Vec`. See
 //! `shared::playback` for why that's an acceptable trade here.
 
+mod input;
 mod synth;
 
 use std::fmt;
@@ -18,9 +19,16 @@ use std::sync::Arc;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Error as CpalError, FromSample, OutputCallbackInfo, Sample, SampleFormat, SizedSample, StreamConfig};
 use shared::playback::{DecodedSource, PlaybackPlan, DECODED_SOURCE_CAPACITY};
+use shared::recorder::RecordCommand;
 use shared::synth::{NoteEvent, SynthParams, SynthTelemetry};
 use shared::{Params, Position, Telemetry};
 use synth::SynthEngine;
+
+/// How many captured input samples can sit unwritten between the input
+/// callback and the writer thread - generous relative to a typical block
+/// size at common sample rates, so a brief writer-thread stall (e.g. a
+/// slow disk) doesn't drop audio.
+const CAPTURE_CAPACITY: usize = 1 << 16;
 
 const TEST_TONE_HZ: f32 = 220.0;
 /// -18 dBFS.
@@ -38,9 +46,12 @@ const CLICK_HZ_BEAT: f32 = 1000.0;
 const CLICK_DECAY_MS: f32 = 15.0;
 const CLICK_AMPLITUDE: f32 = 0.3;
 
-/// Owns the live cpal stream. Dropping it stops audio.
+/// Owns the live cpal stream(s). Dropping it stops audio. `_input_stream`
+/// is `None` when no usable input device was found - recording is then
+/// simply unavailable, not a startup failure (see `input::start`).
 pub struct EngineHandle {
     _stream: cpal::Stream,
+    _input_stream: Option<cpal::Stream>,
     pub sample_rate: u32,
 }
 
@@ -74,7 +85,8 @@ impl std::error::Error for EngineError {}
 /// `note_events` feed Carve's voice engine; `synth_telemetry` reports its
 /// post-mix peak level back to the UI. `playback_plan`/`decoded_sources`
 /// feed the arrangement's audio clips into the mix - see
-/// `shared::playback`.
+/// `shared::playback`. `record_commands`/`input_telemetry` drive guitar/
+/// mic recording - see `shared::recorder` and `input`.
 #[allow(clippy::too_many_arguments)]
 pub fn start(
     params: Arc<Params>,
@@ -84,6 +96,8 @@ pub fn start(
     synth_telemetry: rtrb::Producer<SynthTelemetry>,
     playback_plan: rtrb::Consumer<PlaybackPlan>,
     decoded_sources: rtrb::Consumer<DecodedSource>,
+    record_commands: rtrb::Consumer<RecordCommand>,
+    input_telemetry: rtrb::Producer<shared::recorder::InputTelemetry>,
 ) -> Result<EngineHandle, EngineError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or(EngineError::NoOutputDevice)?;
@@ -131,7 +145,69 @@ pub fn start(
 
     stream.play()?;
 
-    Ok(EngineHandle { _stream: stream, sample_rate })
+    let (capture_tx, capture_rx) = rtrb::RingBuffer::<f32>::new(CAPTURE_CAPACITY);
+    let input_stream = match input::start(sample_rate, capture_tx, input_telemetry) {
+        Some((stream, input_sample_rate)) => {
+            spawn_writer_thread(capture_rx, record_commands, input_sample_rate);
+            Some(stream)
+        }
+        None => None,
+    };
+
+    Ok(EngineHandle { _stream: stream, _input_stream: input_stream, sample_rate })
+}
+
+/// Runs for the lifetime of the process, off the audio thread: streams
+/// captured input samples to a WAV file between `RecordCommand::Start`
+/// and `Stop`, discarding them (but still draining the ring buffer, so it
+/// never backs up) whenever nothing is armed.
+fn spawn_writer_thread(
+    mut capture_rx: rtrb::Consumer<f32>,
+    mut command_rx: rtrb::Consumer<RecordCommand>,
+    sample_rate: u32,
+) {
+    std::thread::spawn(move || {
+        let mut writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>> = None;
+        loop {
+            while let Ok(command) = command_rx.pop() {
+                match command {
+                    RecordCommand::Start { path } => {
+                        if let Some(w) = writer.take() {
+                            let _ = w.finalize();
+                        }
+                        let spec = hound::WavSpec {
+                            channels: 1,
+                            sample_rate,
+                            bits_per_sample: 32,
+                            sample_format: hound::SampleFormat::Float,
+                        };
+                        match hound::WavWriter::create(&path, spec) {
+                            Ok(w) => writer = Some(w),
+                            Err(e) => eprintln!("recorder: failed to create {}: {e}", path.display()),
+                        }
+                    }
+                    RecordCommand::Stop => {
+                        if let Some(w) = writer.take() {
+                            if let Err(e) = w.finalize() {
+                                eprintln!("recorder: failed to finalize WAV: {e}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut drained_any = false;
+            while let Ok(sample) = capture_rx.pop() {
+                drained_any = true;
+                if let Some(w) = writer.as_mut() {
+                    let _ = w.write_sample(sample);
+                }
+            }
+            if !drained_any {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
