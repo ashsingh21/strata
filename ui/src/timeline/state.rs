@@ -10,8 +10,8 @@ use vizia::prelude::*;
 
 use shared::arrangement::{
     seed_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint,
-    ClipContent, ClipId, Command, CommandStack, LoopRange, PeakPyramid, SnapGrid, Ticks, TrackId,
-    TrackKind, ViewTransform, PPQ,
+    ClipContent, ClipId, Command, CommandStack, LoopRange, MidiNote, PeakPyramid, SnapGrid, Ticks,
+    TrackId, TrackKind, ViewTransform, PPQ,
 };
 
 /// The lane area's viewport width isn't known to the model (Vizia only
@@ -48,10 +48,22 @@ pub struct TimelineState {
     /// The clip currently being extended, if the next committed step
     /// lands right at its end.
     step_entry_clip: Option<ClipId>,
+
+    // The piano roll's own state (not reactive here): when it's open with
+    // a note selection, Delete/Backspace removes those notes instead of
+    // the timeline's selected clips - one global shortcut, routed to
+    // whichever thing you're actually looking at.
+    piano_roll_open_clip: Signal<Option<ClipId>>,
+    piano_roll_selected: Signal<HashSet<(Ticks, u8)>>,
 }
 
 impl TimelineState {
-    pub fn new(record_armed: Signal<bool>, playing: Signal<bool>) -> Self {
+    pub fn new(
+        record_armed: Signal<bool>,
+        playing: Signal<bool>,
+        piano_roll_open_clip: Signal<Option<ClipId>>,
+        piano_roll_selected: Signal<HashSet<(Ticks, u8)>>,
+    ) -> Self {
         Self {
             arrangement: Signal::new(seed_arrangement()),
             transform: Signal::new(ViewTransform::default()),
@@ -63,6 +75,8 @@ impl TimelineState {
             record_armed,
             playing,
             step_entry_clip: None,
+            piano_roll_open_clip,
+            piano_roll_selected,
         }
     }
 
@@ -150,6 +164,12 @@ pub enum TimelineEvent {
     /// is played via Space): commits `pitches` (possibly empty, for a
     /// rest) as one step of a step-entry recording.
     CommitStepChord(HashSet<u8>),
+
+    /// The piano roll's own note add/remove (one at a time; a multi-note
+    /// delete of the piano roll's selection goes through
+    /// `DeleteSelected` instead, batched into one undo step).
+    AddMidiNoteAt { clip: ClipId, note: MidiNote },
+    RemoveMidiNoteAt { clip: ClipId, start: Ticks, pitch: u8 },
 }
 
 impl Model for TimelineState {
@@ -193,12 +213,24 @@ impl Model for TimelineState {
                 }
             }
             TimelineEvent::DeleteSelected => {
-                let selection = self.selection.get();
-                if !selection.clips.is_empty() {
-                    let commands =
-                        selection.clips.iter().map(|&clip| Command::DeleteClip { clip }).collect();
+                let piano_roll_selected = self.piano_roll_selected.get();
+                if let (Some(clip), false) =
+                    (self.piano_roll_open_clip.get(), piano_roll_selected.is_empty())
+                {
+                    let commands = piano_roll_selected
+                        .iter()
+                        .map(|&(start, pitch)| Command::RemoveMidiNote { clip, start, pitch })
+                        .collect();
                     self.do_command(Command::Batch(commands));
-                    self.selection.set(Selection::default());
+                    cx.emit(crate::piano_roll::state::PianoRollEvent::ClearSelection);
+                } else {
+                    let selection = self.selection.get();
+                    if !selection.clips.is_empty() {
+                        let commands =
+                            selection.clips.iter().map(|&clip| Command::DeleteClip { clip }).collect();
+                        self.do_command(Command::Batch(commands));
+                        self.selection.set(Selection::default());
+                    }
                 }
             }
             TimelineEvent::DuplicateSelected => {
@@ -339,6 +371,12 @@ impl Model for TimelineState {
             }
             TimelineEvent::CommitStepChord(pitches) => {
                 self.commit_step(pitches);
+            }
+            TimelineEvent::AddMidiNoteAt { clip, note } => {
+                self.do_command(Command::AddMidiNote { clip: *clip, note: *note });
+            }
+            TimelineEvent::RemoveMidiNoteAt { clip, start, pitch } => {
+                self.do_command(Command::RemoveMidiNote { clip: *clip, start: *start, pitch: *pitch });
             }
             TimelineEvent::PeaksLoaded { source, peaks } => {
                 self.with_arrangement(|arr, _| {

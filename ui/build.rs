@@ -252,6 +252,10 @@ fn render_base_css(scalars: &ScalarMap) -> String {
   border-width: 1px;
   z-index: 200;
 }}
+.piano-roll-backdrop {{
+  background-color: rgba(0, 0, 0, 0.6);
+  z-index: 300;
+}}
 
 .hidden {{
   display: none;

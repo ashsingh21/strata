@@ -6,6 +6,7 @@ mod knob;
 mod lfo_demo;
 mod meter;
 mod mixer;
+mod piano_roll;
 mod pill;
 mod synth;
 mod timeline;
@@ -18,6 +19,7 @@ use vizia::prelude::*;
 
 use app::{AppData, AppEvent};
 use interval_input::state::IntervalInputModel;
+use piano_roll::state::{PianoRollEvent, PianoRollModel};
 use shared::arrangement::position_to_ticks;
 use synth::state::{SynthEvent, SynthModel};
 use timeline::state::{TimelineEvent, TimelineState};
@@ -48,7 +50,14 @@ fn main() -> Result<(), ApplicationError> {
 
         app_data.build(cx);
 
-        let timeline_state = TimelineState::new(record_armed, playing);
+        let piano_roll_model = PianoRollModel::new();
+        let piano_roll_open_clip = piano_roll_model.open_clip;
+        let piano_roll_mode = piano_roll_model.mode;
+        let piano_roll_label_mode = piano_roll_model.label_mode;
+        let piano_roll_selected = piano_roll_model.selected;
+        piano_roll_model.build(cx);
+
+        let timeline_state = TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected);
         let tl_arrangement = timeline_state.arrangement;
         let tl_transform = timeline_state.transform;
         let tl_snap = timeline_state.snap;
@@ -155,6 +164,10 @@ fn main() -> Result<(), ApplicationError> {
                 KeyChord::new(Modifiers::empty(), Code::KeyF),
                 KeymapEntry::new(12u8, |cx| cx.emit(TimelineEvent::ToggleFollow)),
             ),
+            (
+                KeyChord::new(Modifiers::empty(), Code::Escape),
+                KeymapEntry::new(13u8, |cx| cx.emit(PianoRollEvent::Close)),
+            ),
         ])
         .build(cx);
 
@@ -187,6 +200,20 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
             interval_input::interval_input_view(cx, theme, synth_state, interval_key, interval_scale_mask, interval_open);
+
+            piano_roll::piano_roll_view(
+                cx,
+                theme,
+                tl_arrangement,
+                piano_roll_open_clip,
+                piano_roll_mode,
+                piano_roll_label_mode,
+                piano_roll_selected,
+                tl_snap,
+                interval_key,
+                interval_scale_mask,
+                tl_playhead,
+            );
         })
         .class("app")
         .toggle_class("theme-daylight", is_daylight)

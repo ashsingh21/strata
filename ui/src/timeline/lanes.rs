@@ -178,6 +178,16 @@ impl LaneArea {
                     .find(|c| tick >= c.start && tick < c.end());
 
                 if let Some(clip) = hit {
+                    let is_double = self
+                        .last_click
+                        .map(|(t, px, py)| t.elapsed() < DOUBLE_CLICK && (px - lx).abs() < 8.0 && (py - ly).abs() < 8.0)
+                        .unwrap_or(false);
+                    self.last_click = Some((Instant::now(), lx, ly));
+                    if is_double && matches!(clip.content, ClipContent::Midi { .. }) {
+                        cx.emit(crate::piano_roll::state::PianoRollEvent::Open(clip.id));
+                        return;
+                    }
+
                     let start_x = transform.tick_to_x(clip.start) as f32;
                     let end_x = transform.tick_to_x(clip.end()) as f32;
                     let edge = if (lx - start_x).abs() <= EDGE_GRAB_PX {
