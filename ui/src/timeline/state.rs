@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    seed_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
+    empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, MidiNote, PeakPyramid,
     SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
 };
@@ -65,7 +65,7 @@ impl TimelineState {
         piano_roll_selected: Signal<HashSet<(Ticks, u8)>>,
     ) -> Self {
         Self {
-            arrangement: Signal::new(seed_arrangement()),
+            arrangement: Signal::new(empty_arrangement()),
             transform: Signal::new(ViewTransform::default()),
             snap: Signal::new(SnapGrid::Sixteenth),
             selection: Signal::new(Selection::default()),
