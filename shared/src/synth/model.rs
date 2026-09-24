@@ -164,6 +164,11 @@ pub fn seed_synth() -> SynthState {
         lfo1: Lfo { rate_label: "1/8", rate_norm: 0.45, depth: 0.6, sync: true, target: LfoTarget::Cutoff, target_count: 1 },
         lfo2: Lfo { rate_label: "3.2 Hz", rate_norm: 0.3, depth: 0.4, sync: false, target: LfoTarget::Pitch, target_count: 1 },
         output: Output { glide_ms: 40.0, volume_db: -3.0, meter_l: 0.62, meter_r: 0.58 },
-        held_notes: vec![60, 64, 67],
+        // Not a demo chord: a fresh session starting with notes already
+        // held meant they rang immediately with zero interaction, and
+        // (since `held_notes.is_empty()` never went true) silently
+        // blocked the very first step-entry recording until those 3
+        // keys were clicked to release them by hand.
+        held_notes: vec![],
     }
 }

@@ -1,6 +1,8 @@
 //! The keyboard strip: 3 octaves (21 white keys, 15 black), held notes lit
-//! `volt`. There's no MIDI input wired up, so clicking a key toggles its
-//! held state directly - a stand-in for real note-on/off.
+//! `volt`. There's no MIDI input wired up, so this is a stand-in for a
+//! real controller: press-and-hold, same as the computer-keyboard input -
+//! a note sounds only as long as the mouse button stays down on it, not
+//! a click-to-toggle latch.
 
 use vizia::prelude::*;
 use vizia::vg;
@@ -30,45 +32,62 @@ fn black_note_after(white_index: usize) -> Option<u8> {
 pub struct Keyboard {
     state: Signal<SynthState>,
     theme: Signal<ThemeId>,
+    /// The note the mouse button is currently down on, if any - released
+    /// on `MouseUp` regardless of where the cursor ends up, via
+    /// `cx.capture()`, same as the knob's drag handling.
+    pressed: Option<u8>,
 }
 
 impl Keyboard {
     pub fn new(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) -> Handle<'_, Self> {
-        Self { state, theme }
+        Self { state, theme, pressed: None }
             .build(cx, |_| {})
             .bind(state, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
+    }
+
+    /// Hit-tests a local (view-relative) point against the keys, black
+    /// keys first since they sit on top.
+    fn note_at(bounds: BoundingBox, lx: f32, ly: f32) -> Option<u8> {
+        let white_w = bounds.w / WHITE_KEYS as f32;
+
+        if ly < bounds.h * BLACK_HEIGHT_FRAC {
+            for white_index in 0..WHITE_KEYS {
+                if let Some(note) = black_note_after(white_index) {
+                    let center = (white_index + 1) as f32 / WHITE_KEYS as f32 * bounds.w;
+                    let half = BLACK_WIDTH_FRAC * bounds.w * 0.5;
+                    if lx >= center - half && lx <= center + half {
+                        return Some(note);
+                    }
+                }
+            }
+        }
+
+        let white_index = ((lx / white_w) as usize).min(WHITE_KEYS - 1);
+        Some(white_note(white_index))
     }
 }
 
 impl View for Keyboard {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        event.map(|window_event, _| {
-            if let WindowEvent::MouseDown(button) = window_event {
-                if *button == MouseButton::Left {
-                    let bounds = cx.bounds();
-                    let lx = cx.mouse().cursor_x - bounds.x;
-                    let ly = cx.mouse().cursor_y - bounds.y;
-                    let white_w = bounds.w / WHITE_KEYS as f32;
-
-                    // Black keys hit-test first: they sit on top.
-                    if ly < bounds.h * BLACK_HEIGHT_FRAC {
-                        for white_index in 0..WHITE_KEYS {
-                            if let Some(note) = black_note_after(white_index) {
-                                let center = (white_index + 1) as f32 / WHITE_KEYS as f32 * bounds.w;
-                                let half = BLACK_WIDTH_FRAC * bounds.w * 0.5;
-                                if lx >= center - half && lx <= center + half {
-                                    cx.emit(SynthEvent::ToggleKey(note));
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    let white_index = ((lx / white_w) as usize).min(WHITE_KEYS - 1);
-                    cx.emit(SynthEvent::ToggleKey(white_note(white_index)));
+        event.map(|window_event, _| match window_event {
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                let bounds = cx.bounds();
+                let lx = cx.mouse().cursor_x - bounds.x;
+                let ly = cx.mouse().cursor_y - bounds.y;
+                if let Some(note) = Self::note_at(bounds, lx, ly) {
+                    self.pressed = Some(note);
+                    cx.capture();
+                    cx.emit(SynthEvent::KeyPress(note));
                 }
             }
+            WindowEvent::MouseUp(MouseButton::Left) => {
+                if let Some(note) = self.pressed.take() {
+                    cx.release();
+                    cx.emit(SynthEvent::KeyRelease(note));
+                }
+            }
+            _ => {}
         });
     }
 

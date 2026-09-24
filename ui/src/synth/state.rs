@@ -32,8 +32,16 @@ pub enum SynthEvent {
     SetLfo1Target(LfoTarget),
     SetLfo2Target(LfoTarget),
     SetVoiceMode(VoiceMode),
-    /// Mouse click on the on-screen keyboard: on if it wasn't held, off if
-    /// it was.
+    /// Mouse press/release on the on-screen keyboard: press-and-hold, like
+    /// a real key, not a toggle - a note keeps sounding only as long as
+    /// the mouse button stays down on it.
+    KeyPress(u8),
+    KeyRelease(u8),
+    /// Click on an Interval Input pad: toggles the note into/out of the
+    /// held chord. Deliberately different from the keyboard's
+    /// press-and-hold - a mouse can only press one thing at a time, so
+    /// building a multi-note chord one pad at a time needs each click to
+    /// latch, not release the moment the button comes up.
     ToggleKey(u8),
     /// Triggered by the timeline's playback scheduler, not by the player -
     /// sounds a note and updates the on-screen keyboard, but doesn't feed
@@ -190,6 +198,16 @@ impl Model for SynthModel {
             SynthEvent::SetLfo1Target(t) => self.state.update(|s| s.lfo1.target = *t),
             SynthEvent::SetLfo2Target(t) => self.state.update(|s| s.lfo2.target = *t),
             SynthEvent::SetVoiceMode(m) => self.state.update(|s| s.voice_mode = *m),
+            SynthEvent::KeyPress(note) => {
+                if !self.state.get().held_notes.contains(note) {
+                    self.note_on(*note);
+                }
+            }
+            SynthEvent::KeyRelease(note) => {
+                if self.state.get().held_notes.contains(note) {
+                    self.note_off(cx, *note);
+                }
+            }
             SynthEvent::ToggleKey(note) => {
                 if self.state.get().held_notes.contains(note) {
                     self.note_off(cx, *note);
