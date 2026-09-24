@@ -14,9 +14,18 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{Arrangement, Ticks, TrackId, TrackKind};
-use shared::recorder::RecordCommand;
+use shared::recorder::{InputTelemetry, RecordCommand, RecordParams};
 
+use crate::app::{db_to_meter_fraction, gain_to_db, METER_DECAY_DB_PER_SEC, METER_FLOOR_DB};
 use crate::timeline::state::TimelineEvent;
+
+/// Input gain knob's normalized 0..1 position maps linearly to
+/// -24..+24 dB, with 0.5 -> unity.
+const INPUT_GAIN_RANGE_DB: f32 = 24.0;
+
+pub fn input_gain_pos_to_db(pos: f32) -> f32 {
+    (pos.clamp(0.0, 1.0) - 0.5) * 2.0 * INPUT_GAIN_RANGE_DB
+}
 
 /// What's currently being recorded, for the timeline to draw as a
 /// growing clip in progress.
@@ -29,21 +38,28 @@ pub struct RecordingPreview {
 
 pub struct RecorderModel {
     pub preview: Signal<Option<RecordingPreview>>,
+    /// 0..1 meter fill fraction, for the input level meter.
+    pub input_level: Signal<f32>,
+    /// 0..1 knob position; see `input_gain_pos_to_db`.
+    pub input_gain_pos: Signal<f32>,
+    record_params: Arc<RecordParams>,
 }
 
+#[allow(clippy::enum_variant_names)]
 pub enum RecorderModelEvent {
     SetPreview(Option<RecordingPreview>),
+    SetInputLevel(f32),
+    SetInputGain(f32),
 }
 
 impl RecorderModel {
-    pub fn new() -> Self {
-        Self { preview: Signal::new(None) }
-    }
-}
-
-impl Default for RecorderModel {
-    fn default() -> Self {
-        Self::new()
+    pub fn new(record_params: Arc<RecordParams>) -> Self {
+        Self {
+            preview: Signal::new(None),
+            input_level: Signal::new(0.0),
+            input_gain_pos: Signal::new(0.5),
+            record_params,
+        }
     }
 }
 
@@ -51,6 +67,11 @@ impl Model for RecorderModel {
     fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
             RecorderModelEvent::SetPreview(preview) => self.preview.set(*preview),
+            RecorderModelEvent::SetInputLevel(level) => self.input_level.set(*level),
+            RecorderModelEvent::SetInputGain(pos) => {
+                self.input_gain_pos.set(*pos);
+                self.record_params.set_input_gain_db(input_gain_pos_to_db(*pos));
+            }
         });
     }
 }
@@ -77,11 +98,35 @@ struct ActiveRecording {
 pub struct RecordingCoordinator {
     active: Cell<Option<ActiveRecording>>,
     take_counter: Cell<usize>,
+    input_meter_db: Cell<f32>,
 }
 
 impl RecordingCoordinator {
     pub fn new() -> Self {
-        Self { active: Cell::new(None), take_counter: Cell::new(0) }
+        Self { active: Cell::new(None), take_counter: Cell::new(0), input_meter_db: Cell::new(METER_FLOOR_DB) }
+    }
+
+    /// Call once per frame, independent of `advance`: drains the input
+    /// device's peak telemetry (reported continuously, whether or not
+    /// anything's armed, so gain can be staged first) and updates the
+    /// input meter's fill fraction, with the same decay ballistics as
+    /// the master meter in `app.rs`.
+    pub fn drain_input_meter(
+        &self,
+        cx: &mut EventContext,
+        telemetry_rx: &RefCell<rtrb::Consumer<InputTelemetry>>,
+        dt: f32,
+    ) {
+        let mut peak = 0.0f32;
+        while let Ok(InputTelemetry { peak: p }) = telemetry_rx.borrow_mut().pop() {
+            peak = peak.max(p);
+        }
+        let target_db = gain_to_db(peak).max(METER_FLOOR_DB);
+        let decay = METER_DECAY_DB_PER_SEC * dt;
+        let db = self.input_meter_db.get();
+        let db = if target_db > db { target_db } else { (db - decay).max(target_db) };
+        self.input_meter_db.set(db);
+        cx.emit(RecorderModelEvent::SetInputLevel(db_to_meter_fraction(db)));
     }
 
     /// Call once per frame. `command_tx` sends Start/Stop to the engine's

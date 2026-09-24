@@ -98,6 +98,7 @@ pub fn start(
     decoded_sources: rtrb::Consumer<DecodedSource>,
     record_commands: rtrb::Consumer<RecordCommand>,
     input_telemetry: rtrb::Producer<shared::recorder::InputTelemetry>,
+    record_params: Arc<shared::recorder::RecordParams>,
 ) -> Result<EngineHandle, EngineError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or(EngineError::NoOutputDevice)?;
@@ -146,7 +147,7 @@ pub fn start(
     stream.play()?;
 
     let (capture_tx, capture_rx) = rtrb::RingBuffer::<f32>::new(CAPTURE_CAPACITY);
-    let input_stream = match input::start(sample_rate, capture_tx, input_telemetry) {
+    let input_stream = match input::start(sample_rate, capture_tx, input_telemetry, record_params) {
         Some((stream, input_sample_rate)) => {
             spawn_writer_thread(capture_rx, record_commands, input_sample_rate);
             Some(stream)

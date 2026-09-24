@@ -7,9 +7,15 @@
 //! the rest of the app fine, so failures here are logged and degrade to
 //! "recording disabled", never a hard error.
 
+use std::sync::Arc;
+
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Error as CpalError, FromSample, InputCallbackInfo, Sample, SampleFormat, SizedSample, StreamConfig};
-use shared::recorder::InputTelemetry;
+use shared::recorder::{InputTelemetry, RecordParams};
+
+fn db_to_gain(db: f32) -> f32 {
+    10f32.powf(db / 20.0)
+}
 
 /// Opens the default input device, preferring `desired_sample_rate` (the
 /// engine's own output rate) when the device supports it so a freshly
@@ -21,6 +27,7 @@ pub fn start(
     desired_sample_rate: u32,
     capture_tx: rtrb::Producer<f32>,
     telemetry: rtrb::Producer<InputTelemetry>,
+    record_params: Arc<RecordParams>,
 ) -> Option<(cpal::Stream, u32)> {
     let host = cpal::default_host();
     let device = host.default_input_device().or_else(|| {
@@ -40,9 +47,15 @@ pub fn start(
     let stream_config: StreamConfig = config.into();
 
     let stream = match sample_format {
-        SampleFormat::F32 => build_input_stream::<f32>(&device, stream_config, channels, capture_tx, telemetry),
-        SampleFormat::I16 => build_input_stream::<i16>(&device, stream_config, channels, capture_tx, telemetry),
-        SampleFormat::U16 => build_input_stream::<u16>(&device, stream_config, channels, capture_tx, telemetry),
+        SampleFormat::F32 => {
+            build_input_stream::<f32>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+        }
+        SampleFormat::I16 => {
+            build_input_stream::<i16>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+        }
+        SampleFormat::U16 => {
+            build_input_stream::<u16>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+        }
         other => {
             eprintln!("input: unsupported sample format {other}; recording disabled");
             return None;
@@ -84,6 +97,7 @@ fn build_input_stream<T>(
     channels: usize,
     mut capture_tx: rtrb::Producer<f32>,
     mut telemetry: rtrb::Producer<InputTelemetry>,
+    record_params: Arc<RecordParams>,
 ) -> Result<cpal::Stream, CpalError>
 where
     T: SizedSample,
@@ -95,10 +109,11 @@ where
     device.build_input_stream(
         config,
         move |data: &[T], _info: &InputCallbackInfo| {
+            let gain = db_to_gain(record_params.input_gain_db());
             let mut peak = 0.0f32;
             for frame in data.chunks(channels) {
                 let sum: f32 = frame.iter().map(|&s| f32::from_sample(s)).sum();
-                let mono = sum / frame.len() as f32;
+                let mono = (sum / frame.len() as f32) * gain;
                 peak = peak.max(mono.abs());
                 let _ = capture_tx.push(mono);
             }

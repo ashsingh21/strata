@@ -31,6 +31,7 @@ fn main() -> Result<(), ApplicationError> {
     let synth_bridge = shared::synth::synth_bridge();
     let playback_bridge = shared::playback::playback_bridge();
     let recorder_bridge = shared::recorder::recorder_bridge();
+    let record_params = std::sync::Arc::new(shared::recorder::RecordParams::new());
     let engine_handle = engine::start(
         params.clone(),
         telemetry_tx,
@@ -41,14 +42,14 @@ fn main() -> Result<(), ApplicationError> {
         playback_bridge.decode_rx,
         recorder_bridge.command_rx,
         recorder_bridge.telemetry_tx,
+        record_params.clone(),
     )
     .expect("failed to start audio engine");
     let engine_sample_rate = engine_handle.sample_rate;
     let playback_plan_tx = std::cell::RefCell::new(playback_bridge.plan_tx);
     let playback_decode_tx = playback_bridge.decode_tx;
     let record_command_tx = std::cell::RefCell::new(recorder_bridge.command_tx);
-    // Held for Phase 5's input meter, not consumed yet.
-    let _input_telemetry_rx = recorder_bridge.telemetry_rx;
+    let input_telemetry_rx = std::cell::RefCell::new(recorder_bridge.telemetry_rx);
 
     Application::new(move |cx| {
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");
@@ -96,8 +97,10 @@ fn main() -> Result<(), ApplicationError> {
 
         timeline_state.build(cx);
 
-        let recorder_model = RecorderModel::new();
+        let recorder_model = RecorderModel::new(record_params.clone());
         let recording_preview = recorder_model.preview;
+        let input_level = recorder_model.input_level;
+        let input_gain_pos = recorder_model.input_gain_pos;
         recorder_model.build(cx);
 
         let synth_model = SynthModel::new(synth_bridge.params_tx, synth_bridge.note_tx, synth_bridge.telemetry_rx);
@@ -149,6 +152,7 @@ fn main() -> Result<(), ApplicationError> {
                     &record_command_tx,
                     &decode_request_tx,
                 );
+                recording_coordinator.drain_input_meter(cx, &input_telemetry_rx, dt);
             }
         });
         cx.start_timer(render_timer);
@@ -216,7 +220,18 @@ fn main() -> Result<(), ApplicationError> {
         .build(cx);
 
         VStack::new(cx, move |cx| {
-            transport::transport_bar(cx, playing, loop_on, record_armed, click_on, position, interval_open);
+            transport::transport_bar(
+                cx,
+                playing,
+                loop_on,
+                record_armed,
+                click_on,
+                position,
+                interval_open,
+                input_level,
+                input_gain_pos,
+                theme,
+            );
 
             timeline::timeline_view(
                 cx,

@@ -11,6 +11,35 @@
 //! rather than needing the engine to report it.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// UI -> engine input gain, applied in `input`'s capture callback before
+/// samples hit the ring buffer - plain atomics shared via `Arc`, same
+/// style as `Params` in `lib.rs`, so gain can be staged in real time
+/// without going through a ring buffer.
+pub struct RecordParams {
+    input_gain_db: AtomicU32,
+}
+
+impl RecordParams {
+    pub fn new() -> Self {
+        Self { input_gain_db: AtomicU32::new(0.0f32.to_bits()) }
+    }
+
+    pub fn set_input_gain_db(&self, db: f32) {
+        self.input_gain_db.store(db.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn input_gain_db(&self) -> f32 {
+        f32::from_bits(self.input_gain_db.load(Ordering::Relaxed))
+    }
+}
+
+impl Default for RecordParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Sent UI -> engine's input writer thread. Ordered - every command
 /// matters, unlike the "latest wins" control snapshots elsewhere.

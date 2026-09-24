@@ -14,10 +14,12 @@ use shared::{Params, Position, Telemetry};
 use crate::meter::HOT_THRESHOLD;
 use crate::tokens::ThemeId;
 
-/// -60 dBFS floor for the meter's dB-to-fraction mapping.
-const METER_FLOOR_DB: f32 = -60.0;
+/// -60 dBFS floor for the meter's dB-to-fraction mapping. `pub(crate)`
+/// alongside the two helpers below: reused by `recorder`'s input meter
+/// ballistics rather than duplicating this mapping.
+pub(crate) const METER_FLOOR_DB: f32 = -60.0;
 /// Release rate for meter ballistics.
-const METER_DECAY_DB_PER_SEC: f32 = 20.0;
+pub(crate) const METER_DECAY_DB_PER_SEC: f32 = 20.0;
 /// Linear amplitude above which the clip LED latches (~-0.3 dBFS).
 const CLIP_THRESHOLD: f32 = 0.965;
 /// LFO rate for the Cutoff demo knob's modulation ring.
@@ -131,11 +133,11 @@ pub fn fader_to_gain(position: f32) -> f32 {
     10f32.powf(db / 20.0)
 }
 
-fn gain_to_db(gain: f32) -> f32 {
+pub(crate) fn gain_to_db(gain: f32) -> f32 {
     if gain <= 0.0001 { -100.0 } else { 20.0 * gain.log10() }
 }
 
-fn db_to_meter_fraction(db: f32) -> f32 {
+pub(crate) fn db_to_meter_fraction(db: f32) -> f32 {
     ((db - METER_FLOOR_DB) / -METER_FLOOR_DB).clamp(0.0, 1.0)
 }
 
