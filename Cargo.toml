@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["engine", "shared", "ui"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.85"
+
+[profile.release]
+lto = true
+codegen-units = 1
