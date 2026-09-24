@@ -110,12 +110,18 @@ impl LaneArea {
         theme: Signal<ThemeId>,
         recording_preview: Signal<Option<RecordingPreview>>,
     ) -> Handle<'_, Self> {
+        // Deliberately not bound to `playhead`: it changes every frame
+        // during playback, and redrawing every clip/waveform/grid line
+        // just to move a 1px line was the actual cause of the jittery
+        // playhead - see `PlayheadOverlay`, which now owns that line and
+        // is the only thing that redraws at playback rate. `self.playhead`
+        // stays a field only for the dead `clip.recording` chase-length
+        // branch above, which nothing currently triggers.
         Self { arrangement, transform, selection, playhead, theme, recording_preview, drag: None, last_click: None }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(transform, |mut h| h.needs_redraw())
             .bind(selection, |mut h| h.needs_redraw())
-            .bind(playhead, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
             .bind(recording_preview, |mut h| h.needs_redraw())
     }
@@ -654,17 +660,8 @@ impl LaneArea {
             }
         }
 
-        // Playhead, spanning the full lane area.
-        let playhead_x = bounds.x + transform.tick_to_x(self.playhead.get()) as f32;
-        if playhead_x >= bounds.x && playhead_x <= bounds.x + bounds.w {
-            let mut ph_paint = vg::Paint::default();
-            ph_paint.set_color(palette.playhead);
-            ph_paint.set_anti_alias(true);
-            canvas.draw_path(
-                &vg::Path::rect(vg::Rect::new(playhead_x, bounds.y, playhead_x + 1.0, bounds.y + bounds.h), None),
-                &ph_paint,
-            );
-        }
+        // The playhead itself is drawn by `PlayheadOverlay`, a separate
+        // view stacked on top - see its doc comment for why.
 
         if let Some((anchor, current)) = rubber_band {
             let x0 = bounds.x + anchor.0.min(current.0);
@@ -891,4 +888,52 @@ fn live_breakpoint(drag: &Option<Drag>, lane_id: AutomationLaneId, bp: &Breakpoi
         }
     }
     (bp.tick, bp.value)
+}
+
+/// Just the playhead line, stacked on top of `LaneArea` instead of drawn
+/// as part of it. During playback the playhead moves every frame; when
+/// it lived inside `LaneArea`'s own draw, that meant redrawing every
+/// clip, every waveform and the whole grid 60 times a second just to
+/// move a 1px line - the actual cause of the jittery playhead. This view
+/// is bound to nothing but `transform`/`playhead`/`theme`, so it's the
+/// only thing that pays the playback-rate redraw cost. `pointer_events`
+/// is off so clicks pass straight through to `LaneArea` underneath.
+pub struct PlayheadOverlay {
+    transform: Signal<ViewTransform>,
+    playhead: Signal<Ticks>,
+    theme: Signal<ThemeId>,
+}
+
+impl PlayheadOverlay {
+    pub fn new(
+        cx: &mut Context,
+        transform: Signal<ViewTransform>,
+        playhead: Signal<Ticks>,
+        theme: Signal<ThemeId>,
+    ) -> Handle<'_, Self> {
+        Self { transform, playhead, theme }
+            .build(cx, |_| {})
+            .bind(transform, |mut h| h.needs_redraw())
+            .bind(playhead, |mut h| h.needs_redraw())
+            .bind(theme, |mut h| h.needs_redraw())
+            .pointer_events(PointerEvents::None)
+    }
+}
+
+impl View for PlayheadOverlay {
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let bounds = cx.bounds();
+        let palette = self.theme.get().palette();
+        let transform = self.transform.get();
+        let playhead_x = bounds.x + transform.tick_to_x(self.playhead.get()) as f32;
+        if playhead_x >= bounds.x && playhead_x <= bounds.x + bounds.w {
+            let mut paint = vg::Paint::default();
+            paint.set_color(palette.playhead);
+            paint.set_anti_alias(true);
+            canvas.draw_path(
+                &vg::Path::rect(vg::Rect::new(playhead_x, bounds.y, playhead_x + 1.0, bounds.y + bounds.h), None),
+                &paint,
+            );
+        }
+    }
 }

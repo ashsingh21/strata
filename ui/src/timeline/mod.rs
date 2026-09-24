@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use vizia::prelude::*;
 
 use header::{automation_header, track_header};
-use lanes::LaneArea;
+use lanes::{LaneArea, PlayheadOverlay};
 use ruler::Ruler;
 use shared::arrangement::{Arrangement, SnapGrid, Ticks};
 use state::TimelineEvent;
@@ -116,9 +116,23 @@ pub fn timeline_view(
                 .height(Pixels(tokens::SIZE_RULER))
                 .width(Stretch(1.0));
 
-            LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview)
-                .height(Stretch(1.0))
-                .width(Stretch(1.0));
+            // PlayheadOverlay stacked on LaneArea rather than drawn as
+            // part of it, so moving the playhead during playback doesn't
+            // force a full redraw of every clip/waveform/grid line every
+            // frame - see PlayheadOverlay's own doc comment.
+            ZStack::new(cx, move |cx| {
+                LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview)
+                    .position_type(PositionType::Absolute)
+                    .height(Stretch(1.0))
+                    .width(Stretch(1.0));
+
+                PlayheadOverlay::new(cx, transform, playhead, theme)
+                    .position_type(PositionType::Absolute)
+                    .height(Stretch(1.0))
+                    .width(Stretch(1.0));
+            })
+            .height(Stretch(1.0))
+            .width(Stretch(1.0));
         })
         .width(Stretch(1.0))
         .height(Stretch(1.0));
