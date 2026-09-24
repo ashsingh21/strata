@@ -129,14 +129,14 @@ selection, move/trim/split/duplicate/delete), loop-range dragging,
 Ctrl/Cmd+scroll zoom, snap cycling, and playhead display driven by the
 existing engine bridge.
 
-Deferred (out of scope for this milestone by explicit agreement):
+Since then, MIDI clip playback and step-entry recording have been added
+(see "Carve <-> timeline" below) - the two items below are what's still
+deferred:
 
-- **The engine doesn't play the arrangement's clips.** The playhead shown
-  in the timeline is the existing single-test-tone transport's position,
-  converted through the tempo map (`position_to_ticks`); there's no
-  `arc-swap`'d arrangement snapshot on the audio thread yet, so dragging a
-  clip or pressing Play doesn't produce clip audio. Recording clips (`Take
-  3`) are seeded as static, not driven by a live input.
+- **Audio clips still don't play.** MIDI clips do (see below), but the
+  Drums/Lead tracks' `.wav`-backed clips are still silent during
+  playback - there's no sample-playback engine yet, only the peak-pyramid
+  visualization. Recording clips (`Take 3`) are still seeded as static.
 - **No `--stress` flag / formal 60fps-at-200-bars validation.** The
   renderer already does visible-range culling (the mechanism a stress test
   would exercise), but there's no generated stress arrangement or
@@ -149,6 +149,43 @@ Deferred (out of scope for this milestone by explicit agreement):
   per-track `height` field exists in the model but isn't user-adjustable.
 - Multi-clip drag preserves each clip's original track (time-shift only);
   only a single selected clip can be dragged to a different track.
+
+## Carve (the synth) and its bridge to the timeline
+
+Carve is a real polyphonic subtractive synth (`engine::synth`), not a mock:
+2 oscillators (sync/FM), sub + noise, a state-variable filter (12/24 dB,
+LP/BP/HP), per-voice filter+amp ADSR, 2 LFOs each patchable to Cutoff or
+Pitch, mono legato/glide or poly voice-stealing. `shared::synth::bridge`
+carries a `SynthParams` snapshot UI -> engine once per frame (latest wins,
+same pattern as the transport's gain/pan) and an ordered `NoteEvent`
+ring buffer for note on/off; `SynthTelemetry` reports Carve's own peak
+level back for its Output meter.
+
+**Playing it**: click the on-screen keyboard, or use the computer
+keyboard - `Z X C V B N M , . /` are white keys, `S D G H J L ;` are the
+black keys between them, `+`/`-` shift the whole row by an octave (shown
+as the "Oct" readout). There's one Carve instance for the whole song, not
+one per track.
+
+**Timeline playback** (`ui/src/timeline/scheduler.rs`): every frame,
+`MidiScheduler` looks at what tick range the playhead just crossed
+(`shared::arrangement::notes_in_range`, which also respects track
+mute/solo) and fires the matching note on/off through Carve - so playing
+the arrangement actually sounds the Bass/Pad MIDI tracks. It's polling-
+resolution (~16ms), not sample-accurate; fine for now since nothing else
+in the timeline is sample-accurate yet either. It reference-counts
+overlapping same-pitch notes so one clip's note ending doesn't cut off
+another clip's still-sounding one of the same pitch.
+
+**Step-entry recording** (`shared::arrangement::step_entry` +
+`TimelineState::commit_step`): press the transport's Record button to arm
+it, arm a MIDI track, and stop the transport. Playing a note (or holding
+several for a chord) on Carve and releasing every key commits that chord
+as one 16th-note step at the playhead on the armed track, then advances
+the playhead by a step; `Space` commits a rest (advances with no note).
+Each step either extends the clip currently being built (if it directly
+abuts the playhead) or starts a new one - `step_entry_commit` is a pure
+function, unit tested independently of the UI.
 
 ## Known cosmetic quirk
 
@@ -169,6 +206,10 @@ first click.
 | `Ctrl/Cmd+D` | Duplicate selection (placed right after it) |
 | `Delete` / `Backspace` | Delete selected clips |
 | `F` | Toggle Follow |
+| `Z X C V B N M , . /` | Play Carve (white keys) |
+| `S D G H J L ;` | Play Carve (black keys) |
+| `+` / `-` | Shift Carve's computer-keyboard octave |
+| `Space` | Step-entry rest (while armed and stopped) |
 
 Mouse: click a clip to select (Shift extends); drag a clip body to move it
 (vertically too, for a single selection); drag within 6px of an edge to
@@ -183,7 +224,7 @@ vertically.
 ## Verifying it
 
 ```
-cargo test --workspace     # 29 tests: time/transform/commands/peaks
+cargo test --workspace     # 48 tests: time/transform/commands/peaks/schedule/step_entry/synth curves
 cargo clippy --workspace --all-targets   # clean
 cargo run -p ui
 ```

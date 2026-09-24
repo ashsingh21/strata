@@ -5,6 +5,7 @@ pub mod header;
 pub mod lanes;
 pub mod peaks_loader;
 pub mod ruler;
+pub mod scheduler;
 pub mod state;
 
 use std::path::PathBuf;

@@ -46,7 +46,7 @@ fn main() -> Result<(), ApplicationError> {
 
         app_data.build(cx);
 
-        let timeline_state = TimelineState::new();
+        let timeline_state = TimelineState::new(record_armed, playing);
         let tl_arrangement = timeline_state.arrangement;
         let tl_transform = timeline_state.transform;
         let tl_snap = timeline_state.snap;
@@ -71,9 +71,11 @@ fn main() -> Result<(), ApplicationError> {
         synth_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
-        // the LFO demo's and synth's animated modulation rings/scope, and
-        // syncs the timeline playhead from the transport's live position.
+        // the LFO demo's and synth's animated modulation rings/scope, syncs
+        // the timeline playhead from the transport's live position, and
+        // schedules Carve to play whatever MIDI notes the playhead crossed.
         let last_tick = std::cell::Cell::new(Instant::now());
+        let midi_scheduler = timeline::scheduler::MidiScheduler::new();
         let render_timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
             if let TimerAction::Tick(_) = action {
                 let now = Instant::now();
@@ -82,7 +84,9 @@ fn main() -> Result<(), ApplicationError> {
 
                 cx.emit(AppEvent::Tick);
                 let ticks = position_to_ticks(position.get());
-                cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: playing.get() });
+                let is_playing = playing.get();
+                cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: is_playing });
+                midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing);
                 cx.emit(SynthEvent::Tick(dt));
             }
         });

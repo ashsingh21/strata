@@ -22,6 +22,8 @@ pub enum Command {
     InsertClip { clip: Box<Clip> },
     DeleteClip { clip: ClipId },
     DuplicateClip { clip: ClipId, new_id: ClipId, offset: Ticks },
+    AddMidiNote { clip: ClipId, note: MidiNote },
+    RemoveMidiNote { clip: ClipId, start: Ticks, pitch: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
@@ -33,8 +35,12 @@ impl Command {
     pub fn apply(self, arr: &mut Arrangement) -> Command {
         match self {
             Command::Batch(cmds) => {
-                let inverses =
-                    cmds.into_iter().map(|c| c.apply(arr)).rev().collect::<Vec<_>>();
+                // Applied in the given order (later commands may depend on
+                // earlier ones, e.g. referencing a clip an earlier InsertClip
+                // just created) - only the returned inverse list is
+                // reversed, so undo replays them back-to-front.
+                let mut inverses: Vec<Command> = cmds.into_iter().map(|c| c.apply(arr)).collect();
+                inverses.reverse();
                 Command::Batch(inverses)
             }
 
@@ -152,6 +158,29 @@ impl Command {
                 copy.recording = false;
                 arr.clips.push(copy);
                 Command::DeleteClip { clip: new_id }
+            }
+
+            Command::AddMidiNote { clip: clip_id, note } => {
+                let clip = arr.clip_mut(clip_id).expect("AddMidiNote: unknown clip");
+                match &mut clip.content {
+                    ClipContent::Midi { notes } => notes.push(note),
+                    ClipContent::Audio { .. } => panic!("AddMidiNote: clip is not a MIDI clip"),
+                }
+                Command::RemoveMidiNote { clip: clip_id, start: note.start, pitch: note.pitch }
+            }
+
+            Command::RemoveMidiNote { clip: clip_id, start, pitch } => {
+                let clip = arr.clip_mut(clip_id).expect("RemoveMidiNote: unknown clip");
+                let notes = match &mut clip.content {
+                    ClipContent::Midi { notes } => notes,
+                    ClipContent::Audio { .. } => panic!("RemoveMidiNote: clip is not a MIDI clip"),
+                };
+                let index = notes
+                    .iter()
+                    .position(|n| n.start == start && n.pitch == pitch)
+                    .expect("RemoveMidiNote: no matching note");
+                let removed = notes.remove(index);
+                Command::AddMidiNote { clip: clip_id, note: removed }
             }
 
             Command::AddBreakpoint { lane, point } => {
@@ -388,6 +417,38 @@ mod tests {
         assert_eq!(arr.automation_lane(1).unwrap().breakpoints.len(), 1);
         assert!(stack.undo(&mut arr));
         assert_eq!(arr.automation_lane(1).unwrap().breakpoints.len(), 0);
+    }
+
+    #[test]
+    fn add_midi_note_then_undo_removes_it() {
+        let mut arr = test_arrangement();
+        let clip_id = 1;
+        arr.clips.push(Clip {
+            id: clip_id,
+            track: 1,
+            start: 0,
+            length: PPQ * 4,
+            name: "Step".into(),
+            content: ClipContent::Midi { notes: vec![] },
+            recording: false,
+        });
+        let mut stack = CommandStack::new();
+
+        stack.do_command(
+            Command::AddMidiNote { clip: clip_id, note: MidiNote { start: 0, length: PPQ / 4, pitch: 60 } },
+            &mut arr,
+        );
+        let ClipContent::Midi { notes } = &arr.clip(clip_id).unwrap().content else { panic!() };
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].pitch, 60);
+
+        assert!(stack.undo(&mut arr));
+        let ClipContent::Midi { notes } = &arr.clip(clip_id).unwrap().content else { panic!() };
+        assert!(notes.is_empty());
+
+        assert!(stack.redo(&mut arr));
+        let ClipContent::Midi { notes } = &arr.clip(clip_id).unwrap().content else { panic!() };
+        assert_eq!(notes.len(), 1);
     }
 
     #[test]

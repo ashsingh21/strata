@@ -9,8 +9,9 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    seed_arrangement, snap, Arrangement, AutomationLaneId, Breakpoint, ClipContent, ClipId,
-    Command, CommandStack, LoopRange, PeakPyramid, SnapGrid, Ticks, TrackId, ViewTransform,
+    seed_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint,
+    ClipContent, ClipId, Command, CommandStack, LoopRange, PeakPyramid, SnapGrid, Ticks, TrackId,
+    TrackKind, ViewTransform, PPQ,
 };
 
 /// The lane area's viewport width isn't known to the model (Vizia only
@@ -27,6 +28,9 @@ pub struct Selection {
     pub breakpoint: Option<(AutomationLaneId, Ticks)>,
 }
 
+/// One 16th note at 4/4 - the step-entry recorder's fixed grid.
+const STEP_TICKS: Ticks = PPQ / 4;
+
 pub struct TimelineState {
     pub arrangement: Signal<Arrangement>,
     pub transform: Signal<ViewTransform>,
@@ -35,10 +39,19 @@ pub struct TimelineState {
     pub follow: Signal<bool>,
     pub playhead_ticks: Signal<Ticks>,
     command_stack: CommandStack,
+
+    // Step-entry recording (not reactive): armed via the transport's
+    // record toggle, targets whichever MIDI track is armed, active only
+    // while the transport is stopped.
+    record_armed: Signal<bool>,
+    playing: Signal<bool>,
+    /// The clip currently being extended, if the next committed step
+    /// lands right at its end.
+    step_entry_clip: Option<ClipId>,
 }
 
 impl TimelineState {
-    pub fn new() -> Self {
+    pub fn new(record_armed: Signal<bool>, playing: Signal<bool>) -> Self {
         Self {
             arrangement: Signal::new(seed_arrangement()),
             transform: Signal::new(ViewTransform::default()),
@@ -47,6 +60,9 @@ impl TimelineState {
             follow: Signal::new(true),
             playhead_ticks: Signal::new(0),
             command_stack: CommandStack::new(),
+            record_armed,
+            playing,
+            step_entry_clip: None,
         }
     }
 
@@ -59,11 +75,37 @@ impl TimelineState {
     fn do_command(&mut self, command: Command) {
         self.with_arrangement(|arr, stack| stack.do_command(command, arr));
     }
-}
 
-impl Default for TimelineState {
-    fn default() -> Self {
-        Self::new()
+    /// Commits one step-entry step: zero or more simultaneous `pitches` at
+    /// the playhead on the armed MIDI track, each one step (a 16th note)
+    /// long, then advances the playhead by one step. A no-op unless
+    /// record is armed, the transport is stopped, and some MIDI track is
+    /// armed.
+    fn commit_step(&mut self, pitches: &HashSet<u8>) {
+        if !self.record_armed.get() || self.playing.get() {
+            return;
+        }
+        let track_id = {
+            let arr = self.arrangement.get();
+            arr.tracks.iter().find(|t| t.arm && t.kind == TrackKind::Midi).map(|t| t.id)
+        };
+        let Some(track_id) = track_id else { return };
+
+        let playhead = self.playhead_ticks.get();
+        let reuse_id = self.step_entry_clip;
+        let pitches: Vec<u8> = pitches.iter().copied().collect();
+        let mut committed_clip = None;
+
+        self.with_arrangement(|arr, stack| {
+            let next_new_id = arr.alloc_id();
+            let (command, clip_id) =
+                step_entry_commit(arr, track_id, playhead, STEP_TICKS, reuse_id, next_new_id, &pitches);
+            stack.do_command(command, arr);
+            committed_clip = Some(clip_id);
+        });
+
+        self.step_entry_clip = committed_clip;
+        self.playhead_ticks.set(playhead + STEP_TICKS);
     }
 }
 
@@ -103,6 +145,11 @@ pub enum TimelineEvent {
     SyncPlayhead { ticks: Ticks, playing: bool },
 
     PeaksLoaded { source: Arc<str>, peaks: Arc<PeakPyramid> },
+
+    /// Emitted by Carve whenever every held note comes back up (or a rest
+    /// is played via Space): commits `pitches` (possibly empty, for a
+    /// rest) as one step of a step-entry recording.
+    CommitStepChord(HashSet<u8>),
 }
 
 impl Model for TimelineState {
@@ -289,6 +336,9 @@ impl Model for TimelineState {
                         });
                     }
                 }
+            }
+            TimelineEvent::CommitStepChord(pitches) => {
+                self.commit_step(pitches);
             }
             TimelineEvent::PeaksLoaded { source, peaks } => {
                 self.with_arrangement(|arr, _| {

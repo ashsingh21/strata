@@ -11,13 +11,15 @@
 //! the on-screen keyboard, or a mapped computer-keyboard key) go straight
 //! through as they happen.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use vizia::prelude::*;
 
 use shared::synth::{
     seed_synth, FilterType, LfoTarget, NoteEvent, SynthParams, SynthState, SynthTelemetry, VoiceMode, Waveform,
 };
+
+use crate::timeline::state::TimelineEvent;
 
 pub enum SynthEvent {
     Update(Box<dyn Fn(&mut SynthState) + Send>),
@@ -33,6 +35,11 @@ pub enum SynthEvent {
     /// Mouse click on the on-screen keyboard: on if it wasn't held, off if
     /// it was.
     ToggleKey(u8),
+    /// Triggered by the timeline's playback scheduler, not by the player -
+    /// sounds a note and updates the on-screen keyboard, but doesn't feed
+    /// step-entry recording.
+    NoteOn(u8),
+    NoteOff(u8),
     ToggleHelp,
     /// Advances the LFO scope's animated phase, pushes the latest params
     /// snapshot to the engine and drains its peak meter; `dt` in seconds.
@@ -102,6 +109,11 @@ pub struct SynthModel {
     /// so a mid-hold octave shift doesn't change an already-sounding note,
     /// and OS key-repeat doesn't retrigger it.
     held_computer_keys: HashMap<Code, u8>,
+    /// Pitches played since the last time every key came back up - the
+    /// chord that gets committed to a step-entry recording, if one's
+    /// running, on full release.
+    step_record_pitches: HashSet<u8>,
+    space_held: bool,
 }
 
 impl SynthModel {
@@ -123,10 +135,14 @@ impl SynthModel {
             meter_db_l: METER_FLOOR_DB,
             meter_db_r: METER_FLOOR_DB,
             held_computer_keys: HashMap::new(),
+            step_record_pitches: HashSet::new(),
+            space_held: false,
         }
     }
 
-    fn note_on(&mut self, note: u8) {
+    /// Sounds a note and updates the on-screen keyboard - shared by both
+    /// player-triggered notes and the playback scheduler.
+    fn sound_on(&mut self, note: u8) {
         self.state.update(|s| {
             if !s.held_notes.contains(&note) {
                 s.held_notes.push(note);
@@ -135,9 +151,27 @@ impl SynthModel {
         let _ = self.note_tx.push(NoteEvent { note, on: true });
     }
 
-    fn note_off(&mut self, note: u8) {
+    fn sound_off(&mut self, note: u8) {
         self.state.update(|s| s.held_notes.retain(|n| *n != note));
         let _ = self.note_tx.push(NoteEvent { note, on: false });
+    }
+
+    /// A note the player actually pressed (mouse or computer keyboard):
+    /// sounds it and marks it as part of the in-progress step-entry chord.
+    fn note_on(&mut self, note: u8) {
+        self.sound_on(note);
+        self.step_record_pitches.insert(note);
+    }
+
+    /// The player-pressed counterpart to `note_on`: once every held note
+    /// is back up, commits whatever chord was played to the timeline's
+    /// step-entry recorder (a no-op there unless it's actually armed).
+    fn note_off(&mut self, cx: &mut EventContext, note: u8) {
+        self.sound_off(note);
+        if self.state.get().held_notes.is_empty() && !self.step_record_pitches.is_empty() {
+            let pitches = std::mem::take(&mut self.step_record_pitches);
+            cx.emit(TimelineEvent::CommitStepChord(pitches));
+        }
     }
 }
 
@@ -158,11 +192,13 @@ impl Model for SynthModel {
             SynthEvent::SetVoiceMode(m) => self.state.update(|s| s.voice_mode = *m),
             SynthEvent::ToggleKey(note) => {
                 if self.state.get().held_notes.contains(note) {
-                    self.note_off(*note);
+                    self.note_off(cx, *note);
                 } else {
                     self.note_on(*note);
                 }
             }
+            SynthEvent::NoteOn(note) => self.sound_on(*note),
+            SynthEvent::NoteOff(note) => self.sound_off(*note),
             SynthEvent::ToggleHelp => self.help_open.update(|v| *v = !*v),
             SynthEvent::Tick(dt) => {
                 self.lfo_scope_phase.update(|p| {
@@ -196,6 +232,14 @@ impl Model for SynthModel {
                 Code::Minus => {
                     self.octave_shift.update(|o| *o = (*o - 1).max(-MAX_OCTAVE_SHIFT));
                 }
+                Code::Space => {
+                    if !self.space_held {
+                        self.space_held = true;
+                        // A rest: advances a running step-entry recording by
+                        // one step with no note. No-op if nothing's armed.
+                        cx.emit(TimelineEvent::CommitStepChord(HashSet::new()));
+                    }
+                }
                 _ => {
                     if let Some(offset) = key_semitone_offset(*code) {
                         if !self.held_computer_keys.contains_key(code) {
@@ -208,8 +252,11 @@ impl Model for SynthModel {
                 }
             },
             WindowEvent::KeyUp(code, _) => {
+                if *code == Code::Space {
+                    self.space_held = false;
+                }
                 if let Some(note) = self.held_computer_keys.remove(code) {
-                    self.note_off(note);
+                    self.note_off(cx, note);
                 }
             }
             _ => {}

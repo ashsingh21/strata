@@ -6,7 +6,9 @@
 pub mod commands;
 pub mod model;
 pub mod peaks;
+pub mod schedule;
 pub mod seed;
+pub mod step_entry;
 pub mod time;
 pub mod transform;
 
@@ -16,6 +18,8 @@ pub use model::{
     ClipId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind,
 };
 pub use peaks::{PeakLevel, PeakPyramid};
+pub use schedule::{notes_in_range, ScheduledNotes};
 pub use seed::seed_arrangement;
+pub use step_entry::step_entry_commit;
 pub use time::{position_to_ticks, TempoEvent, TempoMap, TimeSignature, Ticks, PPQ};
 pub use transform::{snap, SnapGrid, ViewTransform, MAX_PIXELS_PER_BEAT, MIN_PIXELS_PER_BEAT};
