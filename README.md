@@ -182,7 +182,10 @@ another clip's still-sounding one of the same pitch.
 it, arm a MIDI track, and stop the transport. Playing a note (or holding
 several for a chord) on Carve and releasing every key commits that chord
 as one 16th-note step at the playhead on the armed track, then advances
-the playhead by a step; `Space` commits a rest (advances with no note).
+the playhead by a step; `` ` `` (backquote) commits a rest (advances with
+no note) - not Space, since Vizia's buttons treat Space as "activate the
+focused button" and a rest would otherwise risk re-triggering whatever
+button last had focus.
 Each step either extends the clip currently being built (if it directly
 abuts the playhead) or starts a new one - `step_entry_commit` is a pure
 function, unit tested independently of the UI.
@@ -209,7 +212,7 @@ first click.
 | `Z X C V B N M , . /` | Play Carve (white keys) |
 | `S D G H J L ;` | Play Carve (black keys) |
 | `+` / `-` | Shift Carve's computer-keyboard octave |
-| `Space` | Step-entry rest (while armed and stopped) |
+| `` ` `` | Step-entry rest (while armed and stopped) |
 
 Mouse: click a clip to select (Shift extends); drag a clip body to move it
 (vertically too, for a single selection); drag within 6px of an edge to

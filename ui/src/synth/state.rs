@@ -113,7 +113,7 @@ pub struct SynthModel {
     /// chord that gets committed to a step-entry recording, if one's
     /// running, on full release.
     step_record_pitches: HashSet<u8>,
-    space_held: bool,
+    rest_held: bool,
 }
 
 impl SynthModel {
@@ -136,7 +136,7 @@ impl SynthModel {
             meter_db_r: METER_FLOOR_DB,
             held_computer_keys: HashMap::new(),
             step_record_pitches: HashSet::new(),
-            space_held: false,
+            rest_held: false,
         }
     }
 
@@ -232,9 +232,15 @@ impl Model for SynthModel {
                 Code::Minus => {
                     self.octave_shift.update(|o| *o = (*o - 1).max(-MAX_OCTAVE_SHIFT));
                 }
-                Code::Space => {
-                    if !self.space_held {
-                        self.space_held = true;
+                // Not Space: Vizia's buttons treat Space (like Enter) as
+                // "activate the focused button", so using it here meant a
+                // rest could silently re-trigger whatever button last had
+                // focus (e.g. Close) instead of - or as well as - recording
+                // a rest. Backquote isn't a default activation key for
+                // anything.
+                Code::Backquote => {
+                    if !self.rest_held {
+                        self.rest_held = true;
                         // A rest: advances a running step-entry recording by
                         // one step with no note. No-op if nothing's armed.
                         cx.emit(TimelineEvent::CommitStepChord(HashSet::new()));
@@ -252,8 +258,8 @@ impl Model for SynthModel {
                 }
             },
             WindowEvent::KeyUp(code, _) => {
-                if *code == Code::Space {
-                    self.space_held = false;
+                if *code == Code::Backquote {
+                    self.rest_held = false;
                 }
                 if let Some(note) = self.held_computer_keys.remove(code) {
                     self.note_off(cx, note);
