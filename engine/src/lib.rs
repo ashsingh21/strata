@@ -25,6 +25,12 @@ const SIXTEENTHS_PER_BEAT: u64 = 4;
 /// One-pole smoothing time constant for gain/pan, in milliseconds. Short
 /// enough to feel immediate, long enough to kill zipper noise.
 const SMOOTHING_MS: f32 = 5.0;
+/// Metronome click: a short decaying sine blip, higher-pitched on the
+/// downbeat so bar starts are audible over the mix.
+const CLICK_HZ_DOWNBEAT: f32 = 1600.0;
+const CLICK_HZ_BEAT: f32 = 1000.0;
+const CLICK_DECAY_MS: f32 = 15.0;
+const CLICK_AMPLITUDE: f32 = 0.3;
 
 /// Owns the live cpal stream. Dropping it stops audio.
 pub struct EngineHandle {
@@ -122,6 +128,10 @@ where
 
     let mut sample_counter: u64 = 0;
     let mut synth_engine = SynthEngine::new();
+    let mut click_phase = 0.0f32;
+    let mut click_env = 0.0f32;
+    let mut click_hz = CLICK_HZ_BEAT;
+    let click_decay_coeff = (-1.0 / (CLICK_DECAY_MS * 0.001 * sample_rate)).exp();
 
     let err_fn = |err: CpalError| eprintln!("audio stream error: {err}");
 
@@ -153,6 +163,10 @@ where
                     sample_rate,
                     &mut synth_engine,
                     &mut synth_telemetry,
+                    &mut click_phase,
+                    &mut click_env,
+                    &mut click_hz,
+                    click_decay_coeff,
                 );
             },
             err_fn,
@@ -178,6 +192,10 @@ fn write_block<T>(
     sample_rate: f32,
     synth_engine: &mut SynthEngine,
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
+    click_phase: &mut f32,
+    click_env: &mut f32,
+    click_hz: &mut f32,
+    click_decay_coeff: f32,
 ) where
     T: Sample + FromSample<f32>,
 {
@@ -187,6 +205,8 @@ fn write_block<T>(
     let playing = params.playing();
     let target_gain = params.gain();
     let target_pan = params.pan();
+    let click_enabled = params.click_enabled();
+    let samples_per_beat = (sample_rate as f64 * 60.0) / BPM;
 
     let mut peak_l = 0.0f32;
     let mut peak_r = 0.0f32;
@@ -215,8 +235,25 @@ fn write_block<T>(
         synth_peak_l = synth_peak_l.max(synth_l.abs());
         synth_peak_r = synth_peak_r.max(synth_r.abs());
 
-        let out_l = tone * left_gain + synth_l;
-        let out_r = tone * right_gain + synth_r;
+        if playing && click_enabled {
+            let next = *sample_counter + 1;
+            let beat_before = (*sample_counter as f64 / samples_per_beat) as u64;
+            let beat_after = (next as f64 / samples_per_beat) as u64;
+            if beat_after != beat_before {
+                *click_env = 1.0;
+                *click_phase = 0.0;
+                *click_hz = if beat_after % BEATS_PER_BAR == 0 { CLICK_HZ_DOWNBEAT } else { CLICK_HZ_BEAT };
+            }
+        }
+        let click = (*click_phase).sin() * *click_env * CLICK_AMPLITUDE;
+        *click_phase += *click_hz * std::f32::consts::TAU / sample_rate;
+        if *click_phase >= std::f32::consts::TAU {
+            *click_phase -= std::f32::consts::TAU;
+        }
+        *click_env *= click_decay_coeff;
+
+        let out_l = tone * left_gain + synth_l + click;
+        let out_r = tone * right_gain + synth_r + click;
 
         peak_l = peak_l.max(out_l.abs());
         peak_r = peak_r.max(out_r.abs());

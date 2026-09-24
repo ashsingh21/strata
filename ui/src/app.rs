@@ -30,6 +30,7 @@ pub struct AppData {
     pub playing: Signal<bool>,
     pub loop_on: Signal<bool>,
     pub record_armed: Signal<bool>,
+    pub click_on: Signal<bool>,
     pub position: Signal<Position>,
 
     // The one mixer strip.
@@ -65,6 +66,7 @@ pub enum AppEvent {
     Stop,
     ToggleLoop,
     ToggleArm,
+    ToggleClick,
     SetFader(f32),
     SetPan(f32),
     ToggleMute,
@@ -87,6 +89,7 @@ impl AppData {
             playing: Signal::new(false),
             loop_on: Signal::new(false),
             record_armed: Signal::new(false),
+            click_on: Signal::new(false),
             position: Signal::new(Position::default()),
             fader: Signal::new(0.75),
             pan: Signal::new(0.5),
@@ -157,6 +160,10 @@ impl Model for AppData {
             }
             AppEvent::ToggleArm => {
                 self.record_armed.update(|v| *v = !*v);
+            }
+            AppEvent::ToggleClick => {
+                self.click_on.update(|v| *v = !*v);
+                self.params.set_click_enabled(self.click_on.get());
             }
             AppEvent::SetFader(value) => {
                 self.fader.set(*value);

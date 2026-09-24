@@ -46,6 +46,7 @@ fn main() -> Result<(), ApplicationError> {
         let playing = app_data.playing;
         let loop_on = app_data.loop_on;
         let record_armed = app_data.record_armed;
+        let click_on = app_data.click_on;
         let position = app_data.position;
 
         app_data.build(cx);
@@ -172,7 +173,7 @@ fn main() -> Result<(), ApplicationError> {
         .build(cx);
 
         VStack::new(cx, move |cx| {
-            transport::transport_bar(cx, playing, loop_on, record_armed, position, interval_open);
+            transport::transport_bar(cx, playing, loop_on, record_armed, click_on, position, interval_open);
 
             timeline::timeline_view(
                 cx,

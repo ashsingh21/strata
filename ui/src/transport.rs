@@ -14,6 +14,7 @@ pub fn transport_bar(
     playing: Signal<bool>,
     loop_on: Signal<bool>,
     record_armed: Signal<bool>,
+    click_on: Signal<bool>,
     position: Signal<Position>,
     interval_open: Signal<bool>,
 ) {
@@ -34,6 +35,12 @@ pub fn transport_bar(
             .class("btn")
             .toggle_class("is-mod", loop_on)
             .on_press(|cx| cx.emit(AppEvent::ToggleLoop));
+
+        Button::new(cx, |cx| Label::new(cx, "Click"))
+            .class("btn")
+            .class("sm")
+            .toggle_class("is-mod", click_on)
+            .on_press(|cx| cx.emit(AppEvent::ToggleClick));
 
         Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
 

@@ -27,6 +27,8 @@ pub struct Params {
     /// Edge-triggered: the UI sets this on Stop; the engine clears it after
     /// resetting its sample counter.
     stop_requested: AtomicBool,
+    /// Whether the metronome click should sound while playing.
+    click_enabled: AtomicBool,
 }
 
 impl Params {
@@ -36,6 +38,7 @@ impl Params {
             pan: AtomicU32::new(0.0f32.to_bits()),
             playing: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
+            click_enabled: AtomicBool::new(false),
         }
     }
 
@@ -71,6 +74,14 @@ impl Params {
     /// Engine-side: consume the stop request, if any.
     pub fn take_stop_request(&self) -> bool {
         self.stop_requested.swap(false, Ordering::Relaxed)
+    }
+
+    pub fn set_click_enabled(&self, value: bool) {
+        self.click_enabled.store(value, Ordering::Relaxed);
+    }
+
+    pub fn click_enabled(&self) -> bool {
+        self.click_enabled.load(Ordering::Relaxed)
     }
 }
 
