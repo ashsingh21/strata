@@ -6,11 +6,6 @@
 //! all proportions expressed relative to the knob's diameter so the same
 //! code draws both the 32px standard size and the 24px mixer-strip size.
 //!
-//! Currently only used by `mixer`/`lfo_demo`, neither mounted in the main
-//! view right now; kept as milestone-1 infrastructure for the future
-//! mixer/synth panels.
-#![allow(dead_code)]
-
 use vizia::prelude::*;
 use vizia::vg;
 
@@ -34,12 +29,15 @@ const WHEEL_SCALAR: f32 = 0.02;
 
 type ChangeCallback = Box<dyn Fn(&mut EventContext, f32)>;
 
-pub struct Knob {
-    value: Signal<f32>,
+/// Generic over the value source (a plain `Signal<f32>` or a derived
+/// `Memo<f32>`, e.g. read out of a larger model like `SynthState`) and,
+/// separately, the modulation centre/depth source.
+pub struct Knob<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static = V> {
+    value: V,
     default_value: f32,
     /// (centre, depth), both 0..1. The mod ring spans
     /// `[centre - depth, centre + depth]`, clamped to 0..1.
-    modulation: Option<(Signal<f32>, Signal<f32>)>,
+    modulation: Option<(M, M)>,
     theme: Signal<ThemeId>,
     is_dragging: bool,
     prev_drag_y: f32,
@@ -47,16 +45,16 @@ pub struct Knob {
     on_changing: Option<ChangeCallback>,
 }
 
-impl Knob {
+impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Knob<V, M> {
     /// `modulation` is `Some((centre, depth))` to draw a modulation ring, or
     /// `None` for a plain knob. `on_changing` fires as the knob is dragged,
     /// scrolled or reset.
     pub fn new(
         cx: &mut Context,
-        value: Signal<f32>,
+        value: V,
         default_value: f32,
         theme: Signal<ThemeId>,
-        modulation: Option<(Signal<f32>, Signal<f32>)>,
+        modulation: Option<(M, M)>,
         on_changing: impl 'static + Fn(&mut EventContext, f32),
     ) -> Handle<'_, Self> {
         let initial = value.get();
@@ -84,7 +82,21 @@ impl Knob {
     }
 }
 
-impl View for Knob {
+impl<V: SignalGet<f32> + Copy + 'static> Knob<V, Signal<f32>> {
+    /// A knob with no modulation ring - fixes the otherwise-unconstrained
+    /// modulation type parameter so callers don't need a turbofish.
+    pub fn plain(
+        cx: &mut Context,
+        value: V,
+        default_value: f32,
+        theme: Signal<ThemeId>,
+        on_changing: impl 'static + Fn(&mut EventContext, f32),
+    ) -> Handle<'_, Self> {
+        Self::new(cx, value, default_value, theme, None, on_changing)
+    }
+}
+
+impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> View for Knob<V, M> {
     fn element(&self) -> Option<&'static str> {
         Some("strata-knob")
     }

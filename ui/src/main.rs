@@ -6,16 +6,18 @@ mod lfo_demo;
 mod meter;
 mod mixer;
 mod pill;
+mod synth;
 mod timeline;
 mod tokens;
 mod transport;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use vizia::prelude::*;
 
 use app::{AppData, AppEvent};
 use shared::arrangement::position_to_ticks;
+use synth::state::{SynthEvent, SynthModel};
 use timeline::state::{TimelineEvent, TimelineState};
 
 fn main() -> Result<(), ApplicationError> {
@@ -52,14 +54,25 @@ fn main() -> Result<(), ApplicationError> {
 
         timeline_state.build(cx);
 
+        let synth_model = SynthModel::new();
+        let synth_state = synth_model.state;
+        let synth_lfo_phase = synth_model.lfo_scope_phase;
+        synth_model.build(cx);
+
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
-        // the LFO demo's animated modulation ring, and syncs the timeline
-        // playhead from the transport's live position.
+        // the LFO demo's and synth's animated modulation rings/scope, and
+        // syncs the timeline playhead from the transport's live position.
+        let last_tick = std::cell::Cell::new(Instant::now());
         let render_timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
             if let TimerAction::Tick(_) = action {
+                let now = Instant::now();
+                let dt = (now - last_tick.get()).as_secs_f32().min(0.25);
+                last_tick.set(now);
+
                 cx.emit(AppEvent::Tick);
                 let ticks = position_to_ticks(position.get());
                 cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: playing.get() });
+                cx.emit(SynthEvent::Tick(dt));
             }
         });
         cx.start_timer(render_timer);
@@ -134,6 +147,10 @@ fn main() -> Result<(), ApplicationError> {
                 tl_selection,
                 tl_playhead,
             );
+
+            Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
+
+            synth::synth_view(cx, theme, synth_state, synth_lfo_phase);
         })
         .class("app")
         .toggle_class("theme-daylight", is_daylight)
@@ -141,7 +158,7 @@ fn main() -> Result<(), ApplicationError> {
         .width(Stretch(1.0));
     })
     .title("Strata")
-    .inner_size((1600, 980))
+    .inner_size((1600, 1360))
     .ignore_default_theme()
     .run()
 }

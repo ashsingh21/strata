@@ -28,7 +28,7 @@ pub fn mixer_strip(
     meter_clip_r: Signal<bool>,
 ) {
     VStack::new(cx, move |cx| {
-        Knob::new(cx, pan, 0.5, theme, None, |cx, value| cx.emit(AppEvent::SetPan(value)))
+        Knob::plain(cx, pan, 0.5, theme, |cx, value| cx.emit(AppEvent::SetPan(value)))
             .size(Pixels(24.0));
 
         HStack::new(cx, move |cx| {

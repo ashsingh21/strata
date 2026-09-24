@@ -4,9 +4,6 @@
 //! the app's telemetry timer (`app.rs`), which feeds it ready-to-draw 0..1
 //! fill fractions.
 //!
-//! Only used by `mixer`, not currently mounted in the main view.
-#![allow(dead_code)]
-
 use vizia::prelude::*;
 use vizia::vg;
 
@@ -21,20 +18,22 @@ pub const HOT_THRESHOLD: f32 = 0.9;
 
 type ClipResetCallback = Box<dyn Fn(&mut EventContext)>;
 
-pub struct Meter {
-    level_l: Signal<f32>,
-    level_r: Signal<f32>,
+/// Generic over the level source (a plain `Signal<f32>` or a derived
+/// `Memo<f32>`).
+pub struct Meter<L: SignalGet<f32> + Copy + 'static> {
+    level_l: L,
+    level_r: L,
     clip_l: Signal<bool>,
     clip_r: Signal<bool>,
     theme: Signal<ThemeId>,
     on_clip_reset: Option<ClipResetCallback>,
 }
 
-impl Meter {
+impl<L: SignalGet<f32> + Copy + 'static> Meter<L> {
     pub fn new(
         cx: &mut Context,
-        level_l: Signal<f32>,
-        level_r: Signal<f32>,
+        level_l: L,
+        level_r: L,
         clip_l: Signal<bool>,
         clip_r: Signal<bool>,
         theme: Signal<ThemeId>,
@@ -50,7 +49,7 @@ impl Meter {
     }
 }
 
-impl View for Meter {
+impl<L: SignalGet<f32> + Copy + 'static> View for Meter<L> {
     fn element(&self) -> Option<&'static str> {
         Some("strata-meter")
     }

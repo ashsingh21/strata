@@ -1,8 +1,5 @@
 //! The modulator pill/chip (`.st-mod`): the one rounded shape in Strata,
 //! `mod` text and border on a `mod-soft` ground, with a tiny sine glyph.
-//!
-//! Only used by `lfo_demo` (not currently mounted); see there for why.
-#![allow(dead_code)]
 
 use vizia::prelude::*;
 use vizia::vg;
