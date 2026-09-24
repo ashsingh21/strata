@@ -1,6 +1,7 @@
 mod app;
 mod canvas_text;
 mod fader;
+mod interval_input;
 mod knob;
 mod lfo_demo;
 mod meter;
@@ -16,6 +17,7 @@ use std::time::{Duration, Instant};
 use vizia::prelude::*;
 
 use app::{AppData, AppEvent};
+use interval_input::state::IntervalInputModel;
 use shared::arrangement::position_to_ticks;
 use synth::state::{SynthEvent, SynthModel};
 use timeline::state::{TimelineEvent, TimelineState};
@@ -69,6 +71,11 @@ fn main() -> Result<(), ApplicationError> {
         let synth_meter_r = synth_model.meter_r;
         let synth_help_open = synth_model.help_open;
         synth_model.build(cx);
+
+        let interval_model = IntervalInputModel::new();
+        let interval_key = interval_model.key;
+        let interval_scale_mask = interval_model.scale_mask;
+        interval_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
         // the LFO demo's and synth's animated modulation rings/scope, syncs
@@ -175,6 +182,10 @@ fn main() -> Result<(), ApplicationError> {
                 synth_meter_r,
                 synth_help_open,
             );
+
+            Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
+
+            interval_input::interval_input_view(cx, theme, synth_state, interval_key, interval_scale_mask);
         })
         .class("app")
         .toggle_class("theme-daylight", is_daylight)
@@ -182,7 +193,7 @@ fn main() -> Result<(), ApplicationError> {
         .width(Stretch(1.0));
     })
     .title("Strata")
-    .inner_size((1600, 1360))
+    .inner_size((1600, 1900))
     .ignore_default_theme()
     .run()
 }

@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub mod arrangement;
 pub mod synth;
+pub mod theory;
 
 /// UI -> engine control parameters.
 pub struct Params {
