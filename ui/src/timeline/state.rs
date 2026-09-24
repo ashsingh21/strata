@@ -152,7 +152,7 @@ pub enum TimelineEvent {
     Redo,
     CycleSnap,
     ToggleFollow,
-    ToggleTool,
+    SetTool(TimelineTool),
     /// A clip drawn directly on empty MIDI-track space (Draw tool), rather
     /// than built up via step-entry recording.
     InsertMidiClip { track: TrackId, start: Ticks, length: Ticks },
@@ -315,8 +315,8 @@ impl Model for TimelineState {
             TimelineEvent::ToggleFollow => {
                 self.follow.update(|f| *f = !*f);
             }
-            TimelineEvent::ToggleTool => {
-                self.tool.update(|t| *t = if *t == TimelineTool::Select { TimelineTool::Draw } else { TimelineTool::Select });
+            TimelineEvent::SetTool(t) => {
+                self.tool.set(*t);
             }
             TimelineEvent::InsertMidiClip { track, start, length } => {
                 let bypass = cx.modifiers().alt();

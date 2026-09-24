@@ -16,7 +16,7 @@ use header::{automation_header, track_header};
 use lanes::{LaneArea, PlayheadOverlay};
 use ruler::Ruler;
 use shared::arrangement::{Arrangement, SnapGrid, Ticks};
-use state::TimelineEvent;
+use state::{TimelineEvent, TimelineTool};
 
 use crate::timeline::state::Selection;
 use crate::tokens::{self, ThemeId};
@@ -45,7 +45,7 @@ pub fn timeline_view(
     selection: Signal<Selection>,
     playhead: Signal<Ticks>,
     recording_preview: Signal<Option<crate::recorder::RecordingPreview>>,
-    tool: Signal<crate::timeline::state::TimelineTool>,
+    tool: Signal<TimelineTool>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -59,19 +59,15 @@ pub fn timeline_view(
                 // Select (default: rubber-band selection, drag clips) vs
                 // Draw (click/drag empty space on a MIDI track to create
                 // a clip there directly, instead of only via step-entry).
-                let is_draw = tool.map(|t| *t == crate::timeline::state::TimelineTool::Draw);
-                let tool_label = tool.map(|t| match t {
-                    crate::timeline::state::TimelineTool::Select => "Select",
-                    crate::timeline::state::TimelineTool::Draw => "Draw",
-                });
-                Button::new(cx, move |cx| Label::new(cx, tool_label))
-                    .class("btn")
-                    .class("sm")
-                    .toggle_class("is-mod", is_draw)
-                    .on_press(|cx| cx.emit(TimelineEvent::ToggleTool));
+                // Both options always visible (not one button whose label
+                // silently swaps) and styled exactly like the piano roll's
+                // own Select/Draw toggle, so there's one consistent visual
+                // language for "this is a two-state mode switch" instead
+                // of a small single button that was easy to miss entirely.
+                tool_button(cx, "Select", TimelineTool::Select, tool);
+                tool_button(cx, "Draw", TimelineTool::Draw, tool);
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-                Label::new(cx, "16 bars").class("meta");
             })
             .class("tl-corner")
             .gap(Pixels(tokens::SPACE_2))
@@ -155,4 +151,16 @@ pub fn timeline_view(
     })
     .height(Stretch(1.0))
     .width(Stretch(1.0));
+}
+
+/// One segment of the Select/Draw toggle - same shape as the piano roll's
+/// own `mode_button`, so both places a mode switch shows up look and
+/// behave identically.
+fn tool_button(cx: &mut Context, label: &'static str, this: TimelineTool, tool: Signal<TimelineTool>) {
+    let on = tool.map(move |t| *t == this);
+    Button::new(cx, move |cx| Label::new(cx, label))
+        .class("btn")
+        .class("sm")
+        .toggle_class("is-mute", on)
+        .on_press(move |cx| cx.emit(TimelineEvent::SetTool(this)));
 }
