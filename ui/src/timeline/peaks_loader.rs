@@ -41,6 +41,32 @@ pub fn spawn_peak_loaders(cx: &Context, assets_dir: &Path, arrangement: &Arrange
     }
 }
 
+/// Spawns a loader for exactly one source - used when a single new clip
+/// (a freshly recorded take, or an imported drum sample) is added after
+/// startup, rather than the whole-arrangement scan `spawn_peak_loaders`
+/// does. Takes `&mut EventContext`, which has its own `.spawn` (same
+/// shape as `Context::spawn`), since that's what's available from inside
+/// a `Model`'s event handler.
+pub fn spawn_peak_loader_for_source(cx: &mut EventContext, assets_dir: &Path, source: Arc<str>) {
+    let path = assets_dir.join(&*source);
+    cx.spawn(move |proxy| {
+        if let Some(pyramid) = load_and_build(&path) {
+            let _ = proxy.emit(TimelineEvent::PeaksLoaded { source, peaks: Arc::new(pyramid) });
+        } else {
+            eprintln!("timeline: failed to load {}", path.display());
+        }
+    });
+}
+
+/// Just a file's duration - for sizing a freshly imported sample's clip
+/// to its real length without decoding every sample (peak-building and
+/// full decode both happen separately, in the background).
+pub fn wav_duration_seconds(path: &Path) -> Option<f64> {
+    let reader = hound::WavReader::open(path).ok()?;
+    let spec = reader.spec();
+    Some(reader.duration() as f64 / spec.sample_rate as f64)
+}
+
 fn load_and_build(path: &Path) -> Option<PeakPyramid> {
     let (samples, spec) = decode_wav(path)?;
     Some(PeakPyramid::build_from_interleaved(&samples, spec.channels, spec.sample_rate))

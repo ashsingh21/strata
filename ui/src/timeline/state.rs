@@ -43,6 +43,22 @@ pub enum TimelineTool {
 /// One 16th note at 4/4 - the step-entry recorder's fixed grid.
 const STEP_TICKS: Ticks = PPQ / 4;
 
+/// A file stem like "hihat_closed" -> "Hihat Closed", for a new track's
+/// default name when a drum sample is imported.
+pub(crate) fn display_name_from_stem(stem: &str) -> String {
+    stem.split(['_', '-'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut chars = w.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub struct TimelineState {
     pub arrangement: Signal<Arrangement>,
     pub transform: Signal<ViewTransform>,
@@ -51,6 +67,7 @@ pub struct TimelineState {
     pub follow: Signal<bool>,
     pub tool: Signal<TimelineTool>,
     pub playhead_ticks: Signal<Ticks>,
+    pub drums_menu_open: Signal<bool>,
     command_stack: CommandStack,
 
     // Step-entry recording (not reactive): armed via the transport's
@@ -68,6 +85,18 @@ pub struct TimelineState {
     // whichever thing you're actually looking at.
     piano_roll_open_clip: Signal<Option<ClipId>>,
     piano_roll_selected: Signal<HashSet<(Ticks, u8)>>,
+
+    /// Requests a background decode of a newly added audio source (an
+    /// imported drum sample, here) so it's audible without restarting -
+    /// same persistent worker `RecordingCoordinator` already uses for a
+    /// freshly recorded take; `Sender` is `Clone`, so both just hold
+    /// their own copy of it. `None` until `set_decode_sender` is called:
+    /// the worker itself is only spawned once `TimelineState::new` has
+    /// already returned (its initial decode batch needs the starting
+    /// arrangement, which needs `Self::arrangement` to exist first), so
+    /// this can't be a constructor argument without a circular
+    /// dependency.
+    decode_request_tx: Option<std::sync::mpsc::Sender<Arc<str>>>,
 }
 
 impl TimelineState {
@@ -85,13 +114,19 @@ impl TimelineState {
             follow: Signal::new(true),
             tool: Signal::new(TimelineTool::default()),
             playhead_ticks: Signal::new(0),
+            drums_menu_open: Signal::new(false),
             command_stack: CommandStack::new(),
             record_armed,
             playing,
             step_entry_clip: None,
             piano_roll_open_clip,
             piano_roll_selected,
+            decode_request_tx: None,
         }
+    }
+
+    pub fn set_decode_sender(&mut self, tx: std::sync::mpsc::Sender<Arc<str>>) {
+        self.decode_request_tx = Some(tx);
     }
 
     fn with_arrangement(&mut self, f: impl FnOnce(&mut Arrangement, &mut CommandStack)) {
@@ -195,6 +230,11 @@ pub enum TimelineEvent {
     InsertRecordedClip { track: TrackId, start: Ticks, length: Ticks, source: Arc<str> },
 
     AddTrack(TrackKind),
+    /// Imports a drum sample (a `.wav` under `assets/drums/`, named
+    /// relative to the assets dir, e.g. `"drums/kick.wav"`) as a new
+    /// track - one clip, sized to the sample's own length, at tick 0.
+    AddDrumSample(Arc<str>),
+    ToggleDrumsMenu,
     RemoveTrack(TrackId),
 }
 
@@ -485,6 +525,67 @@ impl Model for TimelineState {
                         arr,
                     );
                 });
+            }
+            TimelineEvent::AddDrumSample(source) => {
+                let assets_dir = crate::timeline::assets_dir();
+                let path = assets_dir.join(&**source);
+                let Some(duration_seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
+                    eprintln!("timeline: failed to read {}", path.display());
+                    return;
+                };
+                let name = std::path::Path::new(&**source)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(display_name_from_stem)
+                    .unwrap_or_else(|| "Sample".to_string());
+
+                const COLORS: [ClipColor; 6] = [
+                    ClipColor::Coral,
+                    ClipColor::Amber,
+                    ClipColor::Teal,
+                    ClipColor::Blue,
+                    ClipColor::Violet,
+                    ClipColor::Pink,
+                ];
+                self.with_arrangement(|arr, stack| {
+                    let track_id = arr.alloc_id();
+                    let clip_id = arr.alloc_id();
+                    let index = arr.tracks.len();
+                    let color = COLORS[index % COLORS.len()];
+                    let length = arr.tempo_map.seconds_to_ticks(duration_seconds).max(1);
+                    let track = Track {
+                        id: track_id,
+                        name: name.clone(),
+                        color,
+                        kind: TrackKind::Audio,
+                        mute: false,
+                        solo: false,
+                        arm: false,
+                        gain_db: 0.0,
+                        height: 56.0,
+                    };
+                    let clip = Clip {
+                        id: clip_id,
+                        track: track_id,
+                        start: 0,
+                        length,
+                        name: name.clone(),
+                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+                        recording: false,
+                    };
+                    stack.do_command(
+                        Command::InsertTrack { track: Box::new(track), index, clips: vec![clip], automation: vec![] },
+                        arr,
+                    );
+                });
+                crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
+                if let Some(tx) = &self.decode_request_tx {
+                    let _ = tx.send(source.clone());
+                }
+                self.drums_menu_open.set(false);
+            }
+            TimelineEvent::ToggleDrumsMenu => {
+                self.drums_menu_open.update(|v| *v = !*v);
             }
             TimelineEvent::RemoveTrack(track) => {
                 self.do_command(Command::DeleteTrack { track: *track });

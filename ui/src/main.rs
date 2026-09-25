@@ -76,13 +76,14 @@ fn main() -> Result<(), ApplicationError> {
         let piano_roll_selected = piano_roll_model.selected;
         piano_roll_model.build(cx);
 
-        let timeline_state = TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected);
+        let mut timeline_state = TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected);
         let tl_arrangement = timeline_state.arrangement;
         let tl_transform = timeline_state.transform;
         let tl_snap = timeline_state.snap;
         let tl_selection = timeline_state.selection;
         let tl_playhead = timeline_state.playhead_ticks;
         let tl_tool = timeline_state.tool;
+        let tl_drums_menu_open = timeline_state.drums_menu_open;
 
         // A saved project (if any) replaces the empty starting arrangement
         // before anything downstream reads it - the peak/decode loaders in
@@ -108,6 +109,7 @@ fn main() -> Result<(), ApplicationError> {
             &tl_arrangement.get(),
             playback_decode_tx,
         );
+        timeline_state.set_decode_sender(decode_request_tx.clone());
 
         timeline_state.build(cx);
 
@@ -288,6 +290,8 @@ fn main() -> Result<(), ApplicationError> {
             );
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
+
+            timeline::drums_menu_view(cx, tl_drums_menu_open);
 
             interval_input::interval_input_view(
                 cx,

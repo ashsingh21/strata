@@ -256,6 +256,11 @@ fn render_base_css(scalars: &ScalarMap) -> String {
   background-color: rgba(0, 0, 0, 0.6);
   z-index: 300;
 }}
+.drums-menu {{
+  border-radius: {radius_md}px;
+  border-width: 1px;
+  z-index: 150;
+}}
 
 .hidden {{
   display: none;

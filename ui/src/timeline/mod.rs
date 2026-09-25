@@ -110,6 +110,10 @@ pub fn timeline_view(
                         .on_press(|cx| {
                             cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi))
                         });
+                    Button::new(cx, |cx| Label::new(cx, "Drums"))
+                        .class("btn")
+                        .class("sm")
+                        .on_press(|cx| cx.emit(TimelineEvent::ToggleDrumsMenu));
                 })
                 .gap(Pixels(tokens::SPACE_2))
                 .padding(Pixels(tokens::SPACE_2))
@@ -163,4 +167,57 @@ fn tool_button(cx: &mut Context, label: &'static str, this: TimelineTool, tool: 
         .class("sm")
         .toggle_class("is-mute", on)
         .on_press(move |cx| cx.emit(TimelineEvent::SetTool(this)));
+}
+
+/// The "Drums" button's dropdown: every `.wav` under `assets/drums/`,
+/// clicking one imports it as a new track. See
+/// `TimelineEvent::AddDrumSample`'s own doc comment for what that does.
+///
+/// This is a separate top-level overlay rather than nested inside the
+/// cramped 240px header column, for the same reason Interval Input's own
+/// overlay is: Absolute positioning nested inside a narrow fixed-width
+/// parent produced unexplained offsets earlier in this project (see
+/// `timeline_view`'s layout comment), so floating panels here stay
+/// top-level instead.
+pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
+    let mut samples: Vec<String> = std::fs::read_dir(assets_dir().join("drums"))
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter_map(|e| {
+                    let path = e.path();
+                    (path.extension().and_then(|s| s.to_str()) == Some("wav"))
+                        .then(|| path.file_name().and_then(|s| s.to_str()).map(str::to_string))
+                        .flatten()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    samples.sort();
+
+    VStack::new(cx, move |cx| {
+        Label::new(cx, "Drum samples").class("label");
+        if samples.is_empty() {
+            Label::new(cx, "none in assets/drums/").class("meta");
+        }
+        for filename in &samples {
+            let source: std::sync::Arc<str> = format!("drums/{filename}").into();
+            let display = state::display_name_from_stem(filename.strip_suffix(".wav").unwrap_or(filename));
+            Button::new(cx, move |cx| Label::new(cx, display.clone()))
+                .class("btn")
+                .class("sm")
+                .width(Stretch(1.0))
+                .on_press(move |cx| cx.emit(TimelineEvent::AddDrumSample(source.clone())));
+        }
+    })
+    .class("panel")
+    .class("drums-menu")
+    .toggle_class("hidden", open.map(|o| !*o))
+    .gap(Pixels(tokens::SPACE_1))
+    .padding(Pixels(tokens::SPACE_2))
+    .position_type(PositionType::Absolute)
+    .top(Pixels(48.0))
+    .left(Pixels(20.0))
+    .width(Pixels(160.0))
+    .height(Auto);
 }
