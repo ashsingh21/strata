@@ -33,7 +33,6 @@ const CAPTURE_CAPACITY: usize = 1 << 16;
 const TEST_TONE_HZ: f32 = 220.0;
 /// -18 dBFS.
 const TEST_TONE_AMPLITUDE: f32 = 0.125_892_5;
-const BPM: f64 = 128.0;
 const BEATS_PER_BAR: u64 = 4;
 const SIXTEENTHS_PER_BEAT: u64 = 4;
 /// One-pole smoothing time constant for gain/pan, in milliseconds. Short
@@ -338,7 +337,8 @@ fn write_block<T>(
     let target_gain = params.gain();
     let target_pan = params.pan();
     let click_enabled = params.click_enabled();
-    let samples_per_beat = (sample_rate as f64 * 60.0) / BPM;
+    let bpm = params.bpm();
+    let samples_per_beat = (sample_rate as f64 * 60.0) / bpm;
 
     let mut peak_l = 0.0f32;
     let mut peak_r = 0.0f32;
@@ -413,7 +413,7 @@ fn write_block<T>(
     }
     let _ = frames;
 
-    let position = position_from_samples(*sample_counter, sample_rate);
+    let position = position_from_samples(*sample_counter, sample_rate, bpm);
     // Best-effort: if the UI hasn't drained recently the ring buffer may be
     // full. Dropping a telemetry frame is harmless; never block.
     let _ = telemetry.push(Telemetry { peak_l, peak_r, position });
@@ -454,8 +454,8 @@ fn mix_audio_clips(plan: &PlaybackPlan, sources: &[DecodedSource], pos: i64) -> 
     (out_l, out_r)
 }
 
-fn position_from_samples(sample_counter: u64, sample_rate: f32) -> Position {
-    let samples_per_sixteenth = (sample_rate as f64 * 60.0) / (BPM * SIXTEENTHS_PER_BEAT as f64);
+fn position_from_samples(sample_counter: u64, sample_rate: f32, bpm: f64) -> Position {
+    let samples_per_sixteenth = (sample_rate as f64 * 60.0) / (bpm * SIXTEENTHS_PER_BEAT as f64);
     let sixteenth_index = (sample_counter as f64 / samples_per_sixteenth) as u64;
     let sixteenth_in_beat = sixteenth_index % SIXTEENTHS_PER_BEAT;
     let beat_index = (sixteenth_index / SIXTEENTHS_PER_BEAT) % BEATS_PER_BAR;

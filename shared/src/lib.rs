@@ -32,7 +32,18 @@ pub struct Params {
     stop_requested: AtomicBool,
     /// Whether the metronome click should sound while playing.
     click_enabled: AtomicBool,
+    /// Tempo in beats per minute, stored as f32 bits. Drives both the
+    /// click and the transport position readout - kept in sync with the
+    /// arrangement's own `TempoMap` by whatever sets it (see
+    /// `TimelineEvent::SetTempo`), rather than the engine reading the
+    /// arrangement directly.
+    bpm: AtomicU32,
 }
+
+/// Default tempo, matching `shared::arrangement::seed::empty_arrangement`'s
+/// own default so a fresh session's engine and arrangement agree without
+/// any extra wiring.
+pub const DEFAULT_BPM: f64 = 128.0;
 
 impl Params {
     pub fn new() -> Self {
@@ -42,6 +53,7 @@ impl Params {
             playing: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
             click_enabled: AtomicBool::new(false),
+            bpm: AtomicU32::new((DEFAULT_BPM as f32).to_bits()),
         }
     }
 
@@ -85,6 +97,14 @@ impl Params {
 
     pub fn click_enabled(&self) -> bool {
         self.click_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_bpm(&self, value: f64) {
+        self.bpm.store((value as f32).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn bpm(&self) -> f64 {
+        f32::from_bits(self.bpm.load(Ordering::Relaxed)) as f64
     }
 }
 

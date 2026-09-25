@@ -148,6 +148,7 @@ pub enum TimelineEvent {
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
     SetLoopRange(Option<LoopRange>),
+    SetTempo(f64),
     Undo,
     Redo,
     CycleSnap,
@@ -298,6 +299,9 @@ impl Model for TimelineState {
             }
             TimelineEvent::SetLoopRange(range) => {
                 self.do_command(Command::SetLoopRange { range: *range });
+            }
+            TimelineEvent::SetTempo(bpm) => {
+                self.do_command(Command::SetTempo { bpm: *bpm });
             }
             TimelineEvent::Undo => {
                 self.with_arrangement(|arr, stack| {

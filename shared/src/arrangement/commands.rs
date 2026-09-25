@@ -7,7 +7,7 @@ use super::model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
     LoopRange, MidiNote, Track, TrackId,
 };
-use super::time::Ticks;
+use super::time::{TempoMap, Ticks};
 
 #[derive(Clone, Debug)]
 pub enum Command {
@@ -36,6 +36,12 @@ pub enum Command {
     /// Removes `track` and cascades to every clip and automation lane on
     /// it, so nothing is left pointing at a track that no longer exists.
     DeleteTrack { track: TrackId },
+    /// Replaces the whole tempo map with a single constant tempo at
+    /// `bpm`, keeping the current time signature. Collapses any future
+    /// mid-song tempo changes back to one value - there's no UI for
+    /// tempo automation yet, so that's exactly what every caller today
+    /// already has anyway.
+    SetTempo { bpm: f64 },
 }
 
 impl Command {
@@ -258,6 +264,13 @@ impl Command {
                 let old = arr.loop_range;
                 arr.loop_range = range;
                 Command::SetLoopRange { range: old }
+            }
+
+            Command::SetTempo { bpm } => {
+                let old_bpm = arr.tempo_map.bpm_at(0);
+                let time_signature = arr.tempo_map.time_signature_at(0);
+                arr.tempo_map = TempoMap::constant(bpm, time_signature);
+                Command::SetTempo { bpm: old_bpm }
             }
         }
     }
@@ -502,6 +515,20 @@ mod tests {
 
         stack.do_command(Command::MoveClip { clip: 1, track: 1, start: PPQ * 8 }, &mut arr);
         assert!(!stack.can_redo());
+    }
+
+    #[test]
+    fn set_tempo_keeps_time_signature_and_undoes() {
+        let mut arr = test_arrangement();
+        let mut stack = CommandStack::new();
+        assert_eq!(arr.tempo_map.bpm_at(0), 128.0);
+
+        stack.do_command(Command::SetTempo { bpm: 90.0 }, &mut arr);
+        assert_eq!(arr.tempo_map.bpm_at(0), 90.0);
+        assert_eq!(arr.tempo_map.time_signature_at(0), TimeSignature::FOUR_FOUR);
+
+        assert!(stack.undo(&mut arr));
+        assert_eq!(arr.tempo_map.bpm_at(0), 128.0);
     }
 
     fn new_track(id: TrackId) -> Track {

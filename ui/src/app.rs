@@ -71,6 +71,12 @@ pub enum AppEvent {
     ToggleClick,
     SetFader(f32),
     SetPan(f32),
+    /// Mirrors TimelineEvent::SetTempo into the engine's own Params, so the
+    /// click/position stay in sync with the arrangement's tempo map. Two
+    /// separate events because AppData and TimelineState each own one half
+    /// of what "the current tempo" means: the engine-facing atomic vs. the
+    /// undoable arrangement data.
+    SetBpm(f64),
     ToggleMute,
     ToggleSolo,
     ResetClip,
@@ -176,6 +182,9 @@ impl Model for AppData {
             AppEvent::SetPan(value) => {
                 self.pan.set(*value);
                 self.params.set_pan(value * 2.0 - 1.0);
+            }
+            AppEvent::SetBpm(bpm) => {
+                self.params.set_bpm(*bpm);
             }
             AppEvent::ToggleMute => {
                 self.mute.update(|v| *v = !*v);

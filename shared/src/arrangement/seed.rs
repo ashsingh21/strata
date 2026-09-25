@@ -17,11 +17,11 @@ const BEAT: i64 = PPQ;
 /// actually starts from - build a project up with "+ Audio"/"+ MIDI"
 /// rather than always opening onto a canned demo song.
 pub fn empty_arrangement() -> Arrangement {
-    Arrangement::new(TempoMap::constant(128.0, TimeSignature::FOUR_FOUR))
+    Arrangement::new(TempoMap::constant(crate::DEFAULT_BPM, TimeSignature::FOUR_FOUR))
 }
 
 pub fn seed_arrangement() -> Arrangement {
-    let mut arr = Arrangement::new(TempoMap::constant(128.0, TimeSignature::FOUR_FOUR));
+    let mut arr = Arrangement::new(TempoMap::constant(crate::DEFAULT_BPM, TimeSignature::FOUR_FOUR));
 
     let drums = arr.alloc_id();
     let bass = arr.alloc_id();

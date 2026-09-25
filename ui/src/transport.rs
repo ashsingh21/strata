@@ -5,10 +5,12 @@ use vizia::prelude::*;
 use shared::Position;
 
 use crate::app::AppEvent;
+use crate::bpm_field::BpmField;
 use crate::interval_input::state::IntervalInputEvent;
 use crate::knob::Knob;
 use crate::meter::Meter;
 use crate::recorder::RecorderModelEvent;
+use crate::timeline::state::TimelineEvent;
 use crate::tokens::{ThemeId, SPACE_2, SPACE_3};
 
 #[allow(clippy::too_many_arguments)]
@@ -23,6 +25,7 @@ pub fn transport_bar(
     input_level: Signal<f32>,
     input_gain_pos: Signal<f32>,
     theme: Signal<ThemeId>,
+    bpm: impl SignalGet<f64> + Copy + 'static,
 ) {
     HStack::new(cx, move |cx| {
         Button::new(cx, |cx| Label::new(cx, "\u{25A0}")).class("btn").on_press(|cx| cx.emit(AppEvent::Stop));
@@ -64,8 +67,13 @@ pub fn transport_bar(
 
         Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
 
-        HStack::new(cx, |cx| {
-            Label::new(cx, "128.00").class("mono");
+        HStack::new(cx, move |cx| {
+            BpmField::new(cx, bpm, theme, |cx, v| {
+                cx.emit(TimelineEvent::SetTempo(v));
+                cx.emit(AppEvent::SetBpm(v));
+            })
+            .width(Pixels(42.0))
+            .height(Pixels(16.0));
             Label::new(cx, "BPM").class("unit");
         })
         .class("readout")

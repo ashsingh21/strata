@@ -1,4 +1,5 @@
 mod app;
+mod bpm_field;
 mod canvas_text;
 mod fader;
 mod interval_input;
@@ -89,7 +90,9 @@ fn main() -> Result<(), ApplicationError> {
         let loaded_project = shared::project::load(&project_path()).ok();
         if let Some(project) = &loaded_project {
             tl_arrangement.set(project.arrangement.clone());
+            params.set_bpm(project.arrangement.tempo_map.bpm_at(0));
         }
+        let tl_bpm = tl_arrangement.map(|arr| arr.tempo_map.bpm_at(0));
 
         timeline::peaks_loader::spawn_peak_loaders(
             cx,
@@ -256,6 +259,7 @@ fn main() -> Result<(), ApplicationError> {
                 input_level,
                 input_gain_pos,
                 theme,
+                tl_bpm,
             );
 
             timeline::timeline_view(
