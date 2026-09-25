@@ -94,6 +94,7 @@ pub fn piano_roll_view(
                 .height(Pixels(GRID_H));
         })
         .class("panel")
+        .class("piano-roll-panel")
         .gap(Pixels(tokens::SPACE_2))
         .padding(Pixels(tokens::SPACE_2))
         .width(Pixels(PANEL_W))
