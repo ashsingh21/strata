@@ -3,12 +3,14 @@
 //! arrangement are always ticks - never floats or seconds - so edits stay
 //! exact regardless of tempo or sample rate.
 
+use serde::{Deserialize, Serialize};
+
 /// Pulses (ticks) per quarter note.
 pub const PPQ: i64 = 960;
 
 pub type Ticks = i64;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TimeSignature {
     pub numerator: u8,
     pub denominator: u8,
@@ -31,7 +33,7 @@ impl TimeSignature {
 
 /// A tempo (and time signature) change starting at `tick`. The map always
 /// has at least one event, at tick 0.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TempoEvent {
     pub tick: Ticks,
     pub bpm: f64,
@@ -41,7 +43,7 @@ pub struct TempoEvent {
 /// Converts between ticks, seconds and samples. Built from a sorted list of
 /// [`TempoEvent`]s so it already supports future tempo/signature changes,
 /// even though callers today only ever install one.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TempoMap {
     events: Vec<TempoEvent>,
 }

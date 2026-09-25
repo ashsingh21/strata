@@ -4,6 +4,8 @@
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use super::peaks::PeakPyramid;
 use super::time::{TempoMap, Ticks};
 
@@ -12,7 +14,7 @@ pub type ClipId = u32;
 pub type AutomationLaneId = u32;
 pub type MarkerId = u32;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TrackKind {
     Audio,
     Midi,
@@ -20,7 +22,7 @@ pub enum TrackKind {
 
 /// One of the six `clip-*` design tokens. Also used as a track's colour
 /// swatch, since a track's clips default to its colour.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClipColor {
     Coral,
     Amber,
@@ -30,7 +32,7 @@ pub enum ClipColor {
     Pink,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Track {
     pub id: TrackId,
     pub name: String,
@@ -44,14 +46,14 @@ pub struct Track {
     pub height: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MidiNote {
     pub start: Ticks,
     pub length: Ticks,
     pub pitch: u8,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ClipContent {
     Audio {
         /// File name under the assets directory, e.g. `"drums.wav"`. Several
@@ -59,7 +61,10 @@ pub enum ClipContent {
         /// built once per unique source and shared via `Arc`.
         source: Arc<str>,
         /// Populated asynchronously once the background loader finishes
-        /// decoding the source WAV and building the peak pyramid.
+        /// decoding the source WAV and building the peak pyramid - never
+        /// saved (rebuilt from the WAV file on load, same as on first
+        /// reference today).
+        #[serde(skip)]
         peaks: Option<Arc<PeakPyramid>>,
         /// Offset into the source audio, in samples, that this clip's
         /// `start` corresponds to. Trimming or splitting the left edge
@@ -72,7 +77,7 @@ pub enum ClipContent {
     },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Clip {
     pub id: ClipId,
     pub track: TrackId,
@@ -89,14 +94,14 @@ impl Clip {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Breakpoint {
     pub tick: Ticks,
     /// Normalized 0..1.
     pub value: f32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AutomationLane {
     pub id: AutomationLaneId,
     pub track: TrackId,
@@ -107,20 +112,20 @@ pub struct AutomationLane {
     pub breakpoints: Vec<Breakpoint>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoopRange {
     pub start: Ticks,
     pub end: Ticks,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Marker {
     pub id: MarkerId,
     pub position: Ticks,
     pub name: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Arrangement {
     pub tempo_map: TempoMap,
     pub tracks: Vec<Track>,

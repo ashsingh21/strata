@@ -8,6 +8,7 @@ mod meter;
 mod mixer;
 mod piano_roll;
 mod pill;
+mod project;
 mod recorder;
 mod synth;
 mod timeline;
@@ -21,6 +22,7 @@ use vizia::prelude::*;
 use app::{AppData, AppEvent};
 use interval_input::state::IntervalInputModel;
 use piano_roll::state::{PianoRollEvent, PianoRollModel};
+use project::{project_path, ProjectEvent, ProjectModel};
 use recorder::{RecorderModel, RecordingCoordinator};
 use shared::arrangement::position_to_ticks;
 use synth::state::{SynthEvent, SynthModel};
@@ -81,6 +83,14 @@ fn main() -> Result<(), ApplicationError> {
         let tl_playhead = timeline_state.playhead_ticks;
         let tl_tool = timeline_state.tool;
 
+        // A saved project (if any) replaces the empty starting arrangement
+        // before anything downstream reads it - the peak/decode loaders in
+        // particular need the real clip list to know what to load.
+        let loaded_project = shared::project::load(&project_path()).ok();
+        if let Some(project) = &loaded_project {
+            tl_arrangement.set(project.arrangement.clone());
+        }
+
         timeline::peaks_loader::spawn_peak_loaders(
             cx,
             &timeline::assets_dir(),
@@ -112,6 +122,11 @@ fn main() -> Result<(), ApplicationError> {
         let synth_meter_r = synth_model.meter_r;
         let synth_help_open = synth_model.help_open;
         synth_model.build(cx);
+        if let Some(project) = &loaded_project {
+            synth_state.set(project.synth.clone());
+        }
+
+        ProjectModel::new(tl_arrangement, synth_state).build(cx);
 
         let interval_model = IntervalInputModel::new();
         let interval_key = interval_model.key;
@@ -217,6 +232,14 @@ fn main() -> Result<(), ApplicationError> {
             (
                 KeyChord::new(Modifiers::empty(), Code::Escape),
                 KeymapEntry::new(13u8, |cx| cx.emit(PianoRollEvent::Close)),
+            ),
+            (
+                KeyChord::new(Modifiers::CTRL, Code::KeyS),
+                KeymapEntry::new(14u8, |cx| cx.emit(ProjectEvent::Save)),
+            ),
+            (
+                KeyChord::new(Modifiers::SUPER, Code::KeyS),
+                KeymapEntry::new(15u8, |cx| cx.emit(ProjectEvent::Save)),
             ),
         ])
         .build(cx);

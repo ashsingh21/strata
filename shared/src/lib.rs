@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub mod arrangement;
 pub mod playback;
+pub mod project;
 pub mod recorder;
 pub mod synth;
 pub mod theory;

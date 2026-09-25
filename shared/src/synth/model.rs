@@ -3,7 +3,9 @@
 //! here is wired to the audio engine yet, so every value is just state a
 //! panel of knobs reads and writes.
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Waveform {
     Sine,
     Triangle,
@@ -11,7 +13,7 @@ pub enum Waveform {
     Square,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FilterType {
     Lp24,
     Lp12,
@@ -19,14 +21,14 @@ pub enum FilterType {
     Hp,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VoiceMode {
     Mono,
     Poly,
 }
 
 /// What an LFO's output is patched to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LfoTarget {
     /// Filter cutoff, in octaves either side of the Cutoff knob's setting.
     Cutoff,
@@ -37,7 +39,7 @@ pub enum LfoTarget {
 /// An oscillator's three knobs mean different things per-oscillator (Tune
 /// vs Detune, Shape vs PW, Drift vs FM); the UI labels them, this just
 /// stores the three normalized/physical values uniformly.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Oscillator {
     pub waveform: Waveform,
     pub octave: i8,
@@ -51,7 +53,7 @@ pub struct Oscillator {
     pub sync: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Mix {
     pub osc1_db: f32,
     pub osc2_db: f32,
@@ -59,7 +61,7 @@ pub struct Mix {
     pub noise_db: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Filter {
     pub filter_type: FilterType,
     pub cutoff_hz: f32,
@@ -69,7 +71,7 @@ pub struct Filter {
     pub key_track: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Envelope {
     pub attack_ms: f32,
     pub decay_ms: f32,
@@ -77,8 +79,13 @@ pub struct Envelope {
     pub release_ms: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Lfo {
+    /// Cosmetic only ("1/8", "3.2 Hz") - never read by the engine (the
+    /// actual rate is `rate_norm`) and never updated after the synth is
+    /// first built, so it isn't worth a save-able `String`. Not saved;
+    /// a reloaded project just shows it blank.
+    #[serde(skip)]
     pub rate_label: &'static str,
     pub rate_norm: f32,
     pub depth: f32,
@@ -87,7 +94,7 @@ pub struct Lfo {
     pub target_count: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Output {
     pub glide_ms: f32,
     pub volume_db: f32,
@@ -95,8 +102,10 @@ pub struct Output {
     pub meter_r: f32,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SynthState {
+    /// The patch name - cosmetic only, not saved (blank after a reload).
+    #[serde(skip)]
     pub name: &'static str,
     pub voice_mode: VoiceMode,
     pub voices: u8,

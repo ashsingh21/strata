@@ -2649,6 +2649,8 @@ name = "shared"
 version = "0.1.0"
 dependencies = [
  "rtrb",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
