@@ -281,9 +281,15 @@ impl LaneArea {
 
                     let start_x = transform.tick_to_x(clip.start) as f32;
                     let end_x = transform.tick_to_x(clip.end()) as f32;
-                    let edge = if (lx - start_x).abs() <= EDGE_GRAB_PX {
+                    // A short clip (a single drum hit, easily narrower than
+                    // twice the grab zone) needs a proportionally smaller
+                    // grab zone, or every click anywhere on it - including
+                    // its middle - reads as an edge, and it can never be
+                    // moved by dragging, only ever shrunk toward nothing.
+                    let grab_px = EDGE_GRAB_PX.min((end_x - start_x) / 4.0).max(1.0);
+                    let edge = if (lx - start_x).abs() <= grab_px {
                         Some(Edge::Start)
-                    } else if (lx - end_x).abs() <= EDGE_GRAB_PX {
+                    } else if (lx - end_x).abs() <= grab_px {
                         Some(Edge::End)
                     } else {
                         None
@@ -672,6 +678,19 @@ impl LaneArea {
             }
         }
 
+        // A clip being dragged to a different track row is repositioned
+        // (below) to draw at its target row's y - but it's still drawn
+        // *during that row's own turn* in this loop, wherever that falls
+        // in track order. Dragging it to a row earlier in that order (so
+        // its turn comes first) means every later row's real clips then
+        // paint over it: it visibly "goes behind" them mid-drag. Skipped
+        // here and drawn once more, after every row, so it's always the
+        // last (topmost) thing painted regardless of drag direction.
+        let dragged_across_rows: Option<ClipId> = match drag_move {
+            Some((clips, _, row_delta)) if clips.len() == 1 && row_delta != 0 => Some(clips[0].0),
+            _ => None,
+        };
+
         // Clips.
         for row in &rows {
             let RowKind::Track(track_id) = row.kind else { continue };
@@ -681,6 +700,9 @@ impl LaneArea {
             }
             let track_color = arr.track(track_id).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Coral);
             for clip in arr.clips_on_track(track_id) {
+                if Some(clip.id) == dragged_across_rows {
+                    continue;
+                }
                 let mut start = clip.start;
                 let mut track_row_top = top;
 
@@ -771,6 +793,34 @@ impl LaneArea {
                             if y1 > header_bottom {
                                 self.draw_live_waveform(canvas, &peaks, x0, header_bottom, x1, y1);
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        // The clip skipped above, drawn last so it's always on top - see
+        // the comment where `dragged_across_rows` is computed.
+        if let (Some(dragged_id), Some((clips, delta_ticks, row_delta))) = (dragged_across_rows, drag_move) {
+            let (_, orig_track, orig_start) = clips[0];
+            if let (Some(clip), Some(idx)) = (arr.clip(dragged_id), track_ids.iter().position(|&t| t == orig_track)) {
+                let new_i = (idx as i32 + row_delta).clamp(0, track_ids.len() as i32 - 1);
+                let target_track = track_ids[new_i as usize];
+                if let Some(target_row) = rows.iter().find(|r| r.kind == RowKind::Track(target_track)) {
+                    let top = target_row.top - scroll_y;
+                    if top + target_row.height >= 0.0 && top <= bounds.h {
+                        let start = (orig_start + delta_ticks).max(0);
+                        let x0_raw = bounds.x + transform.tick_to_x(start) as f32;
+                        let x1_raw = bounds.x + transform.tick_to_x(start + clip.length) as f32;
+                        if x1_raw >= bounds.x && x0_raw <= bounds.x + bounds.w {
+                            let x0 = x0_raw.max(bounds.x);
+                            let x1 = x1_raw.min(bounds.x + bounds.w);
+                            let y0 = bounds.y + top + CLIP_INSET;
+                            let y1 = bounds.y + top + target_row.height - CLIP_INSET;
+                            let track_color =
+                                arr.track(target_track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Coral);
+                            let selected = selection.clips.contains(&clip.id);
+                            self.draw_clip(canvas, &palette, clip, track_color, x0, y0, x1, y1, selected);
                         }
                     }
                 }

@@ -433,6 +433,13 @@ pub enum TimelineEvent {
     AddDrumSample(Arc<str>),
     ToggleDrumsMenu,
     RemoveTrack(TrackId),
+
+    /// A whole different project just got loaded (Open) or a fresh one
+    /// started (New): replaces the arrangement outright and drops undo
+    /// history, rather than going through `Command` - the old history
+    /// belongs to a now-gone arrangement, and reapplying it against this
+    /// one would corrupt it.
+    LoadArrangement(Arrangement),
 }
 
 impl Model for TimelineState {
@@ -842,6 +849,15 @@ impl Model for TimelineState {
             TimelineEvent::RemoveTrack(track) => {
                 self.do_command(Command::DeleteTrack { track: *track });
                 self.selection.set(Selection::default());
+            }
+            TimelineEvent::LoadArrangement(arrangement) => {
+                self.arrangement.set(arrangement.clone());
+                self.command_stack = CommandStack::new();
+                self.selection.set(Selection::default());
+                self.playhead_ticks.set(0);
+                self.clipboard = None;
+                self.clipboard_nonempty.set(false);
+                self.context_menu.set(None);
             }
             TimelineEvent::PeaksLoaded { source, peaks } => {
                 self.with_arrangement(|arr, _| {

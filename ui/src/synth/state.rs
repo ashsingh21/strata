@@ -69,6 +69,12 @@ pub enum SynthEvent {
     /// Pushes the latest params snapshot to the engine and drains its peak
     /// meter and LFO phases; `dt` in seconds.
     Tick(f32),
+    /// A whole different project's instrument patches just got loaded (or
+    /// a fresh, empty set, for a new project): replaces every track's
+    /// patch outright. Deselects rather than trying to guess which (if
+    /// any) track in the new project corresponds to whatever was selected
+    /// a moment ago in the old one.
+    LoadPatches(BTreeMap<TrackId, SynthState>),
 }
 
 /// The computer-keyboard "typing piano": one row of white keys (Z through
@@ -420,6 +426,13 @@ impl Model for SynthModel {
                         let _ = self.params_tx.push(snapshot);
                     }
                 }
+            }
+            SynthEvent::LoadPatches(patches) => {
+                for note in self.state.get().held_notes {
+                    self.sound_off(self.selected_track.get(), note);
+                }
+                self.patches.set(patches.clone());
+                self.selected_track.set(None);
             }
         });
 

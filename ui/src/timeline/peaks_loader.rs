@@ -15,7 +15,7 @@ use shared::playback::DecodedSource;
 use crate::timeline::state::TimelineEvent;
 
 /// Every unique audio source referenced by `arrangement`'s clips.
-fn audio_sources(arrangement: &Arrangement) -> HashSet<Arc<str>> {
+pub(crate) fn audio_sources(arrangement: &Arrangement) -> HashSet<Arc<str>> {
     arrangement
         .clips
         .iter()

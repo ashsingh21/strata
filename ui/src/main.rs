@@ -28,7 +28,7 @@ use vizia::prelude::*;
 use app::{AppData, AppEvent};
 use interval_input::state::IntervalInputModel;
 use piano_roll::state::{PianoRollEvent, PianoRollModel};
-use project::{project_path, ProjectEvent, ProjectModel};
+use project::{ProjectEvent, ProjectModel};
 use recorder::{RecorderModel, RecordingCoordinator};
 use shared::arrangement::position_to_ticks;
 use synth::state::{SynthEvent, SynthModel};
@@ -108,7 +108,8 @@ fn main() -> Result<(), ApplicationError> {
         // A saved project (if any) replaces the empty starting arrangement
         // before anything downstream reads it - the peak/decode loaders in
         // particular need the real clip list to know what to load.
-        let loaded_project = shared::project::load(&project_path()).ok();
+        let startup_path = project::startup_path();
+        let loaded_project = startup_path.as_deref().and_then(|p| shared::project::load(p).ok());
         if let Some(project) = &loaded_project {
             tl_arrangement.set(project.arrangement.clone());
             params.set_bpm(project.arrangement.tempo_map.bpm_at(0));
@@ -158,8 +159,9 @@ fn main() -> Result<(), ApplicationError> {
         let synth_patches = synth_model.patches;
         synth_model.build(cx);
 
-        let project_model = ProjectModel::new(tl_arrangement, synth_patches);
+        let project_model = ProjectModel::new(tl_arrangement, synth_patches, decode_request_tx.clone(), startup_path);
         let project_saved = project_model.saved;
+        let project_name = project_model.display_name;
         project_model.build(cx);
         let save_status = Memo::new(move |_| {
             let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
@@ -332,6 +334,7 @@ fn main() -> Result<(), ApplicationError> {
                     output_db,
                     arrangement: tl_arrangement,
                     save_status,
+                    project_name,
                 },
                 tl_bpm,
             );

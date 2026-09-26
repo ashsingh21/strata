@@ -15,9 +15,10 @@ use crate::glyph::{Glyph, GlyphKind, GlyphColor};
 use crate::interval_input::state::{scale_name, IntervalInputEvent};
 use crate::knob::Knob;
 use crate::meter::{Meter, HOT_THRESHOLD};
+use crate::project::ProjectEvent;
 use crate::recorder::RecorderModelEvent;
 use crate::timeline::state::TimelineEvent;
-use crate::tokens::{ThemeId, SPACE_2, SPACE_3};
+use crate::tokens::{ThemeId, SPACE_1, SPACE_2, SPACE_3};
 
 /// A bit taller than `tokens::SIZE_TOOLBAR` (which every *other* header -
 /// Carve's, the piano roll's, Interval Input's - still uses): the app's
@@ -45,10 +46,42 @@ pub struct HeaderProps {
     pub arrangement: Signal<Arrangement>,
     /// "Saved" or "Edited".
     pub save_status: Memo<String>,
+    /// The current project's display name (its file stem, or "Untitled"
+    /// before its first save) - see `crate::project`.
+    pub project_name: Signal<String>,
 }
 
 fn vsep(cx: &mut Context) {
     Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(22.0));
+}
+
+/// One row of the File menu - same shape as the timeline's right-click
+/// menu (`context_menu.rs`), but that one always closes via
+/// `TimelineEvent::CloseContextMenu`, so this is its own copy rather than
+/// a shared helper, parameterized on whichever `Signal<bool>` this menu
+/// closes with.
+fn file_menu_item(
+    cx: &mut Context,
+    label: &'static str,
+    menu_open: Signal<bool>,
+    action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
+) {
+    HStack::new(cx, move |cx| {
+        Label::new(cx, label).class("body");
+    })
+    .class("menu-item")
+    .on_press(move |cx| {
+        action(cx);
+        menu_open.set(false);
+    })
+    .cursor(CursorIcon::Hand)
+    .alignment(Alignment::Left)
+    .width(Stretch(1.0))
+    .height(Pixels(28.0));
+}
+
+fn file_menu_sep(cx: &mut Context) {
+    Element::new(cx).class("menu-sep").width(Stretch(1.0)).height(Pixels(1.0));
 }
 
 /// One transport button: a drawn glyph, its colour following its state.
@@ -72,7 +105,11 @@ fn elapsed_text(position: Position, bpm: f64) -> String {
 }
 
 pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + Copy + 'static) {
-    let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, interval_open, .. } = props;
+    let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, interval_open, project_name, .. } =
+        props;
+    let file_menu_open: Signal<bool> = Signal::new(false);
+    let renaming: Signal<bool> = Signal::new(false);
+    let rename_draft: Signal<String> = Signal::new(project_name.get());
 
     HStack::new(cx, move |cx| {
         // Project and what's happening to it.
@@ -86,10 +123,62 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             props.save_status.get()
         });
         VStack::new(cx, move |cx| {
-            Label::new(cx, crate::project::project_name()).class("title").font_size(14.0);
+            Binding::new(cx, renaming, move |cx| {
+                if renaming.get() {
+                    Textbox::new(cx, rename_draft)
+                        .class("title")
+                        .font_size(14.0)
+                        .on_edit(move |_cx, text| rename_draft.set(text))
+                        .on_submit(move |cx, text, _from_key| {
+                            cx.emit(ProjectEvent::Rename(text));
+                            renaming.set(false);
+                        })
+                        .on_cancel(move |_cx| renaming.set(false))
+                        .width(Pixels(126.0));
+                } else {
+                    Button::new(cx, move |cx| Label::new(cx, project_name).class("title").font_size(14.0))
+                        .class("btn")
+                        .class("quiet")
+                        .on_press(move |_cx| file_menu_open.update(|o| *o = !*o));
+                }
+            });
             Label::new(cx, status).class("value").font_size(12.0);
         })
         .width(Pixels(126.0))
+        .height(Auto);
+
+        // The File menu: no backdrop, unlike the timeline's right-click
+        // menu - it only ever spans this one corner, so toggling the
+        // title button again (or picking an item) is enough to close it.
+        // Built once and toggled with `.hidden` (`display: none`, same as
+        // every other overlay in the app) rather than conditionally
+        // constructed via `Binding` - a freshly built entity is a plausible
+        // reason a click landing right as it appears wouldn't resolve to
+        // it correctly.
+        VStack::new(cx, move |cx| {
+            file_menu_item(cx, "New", file_menu_open, |cx| cx.emit(ProjectEvent::New));
+            file_menu_item(cx, "Open...", file_menu_open, |cx| cx.emit(ProjectEvent::OpenDialog));
+            file_menu_sep(cx);
+            file_menu_item(cx, "Save", file_menu_open, |cx| cx.emit(ProjectEvent::Save));
+            file_menu_item(cx, "Save As...", file_menu_open, |cx| cx.emit(ProjectEvent::SaveAsDialog));
+            file_menu_sep(cx);
+            file_menu_item(cx, "Rename...", file_menu_open, move |_cx| {
+                rename_draft.set(project_name.get());
+                renaming.set(true);
+            });
+        })
+        .class("panel")
+        .class("context-menu")
+        .toggle_class("hidden", file_menu_open.map(|o| !*o))
+        .position_type(PositionType::Absolute)
+        .top(Pixels(HEADER_HEIGHT))
+        .left(Pixels(SPACE_3))
+        .gap(Pixels(2.0))
+        .padding_top(Pixels(SPACE_2))
+        .padding_bottom(Pixels(SPACE_2))
+        .padding_left(Pixels(SPACE_1))
+        .padding_right(Pixels(SPACE_1))
+        .width(Pixels(160.0))
         .height(Auto);
 
         vsep(cx);
