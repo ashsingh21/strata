@@ -1,6 +1,7 @@
 //! The arrangement timeline: a track-header column, a ruler and a lane
 //! area, backed by [`state::TimelineState`].
 
+pub mod beat_templates;
 pub mod header;
 pub mod lanes;
 pub mod peaks_loader;

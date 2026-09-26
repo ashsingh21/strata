@@ -88,6 +88,16 @@ pub fn sidebar(
                     row(cx, display, query, true)
                         .on_press(move |cx| cx.emit(TimelineEvent::AddDrumSample(source.clone())));
                 }
+
+                // A finished multi-bar groove across new tracks in one
+                // click, rather than placing each hit by hand - see
+                // `timeline::beat_templates`.
+                let templates = crate::timeline::beat_templates::TEMPLATES;
+                section_head(cx, "Beat templates", templates.len());
+                for (index, template) in templates.iter().enumerate() {
+                    row(cx, template.name.to_string(), query, true)
+                        .on_press(move |cx| cx.emit(TimelineEvent::AddDrumPattern(index)));
+                }
             })
             .width(Stretch(1.0))
             .height(Auto);

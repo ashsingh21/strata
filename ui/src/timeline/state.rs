@@ -431,6 +431,10 @@ pub enum TimelineEvent {
     /// relative to the assets dir, e.g. `"drums/kick.wav"`) as a new
     /// track - one clip, sized to the sample's own length, at tick 0.
     AddDrumSample(Arc<str>),
+    /// A built-in multi-bar pattern (index into
+    /// `beat_templates::TEMPLATES`) - one or more new tracks, each with
+    /// every bar's worth of hits already placed, one undo step.
+    AddDrumPattern(usize),
     ToggleDrumsMenu,
     RemoveTrack(TrackId),
 
@@ -840,6 +844,95 @@ impl Model for TimelineState {
                 crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
                 if let Some(tx) = &self.decode_request_tx {
                     let _ = tx.send(source.clone());
+                }
+                self.drums_menu_open.set(false);
+            }
+            TimelineEvent::AddDrumPattern(template_index) => {
+                let Some(template) = crate::timeline::beat_templates::TEMPLATES.get(*template_index) else { return };
+                let assets_dir = crate::timeline::assets_dir();
+
+                // Each unique sample's length in ticks, read once - a
+                // one-shot's own duration, same as `AddDrumSample`, not a
+                // fixed length that would drift if the tempo differs from
+                // whatever the sample happens to sound right at.
+                let mut lengths: std::collections::HashMap<&str, Ticks> = std::collections::HashMap::new();
+                for hit in template.hits {
+                    if lengths.contains_key(hit.sample) {
+                        continue;
+                    }
+                    let path = assets_dir.join(hit.sample);
+                    let Some(seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
+                        eprintln!("timeline: failed to read {}", path.display());
+                        continue;
+                    };
+                    lengths.insert(hit.sample, self.arrangement.get().tempo_map.seconds_to_ticks(seconds).max(1));
+                }
+
+                self.with_arrangement(|arr, stack| {
+                    let mut by_track: Vec<(&str, ClipColor, Vec<&crate::timeline::beat_templates::DrumHit>)> = Vec::new();
+                    for hit in template.hits {
+                        match by_track.iter_mut().find(|(name, _, _)| *name == hit.track_name) {
+                            Some(entry) => entry.2.push(hit),
+                            None => by_track.push((hit.track_name, hit.color, vec![hit])),
+                        }
+                    }
+                    let mut commands = Vec::new();
+                    for (track_name, color, hits) in by_track {
+                        let track_id = arr.alloc_id();
+                        let index = arr.tracks.len();
+                        let mut clips = Vec::new();
+                        for bar in 0..template.bars {
+                            for hit in &hits {
+                                let Some(&length) = lengths.get(hit.sample) else { continue };
+                                let clip_id = arr.alloc_id();
+                                let start = bar * (PPQ * 4) + hit.beat * PPQ;
+                                clips.push(Clip {
+                                    id: clip_id,
+                                    track: track_id,
+                                    start,
+                                    length,
+                                    name: track_name.to_string(),
+                                    content: ClipContent::Audio {
+                                        source: hit.sample.into(),
+                                        peaks: None,
+                                        source_offset_samples: 0,
+                                    },
+                                    recording: false,
+                                });
+                            }
+                        }
+                        let track = Track {
+                            id: track_id,
+                            name: track_name.to_string(),
+                            color,
+                            kind: TrackKind::Audio,
+                            mute: false,
+                            solo: false,
+                            arm: false,
+                            gain_db: 0.0,
+                            height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
+                            instrument: None,
+                        };
+                        commands.push(Command::InsertTrack {
+                            track: Box::new(track),
+                            index,
+                            clips,
+                            automation: vec![],
+                        });
+                    }
+                    stack.do_command(Command::Batch(commands), arr);
+                });
+
+                let mut spawned: HashSet<&str> = HashSet::new();
+                for hit in template.hits {
+                    if !spawned.insert(hit.sample) {
+                        continue;
+                    }
+                    let source: Arc<str> = hit.sample.into();
+                    crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
+                    if let Some(tx) = &self.decode_request_tx {
+                        let _ = tx.send(source);
+                    }
                 }
                 self.drums_menu_open.set(false);
             }

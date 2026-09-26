@@ -1,0 +1,187 @@
+{
+  "arrangement": {
+    "tempo_map": {
+      "events": [
+        {
+          "tick": 0,
+          "bpm": 128.0,
+          "time_signature": {
+            "numerator": 4,
+            "denominator": 4
+          }
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "id": 1,
+        "name": "Audio 1",
+        "color": "Coral",
+        "kind": "Audio",
+        "mute": false,
+        "solo": false,
+        "arm": true,
+        "gain_db": 0.0,
+        "height": 96.0,
+        "instrument": null
+      },
+      {
+        "id": 3,
+        "name": "Kick",
+        "color": "Amber",
+        "kind": "Audio",
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "gain_db": 0.0,
+        "height": 96.37784,
+        "instrument": null
+      },
+      {
+        "id": 5,
+        "name": "Snare",
+        "color": "Teal",
+        "kind": "Audio",
+        "mute": false,
+        "solo": false,
+        "arm": false,
+        "gain_db": 0.0,
+        "height": 96.0,
+        "instrument": null
+      }
+    ],
+    "clips": [
+      {
+        "id": 2,
+        "track": 1,
+        "start": 0,
+        "length": 30720,
+        "name": "Take",
+        "content": {
+          "Audio": {
+            "source": "rec_1_0.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 7,
+        "track": 3,
+        "start": 0,
+        "length": 720,
+        "name": "Kick",
+        "content": {
+          "Audio": {
+            "source": "drums/kick.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 8,
+        "track": 5,
+        "start": 960,
+        "length": 3120,
+        "name": "Snare",
+        "content": {
+          "Audio": {
+            "source": "drums/snare.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 9,
+        "track": 3,
+        "start": 1920,
+        "length": 720,
+        "name": "Kick",
+        "content": {
+          "Audio": {
+            "source": "drums/kick.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 10,
+        "track": 5,
+        "start": 2880,
+        "length": 3120,
+        "name": "Snare",
+        "content": {
+          "Audio": {
+            "source": "drums/snare.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 11,
+        "track": 3,
+        "start": 3840,
+        "length": 720,
+        "name": "Kick",
+        "content": {
+          "Audio": {
+            "source": "drums/kick.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 12,
+        "track": 5,
+        "start": 4800,
+        "length": 3120,
+        "name": "Snare",
+        "content": {
+          "Audio": {
+            "source": "drums/snare.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 13,
+        "track": 3,
+        "start": 5760,
+        "length": 720,
+        "name": "Kick",
+        "content": {
+          "Audio": {
+            "source": "drums/kick.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      },
+      {
+        "id": 14,
+        "track": 5,
+        "start": 6720,
+        "length": 3120,
+        "name": "Snare",
+        "content": {
+          "Audio": {
+            "source": "drums/snare.wav",
+            "source_offset_samples": 0
+          }
+        },
+        "recording": false
+      }
+    ],
+    "automation": [],
+    "loop_range": null,
+    "markers": [],
+    "next_id": 15
+  },
+  "instruments": []
+}
