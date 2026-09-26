@@ -7,6 +7,8 @@ use super::model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
     LoopRange, MidiNote, Track, TrackId,
 };
+#[cfg(test)]
+use super::model::DEFAULT_VELOCITY;
 use super::time::{TempoMap, Ticks};
 
 #[derive(Clone, Debug)]
@@ -24,6 +26,8 @@ pub enum Command {
     DuplicateClip { clip: ClipId, new_id: ClipId, offset: Ticks },
     AddMidiNote { clip: ClipId, note: MidiNote },
     RemoveMidiNote { clip: ClipId, start: Ticks, pitch: u8 },
+    /// Sets the velocity of the note at (`start`, `pitch`).
+    SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
@@ -226,6 +230,20 @@ impl Command {
                     .expect("RemoveMidiNote: no matching note");
                 let removed = notes.remove(index);
                 Command::AddMidiNote { clip: clip_id, note: removed }
+            }
+
+            Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity } => {
+                let clip = arr.clip_mut(clip_id).expect("SetNoteVelocity: unknown clip");
+                let ClipContent::Midi { notes } = &mut clip.content else {
+                    panic!("SetNoteVelocity: clip is not a MIDI clip")
+                };
+                let note = notes
+                    .iter_mut()
+                    .find(|n| n.start == start && n.pitch == pitch)
+                    .expect("SetNoteVelocity: no matching note");
+                let previous = note.velocity;
+                note.velocity = velocity.clamp(1, 127);
+                Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity: previous }
             }
 
             Command::AddBreakpoint { lane, point } => {
@@ -487,7 +505,7 @@ mod tests {
         let mut stack = CommandStack::new();
 
         stack.do_command(
-            Command::AddMidiNote { clip: clip_id, note: MidiNote { start: 0, length: PPQ / 4, pitch: 60 } },
+            Command::AddMidiNote { clip: clip_id, note: MidiNote { start: 0, length: PPQ / 4, pitch: 60, velocity: DEFAULT_VELOCITY } },
             &mut arr,
         );
         let ClipContent::Midi { notes } = &arr.clip(clip_id).unwrap().content else { panic!() };
@@ -590,5 +608,33 @@ mod tests {
         assert_eq!(arr.clip(1).unwrap().track, 2);
         assert_eq!(arr.automation_lane(1).unwrap().track, 2);
         assert_eq!(arr.clip(2).unwrap().track, 1);
+    }
+
+    #[test]
+    fn set_note_velocity_undoes_to_the_previous_value() {
+        let mut arr = test_arrangement();
+        let clip_id = 1;
+        arr.clips.push(Clip {
+            id: clip_id,
+            track: 1,
+            start: 0,
+            length: PPQ * 4,
+            name: "Velocity".into(),
+            content: ClipContent::Midi { notes: vec![] },
+            recording: false,
+        });
+        let add = Command::AddMidiNote {
+            clip: clip_id,
+            note: MidiNote { start: 0, length: PPQ / 4, pitch: 60, velocity: DEFAULT_VELOCITY },
+        };
+        add.apply(&mut arr);
+        let undo = Command::SetNoteVelocity { clip: clip_id, start: 0, pitch: 60, velocity: 40 }.apply(&mut arr);
+        let velocity = |arr: &Arrangement| match &arr.clip(clip_id).unwrap().content {
+            ClipContent::Midi { notes } => notes[0].velocity,
+            _ => unreachable!(),
+        };
+        assert_eq!(velocity(&arr), 40);
+        undo.apply(&mut arr);
+        assert_eq!(velocity(&arr), DEFAULT_VELOCITY);
     }
 }

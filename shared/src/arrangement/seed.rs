@@ -5,7 +5,7 @@
 
 use super::model::{
     Arrangement, AutomationLane, Breakpoint, Clip, ClipColor, ClipContent, LoopRange, Marker,
-    MidiNote, Track, TrackKind,
+    MidiNote, Track, TrackKind, DEFAULT_VELOCITY,
 };
 use super::time::{TempoMap, TimeSignature, PPQ};
 
@@ -187,6 +187,8 @@ fn bass_pattern() -> Vec<MidiNote> {
             start: BEAT / 2 * i as i64,
             length: BEAT / 2 - PPQ / 16,
             pitch: pitches[i % pitches.len()],
+            // Accent the downbeats so the velocity lane has something to show.
+            velocity: if i % 4 == 0 { 118 } else { 88 },
         })
         .collect()
 }
@@ -194,7 +196,7 @@ fn bass_pattern() -> Vec<MidiNote> {
 fn pad_pattern() -> Vec<MidiNote> {
     let chord = [48u8, 52, 55];
     (0..8)
-        .flat_map(|bar| chord.iter().map(move |&pitch| MidiNote { start: BAR * bar, length: BAR, pitch }))
+        .flat_map(|bar| chord.iter().map(move |&pitch| MidiNote { start: BAR * bar, length: BAR, pitch, velocity: DEFAULT_VELOCITY }))
         .collect()
 }
 

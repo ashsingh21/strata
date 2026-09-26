@@ -51,6 +51,17 @@ pub struct MidiNote {
     pub start: Ticks,
     pub length: Ticks,
     pub pitch: u8,
+    /// 1..=127, how hard the note is played (Carve maps it to level).
+    /// `default` so projects saved before velocity existed still load.
+    #[serde(default = "default_velocity")]
+    pub velocity: u8,
+}
+
+/// The velocity every new note gets (drawn, step-entered or seeded).
+pub const DEFAULT_VELOCITY: u8 = 100;
+
+fn default_velocity() -> u8 {
+    DEFAULT_VELOCITY
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

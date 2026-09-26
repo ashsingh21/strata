@@ -333,6 +333,19 @@ fn main() -> Result<(), ApplicationError> {
                         // The device chain: the track's one device, raised,
                         // and the interval input's toggle as a quiet action.
                         HStack::new(cx, move |cx| {
+                            // While a clip is open its editor is raised; the
+                            // instrument chip goes back to the device.
+                            let editing = piano_roll_open_clip.map(|c| c.is_some());
+                            let clip_name = Memo::new(move |_| {
+                                piano_roll_open_clip
+                                    .get()
+                                    .and_then(|id| tl_arrangement.get().clip(id).map(|c| c.name.clone()))
+                                    .unwrap_or_default()
+                            });
+                            Button::new(cx, move |cx| Label::new(cx, clip_name))
+                                .class("btn")
+                                .class("is-on")
+                                .toggle_class("hidden", editing.map(|e| !*e));
                             Button::new(cx, |cx| {
                                 HStack::new(cx, |cx| {
                                     Element::new(cx).class("swatch").background_color(tokens::CLIP_VIOLET);
@@ -343,7 +356,8 @@ fn main() -> Result<(), ApplicationError> {
                                 .size(Auto)
                             })
                             .class("btn")
-                            .class("is-on");
+                            .toggle_class("is-on", editing.map(|e| !*e))
+                            .on_press(|cx| cx.emit(PianoRollEvent::Close));
                             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                             Button::new(cx, |cx| Label::new(cx, "Show input"))
                                 .class("btn")
@@ -357,17 +371,36 @@ fn main() -> Result<(), ApplicationError> {
                         .width(Stretch(1.0))
                         .height(Pixels(tokens::SIZE_CONTROL + 6.0));
 
-                        synth::synth_view(
-                            cx,
-                            theme,
-                            synth_state,
-                            synth_lfo_phases,
-                            synth_octave_shift,
-                            synth_meter_l,
-                            synth_meter_r,
-                            synth_help_open,
-                            synth_lfo_drag,
-                        );
+                        // The editor replaces the device while a clip is open.
+                        Binding::new(cx, piano_roll_open_clip, move |cx| {
+                            if piano_roll_open_clip.get().is_some() {
+                                piano_roll::piano_roll_view(
+                                    cx,
+                                    theme,
+                                    tl_arrangement,
+                                    piano_roll_open_clip,
+                                    piano_roll_mode,
+                                    piano_roll_label_mode,
+                                    piano_roll_selected,
+                                    tl_snap,
+                                    interval_key,
+                                    interval_scale_mask,
+                                    tl_playhead,
+                                );
+                            } else {
+                                synth::synth_view(
+                                    cx,
+                                    theme,
+                                    synth_state,
+                                    synth_lfo_phases,
+                                    synth_octave_shift,
+                                    synth_meter_l,
+                                    synth_meter_r,
+                                    synth_help_open,
+                                    synth_lfo_drag,
+                                );
+                            }
+                        });
 
                         interval_input::interval_input_view(
                             cx,
@@ -395,19 +428,6 @@ fn main() -> Result<(), ApplicationError> {
 
             timeline::drums_menu_view(cx, tl_drums_menu_open);
 
-            piano_roll::piano_roll_view(
-                cx,
-                theme,
-                tl_arrangement,
-                piano_roll_open_clip,
-                piano_roll_mode,
-                piano_roll_label_mode,
-                piano_roll_selected,
-                tl_snap,
-                interval_key,
-                interval_scale_mask,
-                tl_playhead,
-            );
         })
         .class("app")
         .toggle_class("theme-daylight", is_daylight)

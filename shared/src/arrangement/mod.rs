@@ -15,7 +15,7 @@ pub mod transform;
 pub use commands::{Command, CommandStack};
 pub use model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent,
-    ClipId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind,
+    ClipId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind, DEFAULT_VELOCITY,
 };
 pub use peaks::{PeakLevel, PeakPyramid};
 pub use schedule::{notes_in_range, ScheduledNotes};

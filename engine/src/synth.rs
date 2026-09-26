@@ -38,6 +38,13 @@ fn midi_to_hz(note: f32) -> f32 {
     440.0 * 2f32.powf((note - 69.0) / 12.0)
 }
 
+/// Velocity to level: full at 127, and a square-law curve below it (so 64
+/// is about -12 dB) - soft notes get audibly softer without vanishing.
+fn velocity_to_gain(velocity: u8) -> f32 {
+    let v = velocity.clamp(1, 127) as f32 / 127.0;
+    v * v
+}
+
 fn db_to_gain(db: f32) -> f32 {
     10f32.powf(db / 20.0)
 }
@@ -320,6 +327,8 @@ struct Voice {
     note: u8,
     current_note: f32,
     target_note: f32,
+    /// The note's velocity as a level multiplier.
+    velocity_gain: f32,
     /// `midi_to_hz(current_note)`, recomputed only while gliding.
     current_hz: f32,
     unison: [UnisonOsc; UNISON],
@@ -340,6 +349,7 @@ impl Voice {
             current_note: REF_NOTE,
             target_note: REF_NOTE,
             current_hz: midi_to_hz(REF_NOTE),
+            velocity_gain: 1.0,
             unison: std::array::from_fn(|i| {
                 UnisonOsc::new(seed.wrapping_mul(2_654_435_761).wrapping_add(i as u32 * 97))
             }),
@@ -448,18 +458,20 @@ impl SynthEngine {
 
     pub fn handle_note_event(&mut self, event: NoteEvent) {
         if event.on {
-            self.note_on(event.note);
+            self.note_on(event.note, event.velocity);
         } else {
             self.note_off(event.note);
         }
     }
 
-    fn note_on(&mut self, note: u8) {
+    fn note_on(&mut self, note: u8, velocity: u8) {
+        let velocity_gain = velocity_to_gain(velocity);
         if self.params.voice_mode == VoiceMode::Mono {
             self.mono_stack.retain(|n| *n != note);
             self.mono_stack.push(note);
             let legato = self.voices[0].active;
             self.voices[0].note = note;
+            self.voices[0].velocity_gain = velocity_gain;
             self.voices[0].target_note = note as f32;
             if !legato {
                 self.voices[0].current_note = note as f32;
@@ -481,6 +493,7 @@ impl SynthEngine {
         let voice = &mut self.voices[slot];
         voice.active = true;
         voice.note = note;
+        voice.velocity_gain = velocity_gain;
         voice.current_note = note as f32;
         voice.current_hz = midi_to_hz(note as f32);
         voice.target_note = note as f32;
@@ -675,7 +688,7 @@ impl SynthEngine {
             for (ch, dry) in [dry_l, dry_r].into_iter().enumerate() {
                 let x = voice.dc[ch].process(dry);
                 let x = voice.drive[ch].process(x * drive_gain);
-                let y = voice.filter[ch].process(x, p.filter.filter_type, &coeffs) * amp_level;
+                let y = voice.filter[ch].process(x, p.filter.filter_type, &coeffs) * amp_level * voice.velocity_gain;
                 if ch == 0 {
                     sum_l += y;
                 } else {
@@ -733,7 +746,7 @@ mod tests {
     fn render(state: &SynthState, note: u8, seconds: f32) -> Vec<f32> {
         let mut engine = SynthEngine::new(SR);
         engine.set_params(SynthParams::from_state(state));
-        engine.handle_note_event(NoteEvent { note, on: true });
+        engine.handle_note_event(NoteEvent { note, on: true, velocity: 127 });
         (0..(SR * seconds) as usize).map(|_| engine.process().0).collect()
     }
 
@@ -832,7 +845,7 @@ mod tests {
         let mut engine = SynthEngine::new(SR);
         engine.set_params(SynthParams::from_state(&s));
         for note in 40..56 {
-            engine.handle_note_event(NoteEvent { note, on: true });
+            engine.handle_note_event(NoteEvent { note, on: true, velocity: 127 });
         }
         let started = std::time::Instant::now();
         let mut acc = 0.0f32;
@@ -857,7 +870,7 @@ mod tests {
         let mut engine = SynthEngine::new(SR);
         engine.set_params(SynthParams::from_state(&s));
         for note in [36, 43, 48, 55, 60, 64, 67, 72] {
-            engine.handle_note_event(NoteEvent { note, on: true });
+            engine.handle_note_event(NoteEvent { note, on: true, velocity: 127 });
         }
         let peak = (0..SR as usize).map(|_| { let (l, r) = engine.process(); l.abs().max(r.abs()) }).fold(0.0, f32::max);
         assert!(peak <= 1.0, "{peak}");

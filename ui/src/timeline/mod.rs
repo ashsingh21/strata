@@ -77,12 +77,10 @@ pub fn timeline_view(
             .width(Pixels(HEAD_WIDTH))
             .height(Pixels(tokens::SIZE_RULER));
 
-            // Plain top-to-bottom relative flow, explicit fixed heights
-            // throughout, no Stretch/Absolute anywhere in this column: two
-            // earlier attempts using Stretch(1.0) containers and Absolute
-            // positioning both produced large, unexplained vertical offsets
-            // (Vizia stack layout quirk this session couldn't pin down).
-            // This trades "fills the window" for "is definitely correct".
+            // The headers scroll with the lanes: a clipping viewport the
+            // lanes' height, with the header stack inside it offset by the
+            // lanes' vertical scroll. The wheel over the headers scrolls too.
+            WheelScroll {}.build(cx, move |cx| {
             VStack::new(cx, move |cx| {
                 // A plain loop only builds this once, at startup: it
                 // won't pick up a track being added or removed later.
@@ -128,9 +126,16 @@ pub fn timeline_view(
             .class("tl-heads")
             .width(Pixels(HEAD_WIDTH))
             .height(Auto);
+            })
+            // Vizia's own scroll offset (what ScrollView uses): shifts the
+            // headers and their hit-testing together.
+            .vertical_scroll(transform.map(|t| -(t.scroll_y as f32)))
+            .overflow(Overflow::Hidden)
+            .width(Pixels(HEAD_WIDTH))
+            .height(Stretch(1.0));
         })
         .width(Pixels(HEAD_WIDTH))
-        .height(Auto);
+        .height(Stretch(1.0));
 
         VStack::new(cx, move |cx| {
             Ruler::new(cx, arrangement, transform, playhead, theme)
@@ -172,6 +177,23 @@ pub fn timeline_view(
 /// parent produced unexplained offsets earlier in this project (see
 /// `timeline_view`'s layout comment), so floating panels here stay
 /// top-level instead.
+/// Passes wheel/trackpad scrolling over the track headers on to the
+/// timeline, so the whole arrangement scrolls wherever the pointer is.
+struct WheelScroll {}
+
+impl View for WheelScroll {
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, meta| {
+            if let WindowEvent::MouseScroll(x, y) = window_event {
+                if !cx.modifiers().ctrl() && !cx.modifiers().logo() {
+                    cx.emit(TimelineEvent::ScrollBy { dx: (-*x as f64) * 32.0, dy: (-*y as f64) * 32.0 });
+                    meta.consume();
+                }
+            }
+        });
+    }
+}
+
 /// The drum sample file names in `assets/drums/`, sorted.
 pub fn drum_samples() -> Vec<String> {
     let mut samples: Vec<String> = std::fs::read_dir(assets_dir().join("drums"))

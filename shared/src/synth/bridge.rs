@@ -82,6 +82,8 @@ pub fn lfo_rate_hz(rate_norm: f32) -> f32 {
 pub struct NoteEvent {
     pub note: u8,
     pub on: bool,
+    /// 1..=127; sets the voice's level (ignored for note-offs).
+    pub velocity: u8,
 }
 
 /// One block's worth of Carve's own post-mix peak level, separate from the

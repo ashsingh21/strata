@@ -9,7 +9,8 @@ use super::time::Ticks;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ScheduledNotes {
-    pub note_on: Vec<u8>,
+    /// (pitch, velocity) of every note starting in the range.
+    pub note_on: Vec<(u8, u8)>,
     pub note_off: Vec<u8>,
 }
 
@@ -34,7 +35,7 @@ pub fn notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> ScheduledNot
             let abs_start = clip.start + note.start;
             let abs_end = abs_start + note.length;
             if abs_start > from && abs_start <= to {
-                result.note_on.push(note.pitch);
+                result.note_on.push((note.pitch, note.velocity));
             }
             if abs_end > from && abs_end <= to {
                 result.note_off.push(note.pitch);
@@ -47,7 +48,7 @@ pub fn notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> ScheduledNot
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arrangement::model::{Clip, ClipColor, MidiNote, Track, TrackKind};
+    use crate::arrangement::model::{Clip, ClipColor, MidiNote, Track, TrackKind, DEFAULT_VELOCITY};
     use crate::arrangement::time::{TempoMap, TimeSignature, PPQ};
     use crate::arrangement::Arrangement;
 
@@ -70,7 +71,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Clip".into(),
-            content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60 }] },
+            content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60, velocity: DEFAULT_VELOCITY }] },
             recording: false,
         });
         arr
@@ -80,7 +81,7 @@ mod tests {
     fn note_start_triggers_on_within_range() {
         let arr = arrangement_with_one_note(false, false);
         let scheduled = notes_in_range(&arr, PPQ - 10, PPQ + 10);
-        assert_eq!(scheduled.note_on, vec![60]);
+        assert_eq!(scheduled.note_on, vec![(60, DEFAULT_VELOCITY)]);
         assert!(scheduled.note_off.is_empty());
     }
 

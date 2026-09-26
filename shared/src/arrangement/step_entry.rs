@@ -6,7 +6,7 @@
 //! arrangement itself; it's simply unused if an existing clip is reused
 //! instead.
 
-use super::model::{Arrangement, Clip, ClipContent, ClipId, MidiNote, TrackId};
+use super::model::{Arrangement, Clip, ClipContent, ClipId, MidiNote, TrackId, DEFAULT_VELOCITY};
 use super::time::Ticks;
 use super::Command;
 
@@ -50,7 +50,7 @@ pub fn step_entry_commit(
     for &pitch in pitches {
         batch.push(Command::AddMidiNote {
             clip: clip_id,
-            note: MidiNote { start: playhead - clip_start, length: step, pitch },
+            note: MidiNote { start: playhead - clip_start, length: step, pitch, velocity: DEFAULT_VELOCITY },
         });
     }
 
@@ -96,7 +96,7 @@ mod tests {
         assert_eq!(clip.start, 0);
         assert_eq!(clip.length, STEP);
         let ClipContent::Midi { notes } = &clip.content else { panic!("expected a MIDI clip") };
-        assert_eq!(notes, &[MidiNote { start: 0, length: STEP, pitch: 60 }]);
+        assert_eq!(notes, &[MidiNote { start: 0, length: STEP, pitch: 60, velocity: DEFAULT_VELOCITY }]);
     }
 
     #[test]
@@ -117,7 +117,7 @@ mod tests {
         assert_eq!(clip.length, STEP * 2);
         let ClipContent::Midi { notes } = &clip.content else { panic!() };
         assert_eq!(notes.len(), 2);
-        assert_eq!(notes[1], MidiNote { start: STEP, length: STEP, pitch: 64 });
+        assert_eq!(notes[1], MidiNote { start: STEP, length: STEP, pitch: 64, velocity: DEFAULT_VELOCITY });
     }
 
     #[test]

@@ -68,6 +68,9 @@ pub struct TimelineState {
     pub tool: Signal<TimelineTool>,
     pub playhead_ticks: Signal<Ticks>,
     pub drums_menu_open: Signal<bool>,
+    /// The lane area's on-screen size in px, reported by `LaneArea`: what
+    /// scrolling is clamped against, and what Follow keeps the playhead in.
+    viewport: (f64, f64),
     command_stack: CommandStack,
 
     // Step-entry recording (not reactive): armed via the transport's
@@ -99,6 +102,31 @@ pub struct TimelineState {
     decode_request_tx: Option<std::sync::mpsc::Sender<Arc<str>>>,
 }
 
+/// Room below the last row for the "+ Audio track / + MIDI track" actions
+/// in the header column, so scrolling can always reach them.
+const ADD_ROW_ROOM: f64 = 48.0;
+
+/// The stacked rows' total height, in px (as `LaneArea` lays them out).
+pub fn content_height(arr: &Arrangement) -> f64 {
+    let tracks = arr.tracks.len() as f64 * crate::timeline::LANE_HEIGHT as f64;
+    let lanes = arr
+        .automation
+        .iter()
+        .filter(|l| arr.tracks.iter().any(|t| t.id == l.track))
+        .count() as f64
+        * crate::timeline::LANE_AUTO_HEIGHT as f64;
+    tracks + lanes + ADD_ROW_ROOM
+}
+
+/// How far right there's anything to scroll to, in unscrolled px: the end
+/// of the last clip plus eight bars of empty room to write into (at least
+/// 32 bars).
+pub fn content_width(arr: &Arrangement, t: &ViewTransform) -> f64 {
+    let bar = shared::arrangement::PPQ * 4;
+    let end = arr.clips.iter().map(|c| c.start + c.length).max().unwrap_or(0);
+    t.ticks_to_px((end + bar * 8).max(bar * 32))
+}
+
 impl TimelineState {
     pub fn new(
         record_armed: Signal<bool>,
@@ -115,6 +143,7 @@ impl TimelineState {
             tool: Signal::new(TimelineTool::default()),
             playhead_ticks: Signal::new(0),
             drums_menu_open: Signal::new(false),
+            viewport: (ASSUMED_LANE_WIDTH, 400.0),
             command_stack: CommandStack::new(),
             record_armed,
             playing,
@@ -125,6 +154,18 @@ impl TimelineState {
         }
     }
 
+    /// Keeps the view inside the arrangement: no scrolling past the last
+    /// row (plus room for the add-track actions) or far past the last clip.
+    fn clamp_scroll(&mut self) {
+        let arr = self.arrangement.get();
+        let (w, h) = self.viewport;
+        self.transform.update(|t| {
+            let max_x = content_width(&arr, t) - w;
+            let max_y = content_height(&arr) - h;
+            t.clamp_scroll(max_x, max_y);
+        });
+    }
+
     pub fn set_decode_sender(&mut self, tx: std::sync::mpsc::Sender<Arc<str>>) {
         self.decode_request_tx = Some(tx);
     }
@@ -133,6 +174,8 @@ impl TimelineState {
         let mut arr = self.arrangement.get();
         f(&mut arr, &mut self.command_stack);
         self.arrangement.set(arr);
+        // Removing tracks or clips can leave the view scrolled past the end.
+        self.clamp_scroll();
     }
 
     fn do_command(&mut self, command: Command) {
@@ -205,6 +248,8 @@ pub enum TimelineEvent {
 
     Zoom { cursor_x: f64, factor: f64 },
     ScrollBy { dx: f64, dy: f64 },
+    /// The lane area's size changed (window resize, panel opening).
+    SetViewport { width: f64, height: f64 },
 
     ScrubPlayhead(Ticks),
     /// Sent every frame from the app's central timer: while playing, the
@@ -224,6 +269,8 @@ pub enum TimelineEvent {
     /// `DeleteSelected` instead, batched into one undo step).
     AddMidiNoteAt { clip: ClipId, note: MidiNote },
     RemoveMidiNoteAt { clip: ClipId, start: Ticks, pitch: u8 },
+    /// A velocity-lane drag ended: one undoable edit, not one per pixel.
+    SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
 
     /// A finished guitar/mic take: insert it as a real clip on `track`,
     /// one undo step, same as any other clip insertion.
@@ -444,12 +491,18 @@ impl Model for TimelineState {
             }
             TimelineEvent::Zoom { cursor_x, factor } => {
                 self.transform.update(|t| t.zoom_at(*cursor_x, *factor));
+                self.clamp_scroll();
             }
             TimelineEvent::ScrollBy { dx, dy } => {
                 self.transform.update(|t| {
-                    t.scroll_x = (t.scroll_x + dx).max(0.0);
-                    t.scroll_y = (t.scroll_y + dy).max(0.0);
+                    t.scroll_x += dx;
+                    t.scroll_y += dy;
                 });
+                self.clamp_scroll();
+            }
+            TimelineEvent::SetViewport { width, height } => {
+                self.viewport = (*width, *height);
+                self.clamp_scroll();
             }
             TimelineEvent::ScrubPlayhead(ticks) => {
                 self.playhead_ticks.set((*ticks).max(0));
@@ -460,9 +513,10 @@ impl Model for TimelineState {
                     if self.follow.get() {
                         self.transform.update(|t| {
                             let x = t.tick_to_x(*ticks);
-                            let in_view = (0.0..=ASSUMED_LANE_WIDTH * 0.9).contains(&x);
+                            let width = self.viewport.0;
+                            let in_view = (0.0..=width * 0.9).contains(&x);
                             if !in_view {
-                                t.scroll_x = (t.scroll_x + x - ASSUMED_LANE_WIDTH * 0.1).max(0.0);
+                                t.scroll_x = (t.scroll_x + x - width * 0.1).max(0.0);
                             }
                         });
                     }
@@ -473,6 +527,9 @@ impl Model for TimelineState {
             }
             TimelineEvent::AddMidiNoteAt { clip, note } => {
                 self.do_command(Command::AddMidiNote { clip: *clip, note: *note });
+            }
+            TimelineEvent::SetNoteVelocity { clip, start, pitch, velocity } => {
+                self.do_command(Command::SetNoteVelocity { clip: *clip, start: *start, pitch: *pitch, velocity: *velocity });
             }
             TimelineEvent::RemoveMidiNoteAt { clip, start, pitch } => {
                 self.do_command(Command::RemoveMidiNote { clip: *clip, start: *start, pitch: *pitch });

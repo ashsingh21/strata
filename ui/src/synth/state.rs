@@ -46,7 +46,8 @@ pub enum SynthEvent {
     /// Triggered by the timeline's playback scheduler, not by the player -
     /// sounds a note and updates the on-screen keyboard, but doesn't feed
     /// step-entry recording.
-    NoteOn(u8),
+    /// (pitch, velocity).
+    NoteOn(u8, u8),
     NoteOff(u8),
     ToggleHelp,
     /// Replaces the whole patch with a preset (keeping held keys held).
@@ -162,24 +163,24 @@ impl SynthModel {
 
     /// Sounds a note and updates the on-screen keyboard - shared by both
     /// player-triggered notes and the playback scheduler.
-    fn sound_on(&mut self, note: u8) {
+    fn sound_on(&mut self, note: u8, velocity: u8) {
         self.state.update(|s| {
             if !s.held_notes.contains(&note) {
                 s.held_notes.push(note);
             }
         });
-        let _ = self.note_tx.push(NoteEvent { note, on: true });
+        let _ = self.note_tx.push(NoteEvent { note, on: true, velocity });
     }
 
     fn sound_off(&mut self, note: u8) {
         self.state.update(|s| s.held_notes.retain(|n| *n != note));
-        let _ = self.note_tx.push(NoteEvent { note, on: false });
+        let _ = self.note_tx.push(NoteEvent { note, on: false, velocity: 0 });
     }
 
     /// A note the player actually pressed (mouse or computer keyboard):
     /// sounds it and marks it as part of the in-progress step-entry chord.
     fn note_on(&mut self, note: u8) {
-        self.sound_on(note);
+        self.sound_on(note, shared::arrangement::DEFAULT_VELOCITY);
         self.step_record_pitches.insert(note);
     }
 
@@ -225,7 +226,7 @@ impl Model for SynthModel {
                     self.note_on(*note);
                 }
             }
-            SynthEvent::NoteOn(note) => self.sound_on(*note),
+            SynthEvent::NoteOn(note, velocity) => self.sound_on(*note, *velocity),
             SynthEvent::NoteOff(note) => self.sound_off(*note),
             SynthEvent::ToggleHelp => self.help_open.update(|v| *v = !*v),
             SynthEvent::LoadPreset(build) => {

@@ -98,6 +98,23 @@ enum Drag {
         anchor_tick: Ticks,
         current_tick: Ticks,
     },
+    /// Dragging a scrollbar thumb: pointer travel scales to content travel.
+    ScrollThumb { vertical: bool, last: f32 },
+}
+
+/// Scrollbar thumb thickness and its grab zone from the lane edge.
+const THUMB_PX: f32 = 5.0;
+const THUMB_GRAB_PX: f32 = 12.0;
+
+/// A scrollbar thumb along an edge `track_len` long: (start, length) in
+/// px, or `None` when everything already fits.
+fn thumb(track_len: f32, content: f32, scroll: f32) -> Option<(f32, f32)> {
+    if content <= track_len + 1.0 {
+        return None;
+    }
+    let len = (track_len * track_len / content).max(24.0);
+    let start = (scroll / (content - track_len)).clamp(0.0, 1.0) * (track_len - len);
+    Some((start, len))
 }
 
 pub struct LaneArea {
@@ -158,8 +175,12 @@ impl View for LaneArea {
             WindowEvent::MouseUp(button) if *button == MouseButton::Left => {
                 self.on_mouse_up(cx);
             }
-            WindowEvent::MouseScroll(_x, y) => {
-                self.on_scroll(cx, *y);
+            WindowEvent::MouseScroll(x, y) => {
+                self.on_scroll(cx, *x, *y);
+            }
+            WindowEvent::GeometryChanged(_) => {
+                let b = cx.bounds();
+                cx.emit(TimelineEvent::SetViewport { width: b.w as f64, height: b.h as f64 });
             }
             _ => {}
         });
@@ -167,6 +188,7 @@ impl View for LaneArea {
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         self.draw_impl(cx, canvas);
+        self.draw_scrollbars(cx, canvas);
     }
 }
 
@@ -178,6 +200,19 @@ impl LaneArea {
 
     fn on_mouse_down(&mut self, cx: &mut EventContext) {
         let (lx, ly) = self.local_pos(cx);
+        // Scrollbar thumbs sit on top of everything along the edges.
+        {
+            let b = cx.bounds();
+            let (cw, ch) = self.content_size();
+            let t = self.transform.get();
+            let on_right = lx >= b.w - THUMB_GRAB_PX && thumb(b.h, ch, t.scroll_y as f32).is_some();
+            let on_bottom = ly >= b.h - THUMB_GRAB_PX && thumb(b.w, cw, t.scroll_x as f32).is_some();
+            if on_right || on_bottom {
+                self.drag = Some(Drag::ScrollThumb { vertical: on_right, last: if on_right { ly } else { lx } });
+                cx.capture();
+                return;
+            }
+        }
         let transform = self.transform.get();
         let arr = self.arrangement.get();
         let rows = build_rows(&arr);
@@ -324,6 +359,23 @@ impl LaneArea {
     }
 
     fn on_mouse_move(&mut self, cx: &mut EventContext, x: f32, y: f32) {
+        if let Some(Drag::ScrollThumb { .. }) = self.drag {
+            let b = cx.bounds();
+            let (cw, ch) = self.content_size();
+            let Some(Drag::ScrollThumb { vertical, last }) = &mut self.drag else { return };
+            let (pos, track, content) = if *vertical { (y - b.y, b.h, ch) } else { (x - b.x, b.w, cw) };
+            let travel = pos - *last;
+            *last = pos;
+            // Thumb travel maps to content travel in proportion.
+            let scale = (content / track.max(1.0)) as f64;
+            let delta = travel as f64 * scale;
+            if *vertical {
+                cx.emit(TimelineEvent::ScrollBy { dx: 0.0, dy: delta });
+            } else {
+                cx.emit(TimelineEvent::ScrollBy { dx: delta, dy: 0.0 });
+            }
+            return;
+        }
         let Some(drag) = &mut self.drag else { return };
         let bounds = cx.bounds();
         let (lx, ly) = (x - bounds.x, y - bounds.y);
@@ -334,6 +386,7 @@ impl LaneArea {
         let tick = transform.x_to_tick(lx as f64);
 
         match drag {
+            Drag::ScrollThumb { .. } => {}
             Drag::MoveClips { clips, grab_tick, original_row, delta_ticks, row_delta } => {
                 *delta_ticks = snap(tick - *grab_tick, snap_grid, bypass);
                 if clips.len() == 1 {
@@ -391,6 +444,7 @@ impl LaneArea {
         cx.release();
 
         match drag {
+            Drag::ScrollThumb { .. } => {}
             Drag::MoveClips { clips, delta_ticks, row_delta, .. } => {
                 if delta_ticks == 0 && row_delta == 0 {
                     return;
@@ -946,7 +1000,9 @@ impl LaneArea {
         }
     }
 
-    fn on_scroll(&mut self, cx: &mut EventContext, y: f32) {
+    /// Wheel: vertical scroll; Shift+wheel or a sideways trackpad swipe:
+    /// horizontal; Ctrl/Cmd+wheel: zoom around the pointer.
+    fn on_scroll(&mut self, cx: &mut EventContext, x: f32, y: f32) {
         if cx.modifiers().ctrl() || cx.modifiers().logo() {
             let (lx, _) = self.local_pos(cx);
             let factor = 1.0 + (y as f64) * 0.1;
@@ -954,8 +1010,41 @@ impl LaneArea {
         } else if cx.modifiers().shift() {
             cx.emit(TimelineEvent::ScrollBy { dx: (-y as f64) * 32.0, dy: 0.0 });
         } else {
-            cx.emit(TimelineEvent::ScrollBy { dx: 0.0, dy: (-y as f64) * 32.0 });
+            cx.emit(TimelineEvent::ScrollBy { dx: (-x as f64) * 32.0, dy: (-y as f64) * 32.0 });
         }
+    }
+
+    /// Thin thumbs along the right and bottom edges, only when there's
+    /// more to see in that direction.
+    fn draw_scrollbars(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let b = cx.bounds();
+        let palette = self.theme.get().palette();
+        let t = self.transform.get();
+        let (cw, ch) = self.content_size();
+        let mut paint = vg::Paint::default();
+        paint.set_color(palette.bg_400);
+        paint.set_anti_alias(true);
+        let inset = 2.0;
+        if let Some((start, len)) = thumb(b.h, ch, t.scroll_y as f32) {
+            let x = b.x + b.w - THUMB_PX - inset;
+            let rect = vg::Rect::new(x, b.y + start, x + THUMB_PX, b.y + start + len);
+            canvas.draw_path(&vg::Path::rrect(vg::RRect::new_rect_xy(rect, 2.5, 2.5), None), &paint);
+        }
+        if let Some((start, len)) = thumb(b.w, cw, t.scroll_x as f32) {
+            let y = b.y + b.h - THUMB_PX - inset;
+            let rect = vg::Rect::new(b.x + start, y, b.x + start + len, y + THUMB_PX);
+            canvas.draw_path(&vg::Path::rrect(vg::RRect::new_rect_xy(rect, 2.5, 2.5), None), &paint);
+        }
+    }
+
+    /// Content size in px (width unscrolled), for the scrollbar thumbs.
+    fn content_size(&self) -> (f32, f32) {
+        let arr = self.arrangement.get();
+        let t = self.transform.get();
+        (
+            crate::timeline::state::content_width(&arr, &t) as f32,
+            crate::timeline::state::content_height(&arr) as f32,
+        )
     }
 }
 

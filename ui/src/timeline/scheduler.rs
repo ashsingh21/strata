@@ -64,10 +64,10 @@ impl MidiScheduler {
                 }
             }
         }
-        for pitch in scheduled.note_on {
+        for (pitch, velocity) in scheduled.note_on {
             let count = held.entry(pitch).or_insert(0);
             if *count == 0 {
-                cx.emit(SynthEvent::NoteOn(pitch));
+                cx.emit(SynthEvent::NoteOn(pitch, velocity));
             }
             *count += 1;
         }
