@@ -14,6 +14,7 @@ use shared::arrangement::{
 };
 
 use crate::recorder::RecordingPreview;
+use crate::synth::state::SynthEvent;
 use crate::timeline::header::clip_color_to_rgb;
 use crate::timeline::state::{ContextMenu, ContextMenuTarget, Selection, TimelineEvent, TimelineTool};
 use crate::tokens::{self, ThemeId};
@@ -260,6 +261,14 @@ impl LaneArea {
 
         match row.kind {
             RowKind::Track(track_id) => {
+                // Any click in this row selects its track - clicking a
+                // clip already did this as a side effect of `SelectClip`,
+                // but only when the clip wasn't already selected, and
+                // empty lane space (drawing, rubber-band) never did at
+                // all. Selecting here first covers every case uniformly,
+                // matching a click anywhere in the track's own header row.
+                cx.emit(SynthEvent::SelectTrack(track_id));
+
                 // Hit-test clips on this track, topmost/last first.
                 let hit = arr
                     .clips

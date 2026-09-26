@@ -5,7 +5,7 @@ use vizia::prelude::*;
 use vizia::vg;
 
 use shared::arrangement::{
-    Arrangement, AutomationLaneId, ClipColor, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
+    Arrangement, AutomationLaneId, ClipColor, Effect, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
     MIN_TRACK_HEIGHT,
 };
 
@@ -163,6 +163,9 @@ pub fn track_header<'a>(
     let mute = arrangement.map(move |arr| arr.track(track_id).map(|t| t.mute).unwrap_or(false));
     let solo = arrangement.map(move |arr| arr.track(track_id).map(|t| t.solo).unwrap_or(false));
     let arm = arrangement.map(move |arr| arr.track(track_id).map(|t| t.arm).unwrap_or(false));
+    let has_compressor = arrangement.map(move |arr| {
+        arr.track(track_id).is_some_and(|t| t.effects.iter().any(|e| matches!(e, Effect::Compressor(_))))
+    });
     // The fader's own drag position is committed to the arrangement only
     // on release (see the `Fader::on_release` wiring below - committing on
     // every intermediate move would rebuild this whole header list mid-
@@ -224,6 +227,25 @@ pub fn track_header<'a>(
                             .on_double_click(move |cx, _| cx.emit(TimelineEvent::BeginRenameTrack(track_id)));
                     }
                 });
+
+                // Compressor indicator: only visible with one on this
+                // track (an at-a-glance "this track has a Compressor on
+                // it", without opening the device panel to find out) -
+                // click to remove it, same no-confirmation-dialog
+                // convention as every other destructive edit here. Named
+                // for the effect itself, not generic "FX" - there's only
+                // one effect type so far, and a vague label would just
+                // raise "an effect? which one?" for no reason. Lives in
+                // the title row (not down with M/S/Rec) so it reads as
+                // "what's on this track" alongside its name, not as a
+                // fourth transport-style toggle.
+                Button::new(cx, |cx| Label::new(cx, "Comp \u{2715}"))
+                    .class("btn")
+                    .class("sm")
+                    .class("is-on")
+                    .toggle_class("hidden", has_compressor.map(|c| !*c))
+                    .on_press(move |cx| cx.emit(TimelineEvent::RemoveCompressorEffect(track_id)));
+
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, kind_label).class("meta");
             })
