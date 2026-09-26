@@ -416,10 +416,13 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   z-index: 180;
 }}
 .menu-item {{
+  border-radius: {radius_xs}px;
   padding: 0px {space3}px;
 }}
 .menu-sep {{
-  margin: {space1}px {space2}px;
+  /* Horizontal inset now comes from .context-menu's own padding, so this
+     spans the same width as the items above/below it, edges aligned. */
+  margin: {space1}px 0px;
 }}
 
 /* Vizia's own layout for ScrollView's inner content lives in its default

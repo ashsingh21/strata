@@ -135,6 +135,10 @@ pub fn context_menu_view(
         .gap(Pixels(2.0))
         .padding_top(Pixels(tokens::SPACE_2))
         .padding_bottom(Pixels(tokens::SPACE_2))
+        // Left/right margin so an item's hover highlight sits inset from
+        // the panel's own border rather than running flush into it.
+        .padding_left(Pixels(tokens::SPACE_1))
+        .padding_right(Pixels(tokens::SPACE_1))
         .width(Pixels(212.0))
         .height(Auto);
     });
