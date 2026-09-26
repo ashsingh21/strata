@@ -17,7 +17,7 @@ use crate::knob::Knob;
 use crate::meter::{Meter, HOT_THRESHOLD};
 use crate::recorder::RecorderModelEvent;
 use crate::timeline::state::TimelineEvent;
-use crate::tokens::{ThemeId, SPACE_1, SPACE_2, SPACE_3};
+use crate::tokens::{ThemeId, SPACE_2, SPACE_3};
 
 /// A bit taller than `tokens::SIZE_TOOLBAR` (which every *other* header -
 /// Carve's, the piano roll's, Interval Input's - still uses): the app's
@@ -173,7 +173,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             Knob::plain(cx, props.input_gain_pos, 0.5, theme, |cx, p| cx.emit(RecorderModelEvent::SetInputGain(p)))
                 .size(Pixels(22.0));
         })
-        .gap(Pixels(SPACE_1))
+        .gap(Pixels(SPACE_2))
         .alignment(Alignment::Center)
         .size(Auto);
 
