@@ -728,6 +728,12 @@ impl Model for TimelineState {
                     };
                     stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
                 });
+                // Without this the clip sits at `peaks: None` - and so
+                // waveform-less - until the project is next reloaded, which
+                // is what the peaks_loader worker normally runs on. A fresh
+                // take needs its waveform right away, same as a dropped-in
+                // drum sample gets via `AddDrumSample`.
+                crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &crate::timeline::assets_dir(), source.clone());
             }
             TimelineEvent::AddTrack(kind) => {
                 const COLORS: [ClipColor; 6] = [

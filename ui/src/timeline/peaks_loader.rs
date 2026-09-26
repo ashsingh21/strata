@@ -74,20 +74,51 @@ fn load_and_build(path: &Path) -> Option<PeakPyramid> {
 
 /// Reads and fully decodes a WAV to interleaved `f32` samples in -1..1,
 /// regardless of the file's own sample format/bit depth.
+///
+/// A source requested right after a take stops (`spawn_peak_loader_for_source`,
+/// the decode worker) races the recorder's writer thread: `Stop` is only a
+/// message on a ring buffer, and until that thread actually calls
+/// `WavWriter::finalize()` the header on disk still declares a 0-sample
+/// data chunk, so `hound` opens the file fine but yields no samples at
+/// all - not an error, just silently empty, and (since nothing re-requests
+/// it) permanently so until the next full reload. So: retry briefly
+/// whenever a read comes back with zero samples, rather than trusting the
+/// first attempt. A file that's genuinely empty (or missing) just burns
+/// this budget and still returns empty, same as before.
 fn decode_wav(path: &Path) -> Option<(Vec<f32>, hound::WavSpec)> {
+    for attempt in 0..25 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let Ok(mut reader) = hound::WavReader::open(path) else { continue };
+        let spec = reader.spec();
+        if reader.duration() == 0 {
+            continue;
+        }
+
+        let samples: Vec<f32> = match spec.sample_format {
+            hound::SampleFormat::Float => {
+                reader.samples::<f32>().filter_map(Result::ok).collect()
+            }
+            hound::SampleFormat::Int => {
+                let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
+                reader.samples::<i32>().filter_map(Result::ok).map(|s| s as f32 / max).collect()
+            }
+        };
+        return Some((samples, spec));
+    }
+    // Ran out of retries: fall back to whatever a last, un-retried open
+    // reports (a genuinely empty/missing file), so callers still get their
+    // usual None on a real failure instead of this function looping forever.
     let mut reader = hound::WavReader::open(path).ok()?;
     let spec = reader.spec();
-
     let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => {
-            reader.samples::<f32>().filter_map(Result::ok).collect()
-        }
+        hound::SampleFormat::Float => reader.samples::<f32>().filter_map(Result::ok).collect(),
         hound::SampleFormat::Int => {
             let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
             reader.samples::<i32>().filter_map(Result::ok).map(|s| s as f32 / max).collect()
         }
     };
-
     Some((samples, spec))
 }
 

@@ -137,6 +137,7 @@ fn main() -> Result<(), ApplicationError> {
         let recording_preview = recorder_model.preview;
         let input_level = recorder_model.input_level;
         let input_gain_pos = recorder_model.input_gain_pos;
+        let live_peaks = recorder_model.live_peaks;
         recorder_model.build(cx);
 
         let synth_model = SynthModel::new(
@@ -354,6 +355,7 @@ fn main() -> Result<(), ApplicationError> {
                         tl_selection,
                         tl_playhead,
                         recording_preview,
+                        live_peaks,
                         tl_tool,
                         selected_track,
                         loop_on,

@@ -361,7 +361,6 @@ fn write_block<T>(
         } else {
             (0.0, 0.0)
         };
-
         let out_l = synth_l + click + clip_l;
         let out_r = synth_r + click + clip_r;
 

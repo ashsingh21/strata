@@ -42,6 +42,12 @@ pub struct RecorderModel {
     pub input_level: Signal<f32>,
     /// 0..1 knob position; see `input_gain_pos_to_db`.
     pub input_gain_pos: Signal<f32>,
+    /// Per-block abs-peak of the current take so far, in capture order -
+    /// the same numbers the input meter already gets from `InputTelemetry`,
+    /// just kept instead of discarded, so the in-progress clip can draw a
+    /// live envelope instead of sitting flat until the take is decoded.
+    /// Empty whenever nothing's being recorded.
+    pub live_peaks: Signal<Arc<[f32]>>,
     record_params: Arc<RecordParams>,
 }
 
@@ -50,6 +56,7 @@ pub enum RecorderModelEvent {
     SetPreview(Option<RecordingPreview>),
     SetInputLevel(f32),
     SetInputGain(f32),
+    SetLivePeaks(Arc<[f32]>),
 }
 
 impl RecorderModel {
@@ -58,6 +65,7 @@ impl RecorderModel {
             preview: Signal::new(None),
             input_level: Signal::new(0.0),
             input_gain_pos: Signal::new(0.5),
+            live_peaks: Signal::new(Arc::from([])),
             record_params,
         }
     }
@@ -72,6 +80,7 @@ impl Model for RecorderModel {
                 self.input_gain_pos.set(*pos);
                 self.record_params.set_input_gain_db(input_gain_pos_to_db(*pos));
             }
+            RecorderModelEvent::SetLivePeaks(peaks) => self.live_peaks.set(peaks.clone()),
         });
     }
 }
@@ -99,27 +108,44 @@ pub struct RecordingCoordinator {
     active: Cell<Option<ActiveRecording>>,
     take_counter: Cell<usize>,
     input_meter_db: Cell<f32>,
+    /// Mirrors `RecorderModel::live_peaks`; kept here too since a `Signal`
+    /// can only be replaced wholesale, not appended to; rebuilt into an
+    /// `Arc` and pushed out each frame a take is active.
+    live_peaks: RefCell<Vec<f32>>,
 }
 
 impl RecordingCoordinator {
     pub fn new() -> Self {
-        Self { active: Cell::new(None), take_counter: Cell::new(0), input_meter_db: Cell::new(METER_FLOOR_DB) }
+        Self {
+            active: Cell::new(None),
+            take_counter: Cell::new(0),
+            input_meter_db: Cell::new(METER_FLOOR_DB),
+            live_peaks: RefCell::new(Vec::new()),
+        }
     }
 
     /// Call once per frame, independent of `advance`: drains the input
     /// device's peak telemetry (reported continuously, whether or not
     /// anything's armed, so gain can be staged first) and updates the
     /// input meter's fill fraction, with the same decay ballistics as
-    /// the master meter in `app.rs`.
+    /// the master meter in `app.rs`. While a take is active, also
+    /// accumulates each block's peak as a rough live waveform for the
+    /// in-progress clip - see `RecorderModel::live_peaks`.
     pub fn drain_input_meter(
         &self,
         cx: &mut EventContext,
         telemetry_rx: &RefCell<rtrb::Consumer<InputTelemetry>>,
         dt: f32,
     ) {
+        let recording = self.active.get().is_some();
         let mut peak = 0.0f32;
+        let mut got_any = false;
         while let Ok(InputTelemetry { peak: p }) = telemetry_rx.borrow_mut().pop() {
             peak = peak.max(p);
+            if recording {
+                got_any = true;
+                self.live_peaks.borrow_mut().push(p);
+            }
         }
         let target_db = gain_to_db(peak).max(METER_FLOOR_DB);
         let decay = METER_DECAY_DB_PER_SEC * dt;
@@ -127,6 +153,9 @@ impl RecordingCoordinator {
         let db = if target_db > db { target_db } else { (db - decay).max(target_db) };
         self.input_meter_db.set(db);
         cx.emit(RecorderModelEvent::SetInputLevel(db_to_meter_fraction(db)));
+        if got_any {
+            cx.emit(RecorderModelEvent::SetLivePeaks(Arc::from(self.live_peaks.borrow().as_slice())));
+        }
     }
 
     /// Call once per frame. `command_tx` sends Start/Stop to the engine's
@@ -156,6 +185,8 @@ impl RecordingCoordinator {
                 let path = crate::timeline::assets_dir().join(&*source);
                 let _ = command_tx.borrow_mut().push(RecordCommand::Start { path });
                 self.active.set(Some(ActiveRecording { track, start: tick, last_tick: tick, source: take }));
+                self.live_peaks.borrow_mut().clear();
+                cx.emit(RecorderModelEvent::SetLivePeaks(Arc::from([])));
                 cx.emit(RecorderModelEvent::SetPreview(Some(RecordingPreview { track, start: tick, length: 1 })));
             }
             (Some(rec), true) => {

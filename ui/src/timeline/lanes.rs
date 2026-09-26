@@ -2,6 +2,7 @@
 //! and playhead. One custom canvas view; draws and hit-tests only the
 //! visible tick range and visible rows.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vizia::prelude::*;
@@ -125,6 +126,7 @@ pub struct LaneArea {
     playhead: Signal<Ticks>,
     theme: Signal<ThemeId>,
     recording_preview: Signal<Option<RecordingPreview>>,
+    live_peaks: Signal<Arc<[f32]>>,
     tool: Signal<TimelineTool>,
     drag: Option<Drag>,
     last_click: Option<(Instant, f32, f32)>,
@@ -140,6 +142,7 @@ impl LaneArea {
         playhead: Signal<Ticks>,
         theme: Signal<ThemeId>,
         recording_preview: Signal<Option<RecordingPreview>>,
+        live_peaks: Signal<Arc<[f32]>>,
         tool: Signal<TimelineTool>,
     ) -> Handle<'_, Self> {
         // Deliberately not bound to `playhead`: it changes every frame
@@ -149,14 +152,33 @@ impl LaneArea {
         // is the only thing that redraws at playback rate. `self.playhead`
         // stays a field only for the dead `clip.recording` chase-length
         // branch above, which nothing currently triggers.
-        Self { arrangement, transform, selection, playhead, theme, recording_preview, tool, drag: None, last_click: None }
-            .build(cx, |_| {})
-            .bind(tool, |mut h| h.needs_redraw())
-            .bind(arrangement, |mut h| h.needs_redraw())
-            .bind(transform, |mut h| h.needs_redraw())
-            .bind(selection, |mut h| h.needs_redraw())
-            .bind(theme, |mut h| h.needs_redraw())
-            .bind(recording_preview, |mut h| h.needs_redraw())
+        //
+        // `live_peaks` IS bound despite updating every frame, unlike
+        // playhead - it only does that while a take is actively
+        // recording, a rare, deliberate state (not the common playback
+        // path this file otherwise guards so carefully), and it's what
+        // makes the in-progress clip draw a live waveform instead of
+        // sitting flat until the take is decoded.
+        Self {
+            arrangement,
+            transform,
+            selection,
+            playhead,
+            theme,
+            recording_preview,
+            live_peaks,
+            tool,
+            drag: None,
+            last_click: None,
+        }
+        .build(cx, |_| {})
+        .bind(tool, |mut h| h.needs_redraw())
+        .bind(arrangement, |mut h| h.needs_redraw())
+        .bind(transform, |mut h| h.needs_redraw())
+        .bind(selection, |mut h| h.needs_redraw())
+        .bind(theme, |mut h| h.needs_redraw())
+        .bind(recording_preview, |mut h| h.needs_redraw())
+        .bind(live_peaks, |mut h| h.needs_redraw())
     }
 }
 
@@ -739,6 +761,13 @@ impl LaneArea {
                             recording: true,
                         };
                         self.draw_clip(canvas, &palette, &preview_clip, track_color, x0, y0, x1, y1, false);
+                        let peaks = self.live_peaks.get();
+                        if !peaks.is_empty() {
+                            let header_bottom = (y0 + CLIP_HEADER_H).min(y1);
+                            if y1 > header_bottom {
+                                self.draw_live_waveform(canvas, &peaks, x0, header_bottom, x1, y1);
+                            }
+                        }
                     }
                 }
             }
@@ -946,6 +975,47 @@ impl LaneArea {
                 &outline,
             );
         }
+    }
+
+    /// The in-progress take's waveform: `peaks` is one abs-peak per input
+    /// block, in capture order (see `RecorderModel::live_peaks`), not the
+    /// real min/max pairs a decoded `PeakPyramid` has, so the envelope is
+    /// drawn symmetric around the centre line rather than true min/max -
+    /// close enough for a live view that gets thrown away and replaced by
+    /// the real waveform the moment the take is decoded.
+    fn draw_live_waveform(&self, canvas: &Canvas, peaks: &[f32], x0: f32, y0: f32, x1: f32, y1: f32) {
+        let width_px = (x1 - x0).round().max(1.0) as usize;
+        let mid = (y0 + y1) * 0.5;
+        let half_h = (y1 - y0) * 0.5 - 1.0;
+        let n = peaks.len();
+
+        let bin_max = |i: usize| -> f32 {
+            let start = i * n / width_px;
+            let end = (((i + 1) * n / width_px).max(start + 1)).min(n);
+            peaks[start..end].iter().cloned().fold(0.0f32, f32::max)
+        };
+
+        let mut path = vg::PathBuilder::new();
+        for i in 0..width_px {
+            let x = x0 + i as f32;
+            let y = mid - bin_max(i) * half_h;
+            if i == 0 {
+                path.move_to(vg::Point::new(x, y));
+            } else {
+                path.line_to(vg::Point::new(x, y));
+            }
+        }
+        for i in (0..width_px).rev() {
+            let x = x0 + i as f32;
+            let y = mid + bin_max(i) * half_h;
+            path.line_to(vg::Point::new(x, y));
+        }
+        path.close();
+
+        let mut paint = vg::Paint::default();
+        paint.set_color(tokens::ON_CLIP);
+        paint.set_anti_alias(true);
+        canvas.draw_path(&path.detach(), &paint);
     }
 
     fn draw_clip_body(
