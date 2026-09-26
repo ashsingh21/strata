@@ -9,6 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
+    Instrument,
     empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, MidiNote, PeakPyramid,
     SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
@@ -68,6 +69,11 @@ pub struct TimelineState {
     pub tool: Signal<TimelineTool>,
     pub playhead_ticks: Signal<Ticks>,
     pub drums_menu_open: Signal<bool>,
+    /// The open right-click menu, if any.
+    pub context_menu: Signal<Option<ContextMenu>>,
+    /// Whether Copy/Cut has put anything aside - so a context menu on
+    /// empty space knows whether to offer Paste.
+    pub clipboard_nonempty: Signal<bool>,
     /// The lane area's on-screen size in px, reported by `LaneArea`: what
     /// scrolling is clamped against, and what Follow keeps the playhead in.
     viewport: (f64, f64),
@@ -88,6 +94,10 @@ pub struct TimelineState {
     // whichever thing you're actually looking at.
     piano_roll_open_clip: Signal<Option<ClipId>>,
     piano_roll_selected: Signal<HashSet<(Ticks, u8)>>,
+    /// Where pasted clips land when they all came from one track.
+    selected_track: Signal<Option<TrackId>>,
+    /// The last Copy/Cut: clips, or (with the piano roll open) notes.
+    clipboard: Option<Clipboard>,
 
     /// Requests a background decode of a newly added audio source (an
     /// imported drum sample, here) so it's audible without restarting -
@@ -102,13 +112,43 @@ pub struct TimelineState {
     decode_request_tx: Option<std::sync::mpsc::Sender<Arc<str>>>,
 }
 
+/// What Copy/Cut put aside. Starts are relative to the earliest item, so
+/// a paste keeps the items' spacing wherever it lands.
+#[derive(Clone)]
+enum Clipboard {
+    Clips(Vec<Clip>),
+    Notes(Vec<MidiNote>),
+}
+
+/// What a right-click context menu is showing actions for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextMenuTarget {
+    Clip(ClipId),
+    Track(TrackId),
+    /// Empty track space: `tick` is where the click landed, for "Paste".
+    Lane { track: TrackId, tick: Ticks },
+}
+
+/// A right-click context menu: what it's for, and where to draw it
+/// (window-absolute px, from the click).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ContextMenu {
+    pub target: ContextMenuTarget,
+    pub x: f32,
+    pub y: f32,
+}
+
 /// Room below the last row for the "+ Audio track / + MIDI track" actions
 /// in the header column, so scrolling can always reach them.
 const ADD_ROW_ROOM: f64 = 48.0;
 
 /// The stacked rows' total height, in px (as `LaneArea` lays them out).
 pub fn content_height(arr: &Arrangement) -> f64 {
-    let tracks = arr.tracks.len() as f64 * crate::timeline::LANE_HEIGHT as f64;
+    let tracks: f64 = arr
+        .tracks
+        .iter()
+        .map(|t| t.height.clamp(shared::arrangement::MIN_TRACK_HEIGHT, shared::arrangement::MAX_TRACK_HEIGHT) as f64)
+        .sum();
     let lanes = arr
         .automation
         .iter()
@@ -133,6 +173,7 @@ impl TimelineState {
         playing: Signal<bool>,
         piano_roll_open_clip: Signal<Option<ClipId>>,
         piano_roll_selected: Signal<HashSet<(Ticks, u8)>>,
+        selected_track: Signal<Option<TrackId>>,
     ) -> Self {
         Self {
             arrangement: Signal::new(empty_arrangement()),
@@ -143,6 +184,8 @@ impl TimelineState {
             tool: Signal::new(TimelineTool::default()),
             playhead_ticks: Signal::new(0),
             drums_menu_open: Signal::new(false),
+            context_menu: Signal::new(None),
+            clipboard_nonempty: Signal::new(false),
             viewport: (ASSUMED_LANE_WIDTH, 400.0),
             command_stack: CommandStack::new(),
             record_armed,
@@ -150,7 +193,100 @@ impl TimelineState {
             step_entry_clip: None,
             piano_roll_open_clip,
             piano_roll_selected,
+            selected_track,
+            clipboard: None,
             decode_request_tx: None,
+        }
+    }
+
+    /// Copies the piano roll's selected notes if it's open with a
+    /// selection, otherwise the selected clips. Returns whether anything
+    /// was copied (Cut only deletes when it was).
+    fn copy(&mut self) -> bool {
+        let arr = self.arrangement.get();
+        let notes_selected = self.piano_roll_selected.get();
+        if let (Some(clip), false) = (self.piano_roll_open_clip.get(), notes_selected.is_empty()) {
+            let Some(ClipContent::Midi { notes }) = arr.clip(clip).map(|c| &c.content) else { return false };
+            let chosen: Vec<MidiNote> =
+                notes.iter().filter(|n| notes_selected.contains(&(n.start, n.pitch))).copied().collect();
+            let first = chosen.iter().map(|n| n.start).min().unwrap_or(0);
+            self.clipboard = Some(Clipboard::Notes(
+                chosen.into_iter().map(|n| MidiNote { start: n.start - first, ..n }).collect(),
+            ));
+            self.clipboard_nonempty.set(true);
+            return true;
+        }
+        let selection = self.selection.get();
+        let mut clips: Vec<Clip> = selection.clips.iter().filter_map(|id| arr.clip(*id).cloned()).collect();
+        if clips.is_empty() {
+            return false;
+        }
+        let first = clips.iter().map(|c| c.start).min().unwrap_or(0);
+        for clip in &mut clips {
+            clip.start -= first;
+            clip.recording = false;
+        }
+        self.clipboard = Some(Clipboard::Clips(clips));
+        self.clipboard_nonempty.set(true);
+        true
+    }
+
+    /// Pastes at the playhead: notes into the open clip, or clips - onto
+    /// the selected track if they all came from one track of the same kind
+    /// (so a bassline can be copied to another track), otherwise back onto
+    /// their own tracks. One undoable edit; the pasted items are selected.
+    fn paste(&mut self, cx: &mut EventContext) {
+        let Some(clipboard) = self.clipboard.clone() else { return };
+        let playhead = self.playhead_ticks.get().max(0);
+        match clipboard {
+            Clipboard::Notes(notes) => {
+                let Some(clip_id) = self.piano_roll_open_clip.get() else { return };
+                let arr = self.arrangement.get();
+                let Some(clip) = arr.clip(clip_id) else { return };
+                let ClipContent::Midi { notes: existing } = &clip.content else { return };
+                let at = (playhead - clip.start).clamp(0, clip.length.max(1) - 1);
+                let pasted: Vec<MidiNote> = notes
+                    .iter()
+                    .map(|n| MidiNote { start: n.start + at, ..*n })
+                    .filter(|n| n.start < clip.length)
+                    .filter(|n| !existing.iter().any(|e| e.start == n.start && e.pitch == n.pitch))
+                    .collect();
+                if pasted.is_empty() {
+                    return;
+                }
+                let commands = pasted.iter().map(|&note| Command::AddMidiNote { clip: clip_id, note }).collect();
+                self.do_command(Command::Batch(commands));
+                cx.emit(crate::piano_roll::state::PianoRollEvent::ClearSelection);
+                for n in &pasted {
+                    cx.emit(crate::piano_roll::state::PianoRollEvent::SelectNote { key: (n.start, n.pitch), extend: true });
+                }
+            }
+            Clipboard::Clips(clips) => {
+                let target = self.selected_track.get();
+                let mut new_selection = HashSet::new();
+                self.with_arrangement(|arr, stack| {
+                    let one_source = clips.iter().all(|c| c.track == clips[0].track);
+                    let kind_of = |arr: &Arrangement, id: TrackId| arr.track(id).map(|t| t.kind);
+                    let retarget = target.filter(|t| {
+                        one_source && kind_of(arr, *t).is_some() && kind_of(arr, *t) == kind_of(arr, clips[0].track)
+                    });
+                    let commands = clips
+                        .iter()
+                        .filter_map(|c| {
+                            let track = retarget.unwrap_or(c.track);
+                            arr.track(track)?;
+                            let mut clip = c.clone();
+                            clip.id = arr.alloc_id();
+                            clip.track = track;
+                            clip.start += playhead;
+                            new_selection.insert(clip.id);
+                            Some(Command::InsertClip { clip: Box::new(clip) })
+                        })
+                        .collect();
+                    stack.do_command(Command::Batch(commands), arr);
+                });
+                self.selection.set(Selection { clips: new_selection, ..Default::default() });
+            }
         }
     }
 
@@ -269,6 +405,20 @@ pub enum TimelineEvent {
     /// `DeleteSelected` instead, batched into one undo step).
     AddMidiNoteAt { clip: ClipId, note: MidiNote },
     RemoveMidiNoteAt { clip: ClipId, start: Ticks, pitch: u8 },
+    /// Ctrl/Cmd+C, X, V: clips on the timeline, or notes when the piano
+    /// roll is open with a note selection.
+    Copy,
+    Cut,
+    Paste,
+    /// Gives a track an instrument, or removes it (`None`).
+    SetInstrument { track: TrackId, instrument: Option<Instrument> },
+    /// Drag on a track header's resize handle: absolute new height in px
+    /// (clamped by the handler), not undoable - a view preference, like
+    /// mute or gain.
+    SetTrackHeight { track: TrackId, height: f32 },
+    /// A right-click: opens the menu for that target at that position.
+    OpenContextMenu(ContextMenu),
+    CloseContextMenu,
     /// A velocity-lane drag ended: one undoable edit, not one per pixel.
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
 
@@ -346,6 +496,15 @@ impl Model for TimelineState {
                     }
                 }
             }
+            TimelineEvent::Copy => {
+                self.copy();
+            }
+            TimelineEvent::Cut => {
+                if self.copy() {
+                    cx.emit(TimelineEvent::DeleteSelected);
+                }
+            }
+            TimelineEvent::Paste => self.paste(cx),
             TimelineEvent::DuplicateSelected => {
                 let selection = self.selection.get();
                 if !selection.clips.is_empty() {
@@ -465,6 +624,10 @@ impl Model for TimelineState {
                 });
             }
             TimelineEvent::SelectClip { clip, extend } => {
+                // Clicking a clip also selects its track (and so its instrument).
+                if let Some(track) = self.arrangement.get().clip(*clip).map(|c| c.track) {
+                    cx.emit(crate::synth::state::SynthEvent::SelectTrack(track));
+                }
                 self.selection.update(|sel| {
                     if *extend {
                         if !sel.clips.remove(clip) {
@@ -528,6 +691,23 @@ impl Model for TimelineState {
             TimelineEvent::AddMidiNoteAt { clip, note } => {
                 self.do_command(Command::AddMidiNote { clip: *clip, note: *note });
             }
+            TimelineEvent::SetInstrument { track, instrument } => {
+                self.do_command(Command::SetInstrument { track: *track, instrument: *instrument });
+            }
+            TimelineEvent::SetTrackHeight { track, height } => {
+                let height = height.clamp(shared::arrangement::MIN_TRACK_HEIGHT, shared::arrangement::MAX_TRACK_HEIGHT);
+                self.with_arrangement(|arr, _| {
+                    if let Some(t) = arr.track_mut(*track) {
+                        t.height = height;
+                    }
+                });
+            }
+            TimelineEvent::OpenContextMenu(menu) => {
+                self.context_menu.set(Some(*menu));
+            }
+            TimelineEvent::CloseContextMenu => {
+                self.context_menu.set(None);
+            }
             TimelineEvent::SetNoteVelocity { clip, start, pitch, velocity } => {
                 self.do_command(Command::SetNoteVelocity { clip: *clip, start: *start, pitch: *pitch, velocity: *velocity });
             }
@@ -558,8 +738,10 @@ impl Model for TimelineState {
                     ClipColor::Violet,
                     ClipColor::Pink,
                 ];
+                let mut new_track = None;
                 self.with_arrangement(|arr, stack| {
                     let id = arr.alloc_id();
+                    new_track = Some(id);
                     let index = arr.tracks.len();
                     let color = COLORS[index % COLORS.len()];
                     let name = match kind {
@@ -575,13 +757,19 @@ impl Model for TimelineState {
                         solo: false,
                         arm: false,
                         gain_db: 0.0,
-                        height: 56.0,
+                        height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
+                        instrument: Instrument::default_for(*kind),
                     };
                     stack.do_command(
                         Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] },
                         arr,
                     );
                 });
+                // A new track is where you're about to work: select it, so
+                // a new MIDI track's Carve is right there in the panel.
+                if let Some(id) = new_track {
+                    cx.emit(crate::synth::state::SynthEvent::SelectTrack(id));
+                }
             }
             TimelineEvent::AddDrumSample(source) => {
                 let assets_dir = crate::timeline::assets_dir();
@@ -619,7 +807,8 @@ impl Model for TimelineState {
                         solo: false,
                         arm: false,
                         gain_db: 0.0,
-                        height: 56.0,
+                        height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
+                        instrument: None,
                     };
                     let clip = Clip {
                         id: clip_id,

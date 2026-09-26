@@ -1,6 +1,8 @@
 mod app;
 mod bpm_field;
 mod canvas_text;
+mod context_menu;
+mod device_area;
 mod fader;
 mod glyph;
 mod interval_input;
@@ -88,7 +90,11 @@ fn main() -> Result<(), ApplicationError> {
         let piano_roll_selected = piano_roll_model.selected;
         piano_roll_model.build(cx);
 
-        let mut timeline_state = TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected);
+        // The selected track: which instrument the panel shows, and where
+        // pasted clips land. Shared by the synth and timeline models.
+        let selected_track: Signal<Option<shared::arrangement::TrackId>> = Signal::new(None);
+        let mut timeline_state =
+            TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected, selected_track);
         let tl_arrangement = timeline_state.arrangement;
         let tl_transform = timeline_state.transform;
         let tl_snap = timeline_state.snap;
@@ -96,6 +102,8 @@ fn main() -> Result<(), ApplicationError> {
         let tl_playhead = timeline_state.playhead_ticks;
         let tl_tool = timeline_state.tool;
         let tl_drums_menu_open = timeline_state.drums_menu_open;
+        let tl_context_menu = timeline_state.context_menu;
+        let tl_clipboard_nonempty = timeline_state.clipboard_nonempty;
 
         // A saved project (if any) replaces the empty starting arrangement
         // before anything downstream reads it - the peak/decode loaders in
@@ -131,7 +139,14 @@ fn main() -> Result<(), ApplicationError> {
         let input_gain_pos = recorder_model.input_gain_pos;
         recorder_model.build(cx);
 
-        let synth_model = SynthModel::new(synth_bridge.params_tx, synth_bridge.note_tx, synth_bridge.telemetry_rx);
+        let synth_model = SynthModel::new(
+            synth_bridge.params_tx,
+            synth_bridge.note_tx,
+            synth_bridge.telemetry_rx,
+            tl_arrangement,
+            loaded_project.as_ref().map(|p| p.instruments.clone()).unwrap_or_default(),
+            selected_track,
+        );
         let synth_state = synth_model.state;
         let synth_lfo_phases = (synth_model.lfo1_phase, synth_model.lfo2_phase);
         let synth_octave_shift = synth_model.octave_shift;
@@ -139,16 +154,14 @@ fn main() -> Result<(), ApplicationError> {
         let synth_meter_r = synth_model.meter_r;
         let synth_help_open = synth_model.help_open;
         let synth_lfo_drag = synth_model.lfo_drag;
+        let synth_patches = synth_model.patches;
         synth_model.build(cx);
-        if let Some(project) = &loaded_project {
-            synth_state.set(project.synth.clone());
-        }
 
-        let project_model = ProjectModel::new(tl_arrangement, synth_state);
+        let project_model = ProjectModel::new(tl_arrangement, synth_patches);
         let project_saved = project_model.saved;
         project_model.build(cx);
         let save_status = Memo::new(move |_| {
-            let edited = project::snapshot(&tl_arrangement.get(), &synth_state.get()) != project_saved.get();
+            let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
             if edited { "Edited".to_string() } else { "Saved".to_string() }
         });
 
@@ -277,6 +290,12 @@ fn main() -> Result<(), ApplicationError> {
                 KeyChord::new(Modifiers::SUPER, Code::KeyB),
                 KeymapEntry::new(17u8, |cx| cx.emit(AppEvent::ToggleSidebar)),
             ),
+            (KeyChord::new(Modifiers::CTRL, Code::KeyC), KeymapEntry::new(18u8, |cx| cx.emit(TimelineEvent::Copy))),
+            (KeyChord::new(Modifiers::SUPER, Code::KeyC), KeymapEntry::new(19u8, |cx| cx.emit(TimelineEvent::Copy))),
+            (KeyChord::new(Modifiers::CTRL, Code::KeyX), KeymapEntry::new(20u8, |cx| cx.emit(TimelineEvent::Cut))),
+            (KeyChord::new(Modifiers::SUPER, Code::KeyX), KeymapEntry::new(21u8, |cx| cx.emit(TimelineEvent::Cut))),
+            (KeyChord::new(Modifiers::CTRL, Code::KeyV), KeymapEntry::new(22u8, |cx| cx.emit(TimelineEvent::Paste))),
+            (KeyChord::new(Modifiers::SUPER, Code::KeyV), KeymapEntry::new(23u8, |cx| cx.emit(TimelineEvent::Paste))),
         ])
         .build(cx);
 
@@ -305,7 +324,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
             HStack::new(cx, move |cx| {
-                sidebar::sidebar(cx, synth_state, sidebar_open);
+                sidebar::sidebar(cx, synth_state, tl_arrangement, selected_track, sidebar_open);
                 Element::new(cx)
                     .class("hairline")
                     .toggle_class("hidden", sidebar_open.map(|o| !*o))
@@ -323,6 +342,7 @@ fn main() -> Result<(), ApplicationError> {
                         tl_playhead,
                         recording_preview,
                         tl_tool,
+                        selected_track,
                     );
 
                     Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
@@ -330,86 +350,30 @@ fn main() -> Result<(), ApplicationError> {
                     // The lower panel spans the arrangement's width and sizes to
                     // its device; the device fills it rather than floating.
                     VStack::new(cx, move |cx| {
-                        // The device chain: the track's one device, raised,
-                        // and the interval input's toggle as a quiet action.
-                        HStack::new(cx, move |cx| {
-                            // While a clip is open its editor is raised; the
-                            // instrument chip goes back to the device.
-                            let editing = piano_roll_open_clip.map(|c| c.is_some());
-                            let clip_name = Memo::new(move |_| {
-                                piano_roll_open_clip
-                                    .get()
-                                    .and_then(|id| tl_arrangement.get().clip(id).map(|c| c.name.clone()))
-                                    .unwrap_or_default()
-                            });
-                            Button::new(cx, move |cx| Label::new(cx, clip_name))
-                                .class("btn")
-                                .class("is-on")
-                                .toggle_class("hidden", editing.map(|e| !*e));
-                            Button::new(cx, |cx| {
-                                HStack::new(cx, |cx| {
-                                    Element::new(cx).class("swatch").background_color(tokens::CLIP_VIOLET);
-                                    Label::new(cx, "Carve");
-                                })
-                                .gap(Pixels(tokens::SPACE_1))
-                                .alignment(Alignment::Center)
-                                .size(Auto)
-                            })
-                            .class("btn")
-                            .toggle_class("is-on", editing.map(|e| !*e))
-                            .on_press(|cx| cx.emit(PianoRollEvent::Close));
-                            Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-                            Button::new(cx, |cx| Label::new(cx, "Show input"))
-                                .class("btn")
-                                .class("quiet")
-                                .toggle_class("is-on", interval_open)
-                                .on_press(|cx| cx.emit(interval_input::state::IntervalInputEvent::ToggleOpen));
-                        })
-                        .gap(Pixels(tokens::SPACE_2))
-                        .padding_left(Pixels(tokens::SPACE_1))
-                        .alignment(Alignment::Left)
-                        .width(Stretch(1.0))
-                        .height(Pixels(tokens::SIZE_CONTROL + 6.0));
-
-                        // The editor replaces the device while a clip is open.
-                        Binding::new(cx, piano_roll_open_clip, move |cx| {
-                            if piano_roll_open_clip.get().is_some() {
-                                piano_roll::piano_roll_view(
-                                    cx,
-                                    theme,
-                                    tl_arrangement,
-                                    piano_roll_open_clip,
-                                    piano_roll_mode,
-                                    piano_roll_label_mode,
-                                    piano_roll_selected,
-                                    tl_snap,
-                                    interval_key,
-                                    interval_scale_mask,
-                                    tl_playhead,
-                                );
-                            } else {
-                                synth::synth_view(
-                                    cx,
-                                    theme,
-                                    synth_state,
-                                    synth_lfo_phases,
-                                    synth_octave_shift,
-                                    synth_meter_l,
-                                    synth_meter_r,
-                                    synth_help_open,
-                                    synth_lfo_drag,
-                                );
-                            }
-                        });
-
-                        interval_input::interval_input_view(
+                        device_area::device_area(
                             cx,
-                            theme,
-                            synth_state,
-                            interval_key,
-                            interval_scale_mask,
-                            interval_open,
-                            interval_show_note_names,
+                            device_area::DeviceAreaProps {
+                                theme,
+                                arrangement: tl_arrangement,
+                                selected_track,
+                                synth_state,
+                                lfo_phases: synth_lfo_phases,
+                                octave_shift: synth_octave_shift,
+                                meter_l: synth_meter_l,
+                                meter_r: synth_meter_r,
+                                help_open: synth_help_open,
+                                lfo_drag: synth_lfo_drag,
+                                open_clip: piano_roll_open_clip,
+                                edit_mode: piano_roll_mode,
+                                label_mode: piano_roll_label_mode,
+                                selected_notes: piano_roll_selected,
+                                snap: tl_snap,
+                                playhead: tl_playhead,
+                                key: interval_key,
+                                scale_mask: interval_scale_mask,
+                                interval_open,
+                                show_note_names: interval_show_note_names,
+                            },
                         );
                     })
                     .gap(Pixels(tokens::SPACE_2))
@@ -427,6 +391,7 @@ fn main() -> Result<(), ApplicationError> {
             sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status);
 
             timeline::drums_menu_view(cx, tl_drums_menu_open);
+            context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);
 
         })
         .class("app")

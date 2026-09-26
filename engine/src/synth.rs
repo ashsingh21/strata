@@ -14,7 +14,7 @@
 //! no syscalls.
 
 use shared::synth::{
-    FilterType, LfoTarget, NoteEvent, SynthParams, VoiceMode, Waveform, LFO_CUTOFF_MAX_OCT, LFO_PITCH_MAX_CENTS,
+    FilterType, LfoTarget, NoteEvent, SynthParams, VoiceMode, Waveform, ALL_NOTES_OFF, LFO_CUTOFF_MAX_OCT, LFO_PITCH_MAX_CENTS,
     LFO_PULSE_WIDTH_MAX, LFO_RESONANCE_MAX, MAX_UNISON,
 };
 
@@ -425,7 +425,13 @@ pub struct SynthEngine {
     chorus: Chorus,
     reverb: Reverb,
     limiter: Limiter,
+    /// Samples since the last voice finished; once past `IDLE_AFTER_S`
+    /// (every effect tail long gone) the instance skips all its work.
+    silent_samples: u32,
 }
+
+/// Longer than any reverb/chorus tail, so skipping never cuts one off.
+const IDLE_AFTER_S: f32 = 10.0;
 
 impl SynthEngine {
     /// Allocates everything the engine will ever need (voices, effect
@@ -444,6 +450,7 @@ impl SynthEngine {
             chorus: Chorus::new(sample_rate),
             reverb: Reverb::new(sample_rate),
             limiter: Limiter::new(sample_rate),
+            silent_samples: u32::MAX / 2,
         }
     }
 
@@ -457,6 +464,14 @@ impl SynthEngine {
     }
 
     pub fn handle_note_event(&mut self, event: NoteEvent) {
+        if event.note == ALL_NOTES_OFF {
+            self.mono_stack.clear();
+            for voice in &mut self.voices {
+                voice.amp_env.note_off();
+                voice.filter_env.note_off();
+            }
+            return;
+        }
         if event.on {
             self.note_on(event.note, event.velocity);
         } else {
@@ -524,6 +539,16 @@ impl SynthEngine {
 
     /// Renders one stereo sample.
     pub fn process(&mut self) -> (f32, f32) {
+        // An instance nobody has played for a while costs next to nothing:
+        // with 16 of them allocated, most are idle most of the time.
+        if self.voices.iter().any(|v| v.active) {
+            self.silent_samples = 0;
+        } else {
+            self.silent_samples = self.silent_samples.saturating_add(1);
+            if self.silent_samples as f32 > IDLE_AFTER_S * self.sample_rate {
+                return (0.0, 0.0);
+            }
+        }
         let sr = self.sample_rate;
         let p = self.params;
         let sm = &mut self.smoothed;
@@ -746,7 +771,7 @@ mod tests {
     fn render(state: &SynthState, note: u8, seconds: f32) -> Vec<f32> {
         let mut engine = SynthEngine::new(SR);
         engine.set_params(SynthParams::from_state(state));
-        engine.handle_note_event(NoteEvent { note, on: true, velocity: 127 });
+        engine.handle_note_event(NoteEvent { slot: 0, note, on: true, velocity: 127 });
         (0..(SR * seconds) as usize).map(|_| engine.process().0).collect()
     }
 
@@ -845,7 +870,7 @@ mod tests {
         let mut engine = SynthEngine::new(SR);
         engine.set_params(SynthParams::from_state(&s));
         for note in 40..56 {
-            engine.handle_note_event(NoteEvent { note, on: true, velocity: 127 });
+            engine.handle_note_event(NoteEvent { slot: 0, note, on: true, velocity: 127 });
         }
         let started = std::time::Instant::now();
         let mut acc = 0.0f32;
@@ -870,7 +895,7 @@ mod tests {
         let mut engine = SynthEngine::new(SR);
         engine.set_params(SynthParams::from_state(&s));
         for note in [36, 43, 48, 55, 60, 64, 67, 72] {
-            engine.handle_note_event(NoteEvent { note, on: true, velocity: 127 });
+            engine.handle_note_event(NoteEvent { slot: 0, note, on: true, velocity: 127 });
         }
         let peak = (0..SR as usize).map(|_| { let (l, r) = engine.process(); l.abs().max(r.abs()) }).fold(0.0, f32::max);
         assert!(peak <= 1.0, "{peak}");

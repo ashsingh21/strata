@@ -5,7 +5,7 @@
 
 use super::model::{
     Arrangement, AutomationLane, Breakpoint, Clip, ClipColor, ClipContent, LoopRange, Marker,
-    MidiNote, Track, TrackKind, DEFAULT_VELOCITY,
+    Instrument, MidiNote, Track, TrackKind, DEFAULT_VELOCITY, DEFAULT_TRACK_HEIGHT,
 };
 use super::time::{TempoMap, TimeSignature, PPQ};
 
@@ -37,7 +37,8 @@ pub fn seed_arrangement() -> Arrangement {
         solo: false,
         arm: false,
         gain_db: -3.0,
-        height: 56.0 /* mirrors ui::tokens::SIZE_LANE */,
+        height: DEFAULT_TRACK_HEIGHT,
+        instrument: None,
     });
     arr.tracks.push(Track {
         id: bass,
@@ -48,7 +49,8 @@ pub fn seed_arrangement() -> Arrangement {
         solo: true,
         arm: false,
         gain_db: -6.0,
-        height: 56.0 /* mirrors ui::tokens::SIZE_LANE */,
+        height: DEFAULT_TRACK_HEIGHT,
+        instrument: Some(Instrument::Carve),
     });
     arr.tracks.push(Track {
         id: lead,
@@ -59,7 +61,8 @@ pub fn seed_arrangement() -> Arrangement {
         solo: false,
         arm: true,
         gain_db: -1.5,
-        height: 56.0 /* mirrors ui::tokens::SIZE_LANE */,
+        height: DEFAULT_TRACK_HEIGHT,
+        instrument: None,
     });
     arr.tracks.push(Track {
         id: pad,
@@ -70,7 +73,8 @@ pub fn seed_arrangement() -> Arrangement {
         solo: false,
         arm: false,
         gain_db: -9.0,
-        height: 56.0 /* mirrors ui::tokens::SIZE_LANE */,
+        height: DEFAULT_TRACK_HEIGHT,
+        instrument: Some(Instrument::Carve),
     });
 
     // -- Drums: one continuous take, sliced into three clips. ---------

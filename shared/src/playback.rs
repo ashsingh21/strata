@@ -117,6 +117,7 @@ mod tests {
             arm: false,
             gain_db: 0.0,
             height: 56.0,
+            instrument: None,
         }
     }
 

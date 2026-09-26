@@ -32,6 +32,12 @@ pub enum ClipColor {
     Pink,
 }
 
+/// A track lane's height in px: the timeline default (matches
+/// `ui::timeline::LANE_HEIGHT`), and a resize handle's range either side.
+pub const DEFAULT_TRACK_HEIGHT: f32 = 96.0;
+pub const MIN_TRACK_HEIGHT: f32 = 40.0;
+pub const MAX_TRACK_HEIGHT: f32 = 240.0;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Track {
     pub id: TrackId,
@@ -44,6 +50,34 @@ pub struct Track {
     pub gain_db: f32,
     /// Lane height in pixels; defaults to `tokens::SIZE_LANE`.
     pub height: f32,
+    /// What a MIDI track plays through (its patch lives in the project's
+    /// per-track instrument list). Always `None` on audio tracks.
+    /// `default` so projects saved before instruments existed still load.
+    #[serde(default)]
+    pub instrument: Option<Instrument>,
+}
+
+/// A track's instrument. Only Carve so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Instrument {
+    Carve,
+}
+
+impl Instrument {
+    pub fn name(self) -> &'static str {
+        match self {
+            Instrument::Carve => "Carve",
+        }
+    }
+
+    /// What a new track of `kind` starts with: MIDI tracks get Carve (a
+    /// MIDI track with no instrument makes no sound), audio tracks nothing.
+    pub fn default_for(kind: TrackKind) -> Option<Instrument> {
+        match kind {
+            TrackKind::Midi => Some(Instrument::Carve),
+            TrackKind::Audio => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

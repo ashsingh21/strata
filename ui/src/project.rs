@@ -6,11 +6,12 @@
 //! non-capturing `fn`, so the save trigger has to land on *some* Model's
 //! own event handler rather than a closure that captures both signals.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use vizia::prelude::*;
 
-use shared::arrangement::Arrangement;
+use shared::arrangement::{Arrangement, TrackId};
 use shared::project::{save, Project};
 use shared::synth::SynthState;
 
@@ -20,18 +21,33 @@ pub fn project_path() -> PathBuf {
 
 pub struct ProjectModel {
     arrangement: Signal<Arrangement>,
-    synth: Signal<SynthState>,
+    patches: Signal<BTreeMap<TrackId, SynthState>>,
     /// The project as last saved (or loaded), serialized - the header
     /// compares the live project against it to show "Saved" or "Edited".
     pub saved: Signal<String>,
 }
 
-/// The project's saved form, for comparing against the last save. Held
-/// keys are play state, not an edit, so they're left out.
-pub fn snapshot(arrangement: &Arrangement, synth: &SynthState) -> String {
-    let mut synth = synth.clone();
-    synth.held_notes.clear();
-    serde_json::to_string(&Project { arrangement: arrangement.clone(), synth }).unwrap_or_default()
+/// The project as it would be saved: the arrangement plus the patch of
+/// every track that still has an instrument (a deleted track's patch is
+/// kept in memory for undo, but not written out).
+pub fn project(arrangement: &Arrangement, patches: &BTreeMap<TrackId, SynthState>) -> Project {
+    let instruments = arrangement
+        .tracks
+        .iter()
+        .filter(|t| t.instrument.is_some())
+        .filter_map(|t| {
+            let mut patch = patches.get(&t.id)?.clone();
+            // Held keys are play state, not an edit.
+            patch.held_notes.clear();
+            Some((t.id, patch))
+        })
+        .collect();
+    Project { arrangement: arrangement.clone(), instruments, synth: None }
+}
+
+/// The project's saved form, for comparing against the last save.
+pub fn snapshot(arrangement: &Arrangement, patches: &BTreeMap<TrackId, SynthState>) -> String {
+    serde_json::to_string(&project(arrangement, patches)).unwrap_or_default()
 }
 
 /// The project's display name, from its file name ("project.json" ->
@@ -50,9 +66,9 @@ pub enum ProjectEvent {
 }
 
 impl ProjectModel {
-    pub fn new(arrangement: Signal<Arrangement>, synth: Signal<SynthState>) -> Self {
-        let saved = Signal::new(snapshot(&arrangement.get(), &synth.get()));
-        Self { arrangement, synth, saved }
+    pub fn new(arrangement: Signal<Arrangement>, patches: Signal<BTreeMap<TrackId, SynthState>>) -> Self {
+        let saved = Signal::new(snapshot(&arrangement.get(), &patches.get()));
+        Self { arrangement, patches, saved }
     }
 }
 
@@ -60,12 +76,13 @@ impl Model for ProjectModel {
     fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
             ProjectEvent::Save => {
-                let project = Project { arrangement: self.arrangement.get(), synth: self.synth.get() };
+                let arrangement = self.arrangement.get();
+                let patches = self.patches.get();
                 let path = project_path();
-                match save(&project, &path) {
+                match save(&project(&arrangement, &patches), &path) {
                     Ok(()) => {
                         eprintln!("project: saved to {}", path.display());
-                        self.saved.set(snapshot(&project.arrangement, &project.synth));
+                        self.saved.set(snapshot(&arrangement, &patches));
                     }
                     Err(e) => eprintln!("project: failed to save to {}: {e}", path.display()),
                 }

@@ -1,10 +1,12 @@
-//! The browser sidebar: search, then the library (Carve and its presets)
-//! and files (the drum samples in `assets/drums/`). Every row does
+//! The browser sidebar: search, then the library (Carve - click to add it
+//! to the selected MIDI track - and its presets, which load into the
+//! selected track's Carve) and files (the drum samples in `assets/drums/`). Every row does
 //! something - a preset loads, a sample becomes a drum clip - and search
 //! narrows the rows as you type. Ctrl/Cmd+B collapses it to zero width.
 
 use vizia::prelude::*;
 
+use shared::arrangement::{Arrangement, TrackId};
 use shared::synth::{SynthState, PRESETS};
 
 use crate::synth::state::SynthEvent;
@@ -38,7 +40,13 @@ fn row<'a>(cx: &'a mut Context, name: String, query: Signal<String>, nested: boo
         .height(Pixels(24.0))
 }
 
-pub fn sidebar(cx: &mut Context, synth: Signal<SynthState>, open: Signal<bool>) {
+pub fn sidebar(
+    cx: &mut Context,
+    synth: Signal<SynthState>,
+    arrangement: Signal<Arrangement>,
+    selected_track: Signal<Option<TrackId>>,
+    open: Signal<bool>,
+) {
     let query = Signal::new(String::new());
     let samples = crate::timeline::drum_samples();
 
@@ -53,9 +61,17 @@ pub fn sidebar(cx: &mut Context, synth: Signal<SynthState>, open: Signal<bool>) 
         ScrollView::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
                 section_head(cx, "Instruments", 1);
+                // Adds Carve to the selected MIDI track; lit when that
+                // track already plays through Carve.
+                let selected_has_carve = Memo::new(move |_| {
+                    selected_track
+                        .get()
+                        .and_then(|id| arrangement.get().track(id).map(|t| t.instrument.is_some()))
+                        .unwrap_or(false)
+                });
                 row(cx, "Carve".to_string(), query, true)
-                    .class("is-on")
-                    .on_press(|cx| cx.emit(SynthEvent::ToggleHelp));
+                    .toggle_class("is-on", selected_has_carve)
+                    .on_press(|cx| cx.emit(SynthEvent::AddCarveToSelected));
 
                 section_head(cx, "Presets", PRESETS.len());
                 for (name, build) in PRESETS {

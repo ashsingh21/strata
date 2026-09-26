@@ -274,7 +274,37 @@ pub fn seed_synth() -> SynthState {
 }
 
 /// Carve's factory presets, as listed in the browser: (name, builder).
-pub const PRESETS: [(&str, fn() -> SynthState); 2] = [("Warm Bass", seed_synth), ("Deep Rave Bass", deep_rave_bass)];
+pub const PRESETS: [(&str, fn() -> SynthState); 3] =
+    [("Warm Bass", seed_synth), ("Deep Rave Bass", deep_rave_bass), ("Soft Pad", soft_pad)];
+
+/// A wide, slow pad: detuned saws in 3-voice unison, a slow amp swell and
+/// filter bloom, chorus and a big reverb - the opposite of a bass, so two
+/// tracks' Carves obviously sound different.
+pub fn soft_pad() -> SynthState {
+    let mut s = seed_synth();
+    s.name = "Soft Pad";
+    s.voice_mode = VoiceMode::Poly;
+    s.osc1 = Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 0.0, knob_b: 0.15, knob_c: 0.25, sync: false };
+    s.osc2 = Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 9.0, knob_b: 0.15, knob_c: 0.0, sync: false };
+    s.mix = Mix { osc1_db: -6.0, osc2_db: -6.0, sub_db: -60.0, noise_db: -38.0 };
+    s.filter = Filter {
+        filter_type: FilterType::Lp12,
+        cutoff_hz: 900.0,
+        resonance: 0.15,
+        drive_db: 0.0,
+        env_amount_oct: 1.2,
+        key_track: 0.6,
+    };
+    s.filter_env = Envelope { attack_ms: 900.0, decay_ms: 1500.0, sustain: 0.5, release_ms: 1200.0 };
+    s.amp_env = Envelope { attack_ms: 450.0, decay_ms: 800.0, sustain: 0.9, release_ms: 1400.0 };
+    s.lfo1 = Lfo { rate_label: "", rate_norm: 0.25, depth: 0.12, sync: false, target: LfoTarget::Cutoff, target_count: 1 };
+    s.lfo2 = Lfo { rate_label: "", rate_norm: 0.35, depth: 0.25, sync: false, target: LfoTarget::PulseWidth, target_count: 1 };
+    s.unison = Unison { voices: 3, detune_cents: 18.0, width: 0.9 };
+    s.fx = Fx { chorus_depth: 0.5, chorus_mix: 0.35, reverb_size: 0.8, reverb_mix: 0.35 };
+    s.output.glide_ms = 1.0;
+    s.output.volume_db = -6.0;
+    s
+}
 
 /// The "Deep Rave Bass" patch the help guide's recipe tab loads and then
 /// walks through knob by knob: two saws an octave down, detuned against

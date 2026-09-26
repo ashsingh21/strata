@@ -20,7 +20,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Error as CpalError, FromSample, OutputCallbackInfo, Sample, SampleFormat, SizedSample, StreamConfig};
 use shared::playback::{DecodedSource, PlaybackPlan, DECODED_SOURCE_CAPACITY};
 use shared::recorder::RecordCommand;
-use shared::synth::{NoteEvent, SynthParams, SynthTelemetry};
+use shared::synth::{NoteEvent, SynthParams, SynthTelemetry, MAX_INSTRUMENTS};
 use shared::{Params, Position, Telemetry};
 use synth::SynthEngine;
 
@@ -224,7 +224,9 @@ where
 
 
     let mut sample_counter: u64 = 0;
-    let mut synth_engine = SynthEngine::new(sample_rate);
+    // One Carve per instrument track, all allocated here - before the
+    // stream starts - so the audio thread never allocates.
+    let mut synth_engines: Vec<SynthEngine> = (0..MAX_INSTRUMENTS).map(|_| SynthEngine::new(sample_rate)).collect();
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -241,11 +243,15 @@ where
             move |data: &mut [T], _info: &OutputCallbackInfo| {
                 // Latest-wins: only the most recent params snapshot matters.
                 while let Ok(next) = synth_params.pop() {
-                    synth_engine.set_params(next);
+                    if let Some(engine) = synth_engines.get_mut(next.slot as usize) {
+                        engine.set_params(next);
+                    }
                 }
                 // Ordered: every note on/off matters.
                 while let Ok(event) = note_events.pop() {
-                    synth_engine.handle_note_event(event);
+                    if let Some(engine) = synth_engines.get_mut(event.slot as usize) {
+                        engine.handle_note_event(event);
+                    }
                 }
                 // Latest-wins: the clip layout only, not any one sample.
                 while let Ok(next) = playback_plan.pop() {
@@ -267,7 +273,7 @@ where
                     &mut telemetry,
                     &mut sample_counter,
                     sample_rate,
-                    &mut synth_engine,
+                    &mut synth_engines,
                     &mut synth_telemetry,
                     &mut click_phase,
                     &mut click_env,
@@ -292,7 +298,7 @@ fn write_block<T>(
     telemetry: &mut rtrb::Producer<Telemetry>,
     sample_counter: &mut u64,
     sample_rate: f32,
-    synth_engine: &mut SynthEngine,
+    synth_engines: &mut [SynthEngine],
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
     click_phase: &mut f32,
     click_env: &mut f32,
@@ -316,15 +322,20 @@ fn write_block<T>(
 
     let mut peak_l = 0.0f32;
     let mut peak_r = 0.0f32;
-    let mut synth_peak_l = 0.0f32;
-    let mut synth_peak_r = 0.0f32;
+    let mut synth_peaks = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
     let mut frames = 0u64;
 
     for frame in output.chunks_mut(channels) {
 
-        let (synth_l, synth_r) = synth_engine.process();
-        synth_peak_l = synth_peak_l.max(synth_l.abs());
-        synth_peak_r = synth_peak_r.max(synth_r.abs());
+        let mut synth_l = 0.0f32;
+        let mut synth_r = 0.0f32;
+        for (engine, peak) in synth_engines.iter_mut().zip(synth_peaks.iter_mut()) {
+            let (l, r) = engine.process();
+            synth_l += l;
+            synth_r += r;
+            peak.0 = peak.0.max(l.abs());
+            peak.1 = peak.1.max(r.abs());
+        }
 
         if playing && click_enabled {
             let next = *sample_counter + 1;
@@ -376,8 +387,11 @@ fn write_block<T>(
     // Best-effort: if the UI hasn't drained recently the ring buffer may be
     // full. Dropping a telemetry frame is harmless; never block.
     let _ = telemetry.push(Telemetry { peak_l, peak_r, position, cpu_load, block_frames: frames as u32 });
-    let (lfo1_phase, lfo2_phase) = synth_engine.lfo_phases();
-    let _ = synth_telemetry.push(SynthTelemetry { peak_l: synth_peak_l, peak_r: synth_peak_r, lfo1_phase, lfo2_phase });
+    let mut lfo_phases = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
+    for (engine, phases) in synth_engines.iter().zip(lfo_phases.iter_mut()) {
+        *phases = engine.lfo_phases();
+    }
+    let _ = synth_telemetry.push(SynthTelemetry { peaks: synth_peaks, lfo_phases });
 }
 
 /// Sums every clip in `plan` that's currently sounding at `pos` (samples

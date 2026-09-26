@@ -14,7 +14,7 @@ use shared::arrangement::{
 
 use crate::recorder::RecordingPreview;
 use crate::timeline::header::clip_color_to_rgb;
-use crate::timeline::state::{Selection, TimelineEvent, TimelineTool};
+use crate::timeline::state::{ContextMenu, ContextMenuTarget, Selection, TimelineEvent, TimelineTool};
 use crate::tokens::{self, ThemeId};
 
 /// One bar at 4/4 - the default length for a clip created with a plain
@@ -48,8 +48,9 @@ fn build_rows(arr: &Arrangement) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut y = 0.0f32;
     for track in &arr.tracks {
-        rows.push(Row { kind: RowKind::Track(track.id), top: y, height: crate::timeline::LANE_HEIGHT });
-        y += crate::timeline::LANE_HEIGHT;
+        let height = track.height.clamp(shared::arrangement::MIN_TRACK_HEIGHT, shared::arrangement::MAX_TRACK_HEIGHT);
+        rows.push(Row { kind: RowKind::Track(track.id), top: y, height });
+        y += height;
         for lane in arr.automation.iter().filter(|a| a.track == track.id) {
             rows.push(Row { kind: RowKind::Automation(lane.id), top: y, height: crate::timeline::LANE_AUTO_HEIGHT });
             y += crate::timeline::LANE_AUTO_HEIGHT;
@@ -168,6 +169,9 @@ impl View for LaneArea {
         event.map(|window_event, _| match window_event {
             WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
                 self.on_mouse_down(cx);
+            }
+            WindowEvent::MouseDown(button) if *button == MouseButton::Right => {
+                self.on_right_click(cx);
             }
             WindowEvent::MouseMove(x, y) => {
                 self.on_mouse_move(cx, *x, *y);
@@ -356,6 +360,34 @@ impl LaneArea {
                 }
             }
         }
+    }
+
+    /// Right-click: hit-test a clip (selecting it first, unless it's
+    /// already part of a multi-selection) or fall back to empty track
+    /// space, and open the context menu there. No drag, no capture.
+    fn on_right_click(&mut self, cx: &mut EventContext) {
+        let (lx, ly) = self.local_pos(cx);
+        let transform = self.transform.get();
+        let arr = self.arrangement.get();
+        let rows = build_rows(&arr);
+        let y_scrolled = ly + transform.scroll_y as f32;
+        let tick = transform.x_to_tick(lx as f64);
+        let (window_x, window_y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+
+        let Some(row_index) = row_at_y(&rows, y_scrolled) else { return };
+        let RowKind::Track(track_id) = rows[row_index].kind else { return };
+
+        let hit = arr.clips.iter().filter(|c| c.track == track_id).rev().find(|c| tick >= c.start && tick < c.end());
+
+        let target = if let Some(clip) = hit {
+            if !self.selection.get().clips.contains(&clip.id) {
+                cx.emit(TimelineEvent::SelectClip { clip: clip.id, extend: false });
+            }
+            ContextMenuTarget::Clip(clip.id)
+        } else {
+            ContextMenuTarget::Lane { track: track_id, tick: tick.max(0) }
+        };
+        cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target, x: window_x, y: window_y }));
     }
 
     fn on_mouse_move(&mut self, cx: &mut EventContext, x: f32, y: f32) {

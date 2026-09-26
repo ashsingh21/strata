@@ -78,6 +78,7 @@ mod tests {
             arm: true,
             gain_db: 0.0,
             height: 56.0,
+            instrument: None,
         });
         arr
     }

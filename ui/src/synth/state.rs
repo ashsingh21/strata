@@ -15,8 +15,11 @@ use std::collections::{HashMap, HashSet};
 
 use vizia::prelude::*;
 
+use std::collections::BTreeMap;
+
+use shared::arrangement::{Arrangement, Instrument, TrackId, TrackKind};
 use shared::synth::{
-    seed_synth, FilterType, LfoTarget, NoteEvent, SynthParams, SynthState, SynthTelemetry, VoiceMode, Waveform,
+    seed_synth, ALL_NOTES_OFF, MAX_INSTRUMENTS, FilterType, LfoTarget, NoteEvent, SynthParams, SynthState, SynthTelemetry, VoiceMode, Waveform,
 };
 
 use crate::timeline::state::TimelineEvent;
@@ -46,9 +49,16 @@ pub enum SynthEvent {
     /// Triggered by the timeline's playback scheduler, not by the player -
     /// sounds a note and updates the on-screen keyboard, but doesn't feed
     /// step-entry recording.
-    /// (pitch, velocity).
-    NoteOn(u8, u8),
-    NoteOff(u8),
+    /// From the playback scheduler: (track, pitch, velocity) - played by
+    /// that track's own Carve.
+    NoteOn(TrackId, u8, u8),
+    NoteOff(TrackId, u8),
+    /// A track was selected (header click, clip click, clip opened): the
+    /// panel now shows and edits that track's instrument.
+    SelectTrack(TrackId),
+    /// Sidebar's "Carve": gives the selected MIDI track a Carve if it has
+    /// no instrument yet.
+    AddCarveToSelected,
     ToggleHelp,
     /// Replaces the whole patch with a preset (keeping held keys held).
     LoadPreset(fn() -> SynthState),
@@ -116,6 +126,18 @@ pub struct SynthModel {
     pub help_open: Signal<bool>,
     /// The LFO pill being dragged, if any (drop targets light up).
     pub lfo_drag: Signal<Option<usize>>,
+    /// The selected track. `state` is its Carve patch, if it has one.
+    pub selected_track: Signal<Option<TrackId>>,
+    /// Every instrument track's patch - the selected one kept in step with
+    /// `state` - for saving, and for playing the tracks not on screen.
+    pub patches: Signal<BTreeMap<TrackId, SynthState>>,
+    arrangement: Signal<Arrangement>,
+    /// Which engine slot plays which track's Carve.
+    slots: [Option<TrackId>; MAX_INSTRUMENTS],
+    /// Whose patch `state` currently holds - only ever stored back there,
+    /// so selecting a track without an instrument can't leak the previous
+    /// track's patch onto it when it later gets one.
+    state_track: Option<TrackId>,
 
     // Engine bridge (not reactive).
     params_tx: rtrb::Producer<SynthParams>,
@@ -140,9 +162,24 @@ impl SynthModel {
         params_tx: rtrb::Producer<SynthParams>,
         note_tx: rtrb::Producer<NoteEvent>,
         telemetry_rx: rtrb::Consumer<SynthTelemetry>,
+        arrangement: Signal<Arrangement>,
+        patches: Vec<(TrackId, SynthState)>,
+        selected_track: Signal<Option<TrackId>>,
     ) -> Self {
+        // Start on the first track with an instrument, showing its patch.
+        let patches: BTreeMap<TrackId, SynthState> = patches.into_iter().collect();
+        let first = arrangement.get().tracks.iter().find(|t| t.instrument.is_some()).map(|t| t.id);
+        let state = first.and_then(|id| patches.get(&id).cloned()).unwrap_or_else(seed_synth);
         Self {
-            state: Signal::new(seed_synth()),
+            selected_track: {
+                selected_track.set(first);
+                selected_track
+            },
+            patches: Signal::new(patches),
+            arrangement,
+            slots: [None; MAX_INSTRUMENTS],
+            state_track: first,
+            state: Signal::new(state),
             lfo1_phase: Signal::new(0.0),
             lfo2_phase: Signal::new(0.0),
             octave_shift: Signal::new(0),
@@ -161,26 +198,101 @@ impl SynthModel {
         }
     }
 
-    /// Sounds a note and updates the on-screen keyboard - shared by both
-    /// player-triggered notes and the playback scheduler.
-    fn sound_on(&mut self, note: u8, velocity: u8) {
-        self.state.update(|s| {
-            if !s.held_notes.contains(&note) {
-                s.held_notes.push(note);
-            }
-        });
-        let _ = self.note_tx.push(NoteEvent { note, on: true, velocity });
+    /// The engine slot playing `track`'s Carve, if it has one.
+    fn slot_of(&self, track: TrackId) -> Option<u8> {
+        self.slots.iter().position(|s| *s == Some(track)).map(|i| i as u8)
     }
 
-    fn sound_off(&mut self, note: u8) {
-        self.state.update(|s| s.held_notes.retain(|n| *n != note));
-        let _ = self.note_tx.push(NoteEvent { note, on: false, velocity: 0 });
+    /// Sounds a note on `track`'s Carve, lighting the on-screen keyboard
+    /// if that's the track on screen - shared by player-triggered notes
+    /// and the playback scheduler.
+    fn sound_on(&mut self, track: Option<TrackId>, note: u8, velocity: u8) {
+        let Some(track) = track else { return };
+        if self.selected_track.get() == Some(track) {
+            self.state.update(|s| {
+                if !s.held_notes.contains(&note) {
+                    s.held_notes.push(note);
+                }
+            });
+        }
+        if let Some(slot) = self.slot_of(track) {
+            let _ = self.note_tx.push(NoteEvent { slot, note, on: true, velocity });
+        }
+    }
+
+    fn sound_off(&mut self, track: Option<TrackId>, note: u8) {
+        let Some(track) = track else { return };
+        if self.selected_track.get() == Some(track) {
+            self.state.update(|s| s.held_notes.retain(|n| *n != note));
+        }
+        if let Some(slot) = self.slot_of(track) {
+            let _ = self.note_tx.push(NoteEvent { slot, note, on: false, velocity: 0 });
+        }
+    }
+
+    /// Puts the selected track's patch on screen once it has one (just
+    /// selected, or just given a Carve).
+    fn show_selected_patch(&mut self) {
+        let selected = self.selected_track.get();
+        if selected != self.state_track {
+            if let Some(patch) = selected.and_then(|t| self.patches.get().get(&t).cloned()) {
+                self.state.set(patch);
+                self.state_track = selected;
+            }
+        }
+    }
+
+    /// Stores the on-screen patch back into `patches` for its track.
+    fn store_state(&mut self) {
+        if let Some(track) = self.state_track {
+            if self.has_instrument(track) {
+                let mut patch = self.state.get();
+                patch.held_notes.clear();
+                if self.patches.get().get(&track) != Some(&patch) {
+                    self.patches.update(|p| {
+                        p.insert(track, patch);
+                    });
+                }
+            }
+        }
+    }
+
+    fn has_instrument(&self, track: TrackId) -> bool {
+        self.arrangement.get().track(track).is_some_and(|t| t.instrument.is_some())
+    }
+
+    /// Keeps engine slots matched to the tracks that have instruments:
+    /// frees slots whose track lost its instrument (silencing it), gives
+    /// every instrument track a slot and a patch.
+    fn sync_slots(&mut self) {
+        let arr = self.arrangement.get();
+        let wanted: Vec<TrackId> = arr.tracks.iter().filter(|t| t.instrument.is_some()).map(|t| t.id).collect();
+        for i in 0..MAX_INSTRUMENTS {
+            if let Some(track) = self.slots[i] {
+                if !wanted.contains(&track) {
+                    self.slots[i] = None;
+                    let _ = self.note_tx.push(NoteEvent { slot: i as u8, note: ALL_NOTES_OFF, on: false, velocity: 0 });
+                }
+            }
+        }
+        for track in wanted {
+            if self.slot_of(track).is_none() {
+                if let Some(free) = self.slots.iter().position(Option::is_none) {
+                    self.slots[free] = Some(track);
+                }
+            }
+            if !self.patches.get().contains_key(&track) {
+                self.patches.update(|p| {
+                    p.insert(track, seed_synth());
+                });
+            }
+        }
     }
 
     /// A note the player actually pressed (mouse or computer keyboard):
     /// sounds it and marks it as part of the in-progress step-entry chord.
     fn note_on(&mut self, note: u8) {
-        self.sound_on(note, shared::arrangement::DEFAULT_VELOCITY);
+        self.sound_on(self.selected_track.get(), note, shared::arrangement::DEFAULT_VELOCITY);
         self.step_record_pitches.insert(note);
     }
 
@@ -188,7 +300,7 @@ impl SynthModel {
     /// is back up, commits whatever chord was played to the timeline's
     /// step-entry recorder (a no-op there unless it's actually armed).
     fn note_off(&mut self, cx: &mut EventContext, note: u8) {
-        self.sound_off(note);
+        self.sound_off(self.selected_track.get(), note);
         if self.state.get().held_notes.is_empty() && !self.step_record_pitches.is_empty() {
             let pitches = std::mem::take(&mut self.step_record_pitches);
             cx.emit(TimelineEvent::CommitStepChord(pitches));
@@ -226,10 +338,37 @@ impl Model for SynthModel {
                     self.note_on(*note);
                 }
             }
-            SynthEvent::NoteOn(note, velocity) => self.sound_on(*note, *velocity),
-            SynthEvent::NoteOff(note) => self.sound_off(*note),
+            SynthEvent::NoteOn(track, note, velocity) => self.sound_on(Some(*track), *note, *velocity),
+            SynthEvent::NoteOff(track, note) => self.sound_off(Some(*track), *note),
+            SynthEvent::SelectTrack(track) => {
+                if self.selected_track.get() != Some(*track) {
+                    self.store_state();
+                    // Release what the old track's keys were holding.
+                    for note in self.state.get().held_notes {
+                        self.sound_off(self.selected_track.get(), note);
+                    }
+                    self.selected_track.set(Some(*track));
+                    self.show_selected_patch();
+                }
+            }
+            SynthEvent::AddCarveToSelected => {
+                if let Some(track) = self.selected_track.get() {
+                    let arr = self.arrangement.get();
+                    if let Some(t) = arr.track(track) {
+                        if t.kind == TrackKind::Midi && t.instrument.is_none() {
+                            cx.emit(TimelineEvent::SetInstrument { track, instrument: Some(Instrument::Carve) });
+                        }
+                    }
+                }
+            }
             SynthEvent::ToggleHelp => self.help_open.update(|v| *v = !*v),
             SynthEvent::LoadPreset(build) => {
+                // Only into a Carve that's actually on screen - never into
+                // some other track's patch.
+                let selected = self.selected_track.get();
+                if selected.is_none() || selected != self.state_track || !selected.is_some_and(|t| self.has_instrument(t)) {
+                    return;
+                }
                 let preset = build();
                 self.state.update(|s| {
                     let held = std::mem::take(&mut s.held_notes);
@@ -243,13 +382,21 @@ impl Model for SynthModel {
                 self.state.update(|s| if *lfo == 0 { s.lfo1.target = target } else { s.lfo2.target = target });
             }
             SynthEvent::Tick(dt) => {
+                self.sync_slots();
+                self.store_state();
+                self.show_selected_patch();
+
+                // Meter and LFO scopes follow the track on screen.
+                let shown = self.selected_track.get().and_then(|t| self.slot_of(t)).map(|s| s as usize);
                 let mut peak_l = 0.0f32;
                 let mut peak_r = 0.0f32;
                 let mut phases = None;
-                while let Ok(SynthTelemetry { peak_l: l, peak_r: r, lfo1_phase, lfo2_phase }) = self.telemetry_rx.pop() {
-                    peak_l = peak_l.max(l);
-                    peak_r = peak_r.max(r);
-                    phases = Some((lfo1_phase, lfo2_phase));
+                while let Ok(SynthTelemetry { peaks, lfo_phases }) = self.telemetry_rx.pop() {
+                    if let Some(slot) = shown {
+                        peak_l = peak_l.max(peaks[slot].0);
+                        peak_r = peak_r.max(peaks[slot].1);
+                        phases = Some(lfo_phases[slot]);
+                    }
                 }
                 if let Some((p1, p2)) = phases {
                     self.lfo1_phase.set(p1);
@@ -263,8 +410,16 @@ impl Model for SynthModel {
                 self.meter_l.set(db_to_meter_fraction(self.meter_db_l));
                 self.meter_r.set(db_to_meter_fraction(self.meter_db_r));
 
-                let snapshot = SynthParams::from_state(&self.state.get());
-                let _ = self.params_tx.push(snapshot);
+                // Every instrument's latest patch to its slot (the engine
+                // keeps the latest per slot).
+                let patches = self.patches.get();
+                for (slot, track) in self.slots.iter().enumerate() {
+                    if let Some(patch) = track.and_then(|t| patches.get(&t)) {
+                        let mut snapshot = SynthParams::from_state(patch);
+                        snapshot.slot = slot as u8;
+                        let _ = self.params_tx.push(snapshot);
+                    }
+                }
             }
         });
 

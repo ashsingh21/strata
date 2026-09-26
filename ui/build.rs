@@ -407,6 +407,20 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   border-width: 1px;
   z-index: 150;
 }}
+.context-menu-backdrop {{
+  z-index: 170;
+}}
+.context-menu {{
+  border-radius: {radius_sm}px;
+  border-width: 1px;
+  z-index: 180;
+}}
+.menu-item {{
+  padding: 0px {space3}px;
+}}
+.menu-sep {{
+  margin: {space1}px {space2}px;
+}}
 
 /* Vizia's own layout for ScrollView's inner content lives in its default
    theme, which main.rs opts out of - without this the content has no size.
@@ -451,6 +465,7 @@ scrollview > scroll-content {{
         radius_md = space("radius-md"),
         radius_pill = space("radius-pill"),
         radius_xs = space("radius-xs"),
+        space1 = space("space-1"),
         space2 = space("space-2"),
         space3 = space("space-3"),
         space6 = space("space-6"),
@@ -494,7 +509,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".hairline", vec![("background-color", c("line"))]);
 
     // shadow-pop: "Popovers and menus only. Panels are flat."
-    for popover in [".synth-help-panel", ".interval-overlay", ".piano-roll-panel", ".drums-menu"] {
+    for popover in [".synth-help-panel", ".interval-overlay", ".piano-roll-panel", ".drums-menu", ".context-menu"] {
         rule(popover, vec![("shadow", shadow_pop.to_string())]);
     }
 
@@ -507,6 +522,8 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
         ],
     );
     rule(".btn:hover", vec![("background-color", c("bg-300"))]);
+    rule(".menu-item:hover", vec![("background-color", c("bg-300"))]);
+    rule(".menu-sep", vec![("background-color", c("line"))]);
     rule(".btn.quiet", vec![("background-color", "transparent".to_string()), ("color", c("ink-muted"))]);
     rule(".btn.quiet:hover", vec![("background-color", c("bg-300")), ("color", c("ink"))]);
     // State buttons fill with their state's colour...
@@ -568,6 +585,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".tl-corner", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
     rule(".tl-heads", vec![("border-color", c("line"))]);
     rule(".tl-head", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
+    rule(".tl-head.is-selected", vec![("background-color", c("bg-200"))]);
     rule(".tl-head-auto", vec![("background-color", c("bg-000"))]);
 
     rule(".lower-panel", vec![("background-color", c("bg-000"))]);

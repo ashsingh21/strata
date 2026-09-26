@@ -30,9 +30,10 @@ pub fn assets_dir() -> PathBuf {
 /// spec's compact value gives at this window size.
 pub const HEAD_WIDTH: f32 = 240.0;
 
-/// Wider than the `size-lane`/`size-lane-auto` tokens (56px/40px): taller
-/// rows so waveforms, MIDI notes and automation curves have more room.
-pub const LANE_HEIGHT: f32 = 96.0;
+/// Wider than the `size-lane-auto` token (40px): taller so automation
+/// curves have more room. Track lanes themselves are `Track::height`
+/// (default `shared::arrangement::DEFAULT_TRACK_HEIGHT`, also wider than
+/// `size-lane`'s 56px) - resizable per track, unlike this one.
 pub const LANE_AUTO_HEIGHT: f32 = 64.0;
 
 #[allow(clippy::too_many_arguments)]
@@ -46,6 +47,7 @@ pub fn timeline_view(
     playhead: Signal<Ticks>,
     recording_preview: Signal<Option<crate::recorder::RecordingPreview>>,
     tool: Signal<TimelineTool>,
+    selected_track: Signal<Option<shared::arrangement::TrackId>>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -91,7 +93,7 @@ pub fn timeline_view(
                 Binding::new(cx, arrangement, move |cx| {
                     let arr = arrangement.get();
                     for track in arr.tracks.clone() {
-                        track_header(cx, arrangement, theme, track.id);
+                        track_header(cx, arrangement, theme, selected_track, track.id);
                         for lane in arr.automation.iter().filter(|a| a.track == track.id) {
                             automation_header(cx, arrangement, lane.id);
                         }

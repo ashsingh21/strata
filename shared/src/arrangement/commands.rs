@@ -5,7 +5,7 @@
 
 use super::model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
-    LoopRange, MidiNote, Track, TrackId,
+    Instrument, LoopRange, MidiNote, Track, TrackId,
 };
 #[cfg(test)]
 use super::model::DEFAULT_VELOCITY;
@@ -26,6 +26,8 @@ pub enum Command {
     DuplicateClip { clip: ClipId, new_id: ClipId, offset: Ticks },
     AddMidiNote { clip: ClipId, note: MidiNote },
     RemoveMidiNote { clip: ClipId, start: Ticks, pitch: u8 },
+    /// Sets (or, with `None`, removes) a track's instrument.
+    SetInstrument { track: TrackId, instrument: Option<Instrument> },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -232,6 +234,12 @@ impl Command {
                 Command::AddMidiNote { clip: clip_id, note: removed }
             }
 
+            Command::SetInstrument { track, instrument } => {
+                let t = arr.track_mut(track).expect("SetInstrument: unknown track");
+                let previous = std::mem::replace(&mut t.instrument, instrument);
+                Command::SetInstrument { track, instrument: previous }
+            }
+
             Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity } => {
                 let clip = arr.clip_mut(clip_id).expect("SetNoteVelocity: unknown clip");
                 let ClipContent::Midi { notes } = &mut clip.content else {
@@ -372,6 +380,7 @@ mod tests {
             arm: false,
             gain_db: 0.0,
             height: 56.0,
+            instrument: None,
         });
         arr
     }
@@ -560,6 +569,7 @@ mod tests {
             arm: false,
             gain_db: 0.0,
             height: 56.0,
+            instrument: None,
         }
     }
 

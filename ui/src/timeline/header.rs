@@ -2,12 +2,110 @@
 //! stylesheet, reusing the milestone-1 M/S/Arm buttons and colour swatch.
 
 use vizia::prelude::*;
+use vizia::vg;
 
-use shared::arrangement::{Arrangement, AutomationLaneId, ClipColor, TrackId, TrackKind};
+use shared::arrangement::{
+    Arrangement, AutomationLaneId, ClipColor, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
+    MIN_TRACK_HEIGHT,
+};
 
 use crate::fader::Fader;
-use crate::timeline::state::TimelineEvent;
+use crate::timeline::state::{ContextMenu, ContextMenuTarget, TimelineEvent};
 use crate::tokens::{self, ThemeId};
+
+/// Height of the drag-to-resize strip at a track header's bottom edge.
+const RESIZE_HANDLE_PX: f32 = 6.0;
+
+/// A thin strip along a track header's bottom edge: drag to resize the
+/// track's lane, double-click to reset it. Height in px isn't normalized
+/// (unlike [`Fader`]/`Knob`) - the callback gets the new height directly.
+struct TrackResizeHandle<V: SignalGet<f32> + Copy + 'static> {
+    value: V,
+    theme: Signal<ThemeId>,
+    is_dragging: bool,
+    hovered: bool,
+    prev_drag_y: f32,
+    on_changing: Option<Box<dyn Fn(&mut EventContext, f32)>>,
+}
+
+impl<V: SignalGet<f32> + Copy + 'static> TrackResizeHandle<V> {
+    fn new(
+        cx: &mut Context,
+        value: V,
+        theme: Signal<ThemeId>,
+        on_changing: impl 'static + Fn(&mut EventContext, f32),
+    ) -> Handle<'_, Self> {
+        Self {
+            value,
+            theme,
+            is_dragging: false,
+            hovered: false,
+            prev_drag_y: 0.0,
+            on_changing: Some(Box::new(on_changing)),
+        }
+        .build(cx, |_| {})
+        .bind(value, |mut h| h.needs_redraw())
+        .bind(theme, |mut h| h.needs_redraw())
+        .cursor(CursorIcon::RowResize)
+    }
+}
+
+impl<V: SignalGet<f32> + Copy + 'static> View for TrackResizeHandle<V> {
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, _| match window_event {
+            WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
+                self.is_dragging = true;
+                self.prev_drag_y = cx.mouse().left.pos_down.1;
+                cx.capture();
+                cx.focus_with_visibility(false);
+            }
+            WindowEvent::MouseUp(button) if *button == MouseButton::Left => {
+                self.is_dragging = false;
+                cx.release();
+            }
+            WindowEvent::MouseMove(_, y) => {
+                if self.is_dragging {
+                    let delta = *y - self.prev_drag_y;
+                    self.prev_drag_y = *y;
+                    let new_height = (self.value.get() + delta).clamp(MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT);
+                    if let Some(cb) = &self.on_changing {
+                        cb(cx, new_height);
+                    }
+                }
+            }
+            WindowEvent::MouseDoubleClick(button) if *button == MouseButton::Left => {
+                self.is_dragging = false;
+                if let Some(cb) = &self.on_changing {
+                    cb(cx, DEFAULT_TRACK_HEIGHT);
+                }
+            }
+            WindowEvent::MouseOver => {
+                self.hovered = true;
+                cx.needs_redraw();
+            }
+            WindowEvent::MouseOut => {
+                self.hovered = false;
+                cx.needs_redraw();
+            }
+            _ => {}
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let bounds = cx.bounds();
+        let palette = self.theme.get().palette();
+        // A short grip mark, centred - brighter on hover/drag so the drag
+        // affordance is a glance away rather than printed as a hint.
+        let color = if self.hovered || self.is_dragging { palette.ink_muted } else { palette.line };
+        let cx_px = bounds.x + bounds.w * 0.5;
+        let cy_px = bounds.y + bounds.h * 0.5;
+        let mut paint = vg::Paint::default();
+        paint.set_color(color);
+        paint.set_anti_alias(true);
+        let rect = vg::Rect::new(cx_px - 12.0, cy_px - 1.0, cx_px + 12.0, cy_px + 1.0);
+        canvas.draw_path(&vg::Path::rect(rect, None), &paint);
+    }
+}
 
 /// Same taper as the mixer strip's fader (`app::fader_to_gain`, in dB
 /// instead of linear gain): unity at 0.75, +6 dB at the top, -60..0 dB
@@ -46,14 +144,16 @@ pub fn track_header<'a>(
     cx: &'a mut Context,
     arrangement: Signal<Arrangement>,
     theme: Signal<ThemeId>,
+    selected_track: Signal<Option<TrackId>>,
     track_id: TrackId,
 ) -> Handle<'a, impl View> {
     let name = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.name.clone()).unwrap_or_default()
     });
-    let kind_label = arrangement.map(move |arr| match arr.track(track_id).map(|t| t.kind) {
-        Some(TrackKind::Audio) => "Audio",
-        Some(TrackKind::Midi) => "MIDI",
+    // An audio track says so; a MIDI track names what it plays through.
+    let kind_label = arrangement.map(move |arr| match arr.track(track_id) {
+        Some(t) if t.kind == TrackKind::Audio => "Audio",
+        Some(t) => t.instrument.map(|i| i.name()).unwrap_or("No instrument"),
         None => "",
     });
     let color = arrangement.map(move |arr| {
@@ -68,7 +168,11 @@ pub fn track_header<'a>(
     let fader_pos = arrangement.map(move |arr| {
         gain_db_to_fader_pos(arr.track(track_id).map(|t| t.gain_db).unwrap_or(0.0))
     });
+    let height = arrangement.map(move |arr| {
+        arr.track(track_id).map(|t| t.height).unwrap_or(DEFAULT_TRACK_HEIGHT)
+    });
 
+    VStack::new(cx, move |cx| {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
             HStack::new(cx, move |cx| {
@@ -131,11 +235,31 @@ pub fn track_header<'a>(
         .width(Pixels(16.0))
         .height(Stretch(1.0));
     })
-    .class("tl-head")
     .gap(Pixels(tokens::SPACE_3))
     .padding(Pixels(tokens::SPACE_2))
+    .width(Stretch(1.0))
+    .height(Stretch(1.0));
+
+    // A thin drag strip at the row's bottom edge, inside the row (not
+    // overlapping the next one) so it never fights that row's own clicks.
+    TrackResizeHandle::new(cx, height, theme, move |cx, new_height| {
+        cx.emit(TimelineEvent::SetTrackHeight { track: track_id, height: new_height });
+    })
+    .width(Stretch(1.0))
+    .height(Pixels(RESIZE_HANDLE_PX));
+    })
+    .class("tl-head")
+    .toggle_class("is-selected", selected_track.map(move |s| *s == Some(track_id)))
+    .on_press_down(move |cx| cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id)))
+    .on_mouse_down(move |cx, button| {
+        if button == MouseButton::Right {
+            cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
+            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target: ContextMenuTarget::Track(track_id), x, y }));
+        }
+    })
     .width(Pixels(crate::timeline::HEAD_WIDTH))
-    .height(Pixels(crate::timeline::LANE_HEIGHT))
+    .height(height.map(|h| Pixels(*h)))
 }
 
 pub fn automation_header<'a>(

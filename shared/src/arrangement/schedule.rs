@@ -4,14 +4,15 @@
 //! the UI owns the actual note-on/off bookkeeping (see
 //! `ui::timeline::scheduler`).
 
-use super::model::{Arrangement, ClipContent};
+use super::model::{Arrangement, ClipContent, TrackId};
 use super::time::Ticks;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ScheduledNotes {
-    /// (pitch, velocity) of every note starting in the range.
-    pub note_on: Vec<(u8, u8)>,
-    pub note_off: Vec<u8>,
+    /// (track, pitch, velocity) of every note starting in the range.
+    pub note_on: Vec<(TrackId, u8, u8)>,
+    /// (track, pitch) of every note ending in it.
+    pub note_off: Vec<(TrackId, u8)>,
 }
 
 /// Notes whose start or end falls in `(from, to]`, across every audible
@@ -35,10 +36,10 @@ pub fn notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> ScheduledNot
             let abs_start = clip.start + note.start;
             let abs_end = abs_start + note.length;
             if abs_start > from && abs_start <= to {
-                result.note_on.push((note.pitch, note.velocity));
+                result.note_on.push((clip.track, note.pitch, note.velocity));
             }
             if abs_end > from && abs_end <= to {
-                result.note_off.push(note.pitch);
+                result.note_off.push((clip.track, note.pitch));
             }
         }
     }
@@ -64,6 +65,7 @@ mod tests {
             arm: false,
             gain_db: 0.0,
             height: 56.0,
+            instrument: None,
         });
         arr.clips.push(Clip {
             id: 1,
@@ -81,7 +83,7 @@ mod tests {
     fn note_start_triggers_on_within_range() {
         let arr = arrangement_with_one_note(false, false);
         let scheduled = notes_in_range(&arr, PPQ - 10, PPQ + 10);
-        assert_eq!(scheduled.note_on, vec![(60, DEFAULT_VELOCITY)]);
+        assert_eq!(scheduled.note_on, vec![(1, 60, DEFAULT_VELOCITY)]);
         assert!(scheduled.note_off.is_empty());
     }
 
@@ -90,7 +92,7 @@ mod tests {
         let arr = arrangement_with_one_note(false, false);
         let scheduled = notes_in_range(&arr, PPQ * 2 - 10, PPQ * 2 + 10);
         assert!(scheduled.note_on.is_empty());
-        assert_eq!(scheduled.note_off, vec![60]);
+        assert_eq!(scheduled.note_off, vec![(1, 60)]);
     }
 
     #[test]
@@ -120,6 +122,7 @@ mod tests {
             arm: false,
             gain_db: 0.0,
             height: 56.0,
+            instrument: None,
         });
         let scheduled = notes_in_range(&arr, PPQ - 10, PPQ + 10);
         assert!(scheduled.note_on.is_empty());

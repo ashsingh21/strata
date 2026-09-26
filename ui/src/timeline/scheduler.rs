@@ -13,6 +13,8 @@ use std::collections::HashMap;
 
 use vizia::prelude::*;
 
+use shared::arrangement::TrackId;
+
 use shared::arrangement::{notes_in_range, Arrangement, Ticks};
 
 use crate::synth::state::SynthEvent;
@@ -20,7 +22,8 @@ use crate::synth::state::SynthEvent;
 pub struct MidiScheduler {
     last_tick: Cell<Ticks>,
     was_playing: Cell<bool>,
-    held: RefCell<HashMap<u8, u32>>,
+    /// (track, pitch) -> how many overlapping notes hold it.
+    held: RefCell<HashMap<(TrackId, u8), u32>>,
 }
 
 impl MidiScheduler {
@@ -55,19 +58,19 @@ impl MidiScheduler {
 
         let scheduled = notes_in_range(arrangement, from, tick);
         let mut held = self.held.borrow_mut();
-        for pitch in scheduled.note_off {
-            if let Some(count) = held.get_mut(&pitch) {
+        for (track, pitch) in scheduled.note_off {
+            if let Some(count) = held.get_mut(&(track, pitch)) {
                 *count = count.saturating_sub(1);
                 if *count == 0 {
-                    held.remove(&pitch);
-                    cx.emit(SynthEvent::NoteOff(pitch));
+                    held.remove(&(track, pitch));
+                    cx.emit(SynthEvent::NoteOff(track, pitch));
                 }
             }
         }
-        for (pitch, velocity) in scheduled.note_on {
-            let count = held.entry(pitch).or_insert(0);
+        for (track, pitch, velocity) in scheduled.note_on {
+            let count = held.entry((track, pitch)).or_insert(0);
             if *count == 0 {
-                cx.emit(SynthEvent::NoteOn(pitch, velocity));
+                cx.emit(SynthEvent::NoteOn(track, pitch, velocity));
             }
             *count += 1;
         }
@@ -75,8 +78,8 @@ impl MidiScheduler {
 
     fn release_all(&self, cx: &mut EventContext) {
         let mut held = self.held.borrow_mut();
-        for &pitch in held.keys() {
-            cx.emit(SynthEvent::NoteOff(pitch));
+        for &(track, pitch) in held.keys() {
+            cx.emit(SynthEvent::NoteOff(track, pitch));
         }
         held.clear();
     }

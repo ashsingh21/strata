@@ -19,7 +19,8 @@ use crate::glyph::{ink_when_on, Glyph, GlyphKind};
 use crate::knob::{Knob, KnobAccentExt};
 use crate::status::StatusEvent;
 use crate::pill::modulator_pill;
-use crate::tokens::{self, ThemeId, CLIP_VIOLET};
+use crate::tokens::{self, ThemeId};
+use shared::arrangement::ClipColor;
 use display::{EnvelopeDisplay, FilterDisplay, LfoScope, WaveDisplay};
 use keyboard::Keyboard;
 use segmented::segmented;
@@ -32,7 +33,21 @@ fn update(f: impl Fn(&mut SynthState) + Send + 'static) -> SynthEvent {
 /// Carve's track colour: the violet swatch in its header, and (as its
 /// `-line` variant) every knob's value arc - one hue per device.
 fn carve_accent(p: &tokens::Palette) -> Color {
-    p.clip_violet_line
+    match TRACK_COLOR.get() {
+        ClipColor::Coral => p.clip_coral_line,
+        ClipColor::Amber => p.clip_amber_line,
+        ClipColor::Teal => p.clip_teal_line,
+        ClipColor::Blue => p.clip_blue_line,
+        ClipColor::Violet => p.clip_violet_line,
+        ClipColor::Pink => p.clip_pink_line,
+    }
+}
+
+thread_local! {
+    /// The colour of the track whose Carve is on screen: its value arcs
+    /// and header swatch take it (one hue per device), so it's obvious
+    /// whose instrument you're editing. Set by `synth_view`.
+    static TRACK_COLOR: Cell<ClipColor> = const { Cell::new(ClipColor::Violet) };
 }
 
 /// Strata's voice uses a true minus sign in values ("−6.2 dB").
@@ -620,11 +635,13 @@ pub fn synth_view(
     meter_r: Signal<f32>,
     help_open: Signal<bool>,
     lfo_drag: Signal<Option<usize>>,
+    track_color: ClipColor,
 ) {
     LFO_DRAG.set(Some(lfo_drag));
+    TRACK_COLOR.set(track_color);
     VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
-            Element::new(cx).class("swatch").background_color(CLIP_VIOLET);
+            Element::new(cx).class("swatch").background_color(crate::timeline::header::clip_color_to_rgb(track_color));
             Label::new(cx, "Carve").class("heading");
             let preset = state.map(|s| if s.name.is_empty() { "Untitled".to_string() } else { s.name.to_string() });
             Label::new(cx, preset).class("readout").size(Auto);

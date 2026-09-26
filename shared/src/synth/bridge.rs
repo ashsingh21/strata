@@ -12,8 +12,14 @@ use super::{seed_synth, Envelope, Filter, Fx, LfoTarget, Mix, Oscillator, SynthS
 /// display labels, target counts) stripped out. Plain, `Copy`, allocation
 /// free, so pushing one is real-time safe on the UI side and reading one
 /// is real-time safe on the audio side.
+/// How many Carve instances the engine keeps (one per instrument track),
+/// all allocated before the audio stream starts.
+pub const MAX_INSTRUMENTS: usize = 16;
+
 #[derive(Clone, Copy, Debug)]
 pub struct SynthParams {
+    /// Which Carve instance (0..MAX_INSTRUMENTS) this snapshot is for.
+    pub slot: u8,
     pub voice_mode: VoiceMode,
     pub max_voices: u8,
     pub osc1: Oscillator,
@@ -37,6 +43,7 @@ pub struct SynthParams {
 impl SynthParams {
     pub fn from_state(s: &SynthState) -> Self {
         Self {
+            slot: 0,
             voice_mode: s.voice_mode,
             max_voices: s.voices,
             osc1: s.osc1,
@@ -80,25 +87,30 @@ pub fn lfo_rate_hz(rate_norm: f32) -> f32 {
 /// drains and applies all pending events rather than just the latest.
 #[derive(Clone, Copy, Debug)]
 pub struct NoteEvent {
+    /// Which Carve instance plays it.
+    pub slot: u8,
     pub note: u8,
     pub on: bool,
     /// 1..=127; sets the voice's level (ignored for note-offs).
     pub velocity: u8,
 }
 
+/// A `NoteEvent::note` meaning "release every voice in this slot" - sent
+/// when a track loses its instrument, so nothing is left hanging.
+pub const ALL_NOTES_OFF: u8 = 255;
+
 /// One block's worth of Carve's own post-mix peak level, separate from the
 /// transport's master peak meter.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SynthTelemetry {
-    pub peak_l: f32,
-    pub peak_r: f32,
-    /// Where each LFO is in its cycle (0..1) at the end of the block, so
-    /// the scopes show the real LFOs rather than an animation of their own.
-    pub lfo1_phase: f32,
-    pub lfo2_phase: f32,
+    /// Each instance's post-mix peak (L, R) over the block.
+    pub peaks: [(f32, f32); MAX_INSTRUMENTS],
+    /// Where each instance's two LFOs are in their cycles (0..1) at the end
+    /// of the block, so the scopes show the real LFOs.
+    pub lfo_phases: [(f32, f32); MAX_INSTRUMENTS],
 }
 
-pub const SYNTH_PARAMS_CAPACITY: usize = 64;
+pub const SYNTH_PARAMS_CAPACITY: usize = 1024;
 pub const NOTE_EVENT_CAPACITY: usize = 256;
 pub const SYNTH_TELEMETRY_CAPACITY: usize = 512;
 
