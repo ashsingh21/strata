@@ -17,7 +17,14 @@ use crate::knob::Knob;
 use crate::meter::{Meter, HOT_THRESHOLD};
 use crate::recorder::RecorderModelEvent;
 use crate::timeline::state::TimelineEvent;
-use crate::tokens::{ThemeId, SIZE_TOOLBAR, SPACE_1, SPACE_2, SPACE_3};
+use crate::tokens::{ThemeId, SPACE_1, SPACE_2, SPACE_3};
+
+/// A bit taller than `tokens::SIZE_TOOLBAR` (which every *other* header -
+/// Carve's, the piano roll's, Interval Input's - still uses): the app's
+/// own top bar reads as the one thing everything else sits below, so it
+/// gets a size of its own rather than sharing the generic device-header
+/// token.
+const HEADER_HEIGHT: f32 = 48.0;
 
 /// Everything the header shows or drives. All signals, so `Copy`.
 #[derive(Clone, Copy)]
@@ -41,7 +48,7 @@ pub struct HeaderProps {
 }
 
 fn vsep(cx: &mut Context) {
-    Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
+    Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(22.0));
 }
 
 /// One transport button: a drawn glyph, its colour following its state.
@@ -52,7 +59,9 @@ fn transport_button<'a>(
     on: Signal<bool>,
     color: GlyphColor,
 ) -> Handle<'a, Button> {
-    Button::new(cx, move |cx| Glyph::new(cx, kind, on, theme, color)).class("btn").class("tbtn")
+    Button::new(cx, move |cx| Glyph::new(cx, kind, on, theme, color).width(Pixels(15.0)).height(Pixels(15.0)))
+        .class("btn")
+        .class("tbtn")
 }
 
 /// "mm:ss.mmm" from a musical position at a constant tempo.
@@ -77,19 +86,19 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             props.save_status.get()
         });
         VStack::new(cx, move |cx| {
-            Label::new(cx, crate::project::project_name()).class("title");
-            Label::new(cx, status).class("value");
+            Label::new(cx, crate::project::project_name()).class("title").font_size(14.0);
+            Label::new(cx, status).class("value").font_size(12.0);
         })
-        .width(Pixels(120.0))
+        .width(Pixels(126.0))
         .height(Auto);
 
         vsep(cx);
 
-        Label::new(cx, "Key").class("label");
+        Label::new(cx, "Key").class("label").font_size(12.0);
         let key_text = Memo::new(move |_| {
             format!("{} {}  \u{2304}", note_name(props.key.get()), scale_name(props.scale_mask.get()).to_lowercase())
         });
-        Button::new(cx, move |cx| Label::new(cx, key_text))
+        Button::new(cx, move |cx| Label::new(cx, key_text).font_size(13.0))
             .class("btn")
             .toggle_class("is-on", interval_open)
             .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
@@ -99,15 +108,18 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                 cx.emit(TimelineEvent::SetTempo(v));
                 cx.emit(AppEvent::SetBpm(v));
             })
-            .width(Pixels(48.0))
-            .height(Pixels(16.0));
+            .width(Pixels(52.0))
+            .height(Pixels(18.0));
         })
         .class("readout")
         .alignment(Alignment::Center)
         .size(Auto);
-        Label::new(cx, "BPM").class("value");
-        Button::new(cx, |cx| Label::new(cx, "Tap")).class("btn").class("quiet").on_press(|cx| cx.emit(AppEvent::Tap));
-        Label::new(cx, "4/4").class("readout").size(Auto);
+        Label::new(cx, "BPM").class("value").font_size(12.0);
+        Button::new(cx, |cx| Label::new(cx, "Tap").font_size(13.0))
+            .class("btn")
+            .class("quiet")
+            .on_press(|cx| cx.emit(AppEvent::Tap));
+        Label::new(cx, "4/4").class("readout").font_size(13.0).size(Auto);
 
         // The transport, grouped.
         HStack::new(cx, move |cx| {
@@ -132,9 +144,11 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         let time_text = Memo::new(move |_| elapsed_text(position.get(), bpm.get()));
         HStack::new(cx, move |cx| {
             Glyph::new(cx, GlyphKind::Record, recording, theme, |p, _| p.record)
+                .width(Pixels(13.0))
+                .height(Pixels(13.0))
                 .toggle_class("hidden", recording.map(|r| !*r));
-            Label::new(cx, bar_text).class("readout-big").width(Pixels(64.0));
-            Label::new(cx, time_text).class("value");
+            Label::new(cx, bar_text).class("readout-big").width(Pixels(70.0));
+            Label::new(cx, time_text).class("value").font_size(12.0);
         })
         .class("readout")
         .class("position")
@@ -153,11 +167,11 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
 
         // Input gain-staging stays by the transport: that's when it matters.
         HStack::new(cx, move |cx| {
-            Label::new(cx, "In").class("label");
+            Label::new(cx, "In").class("label").font_size(12.0);
             Meter::new(cx, props.input_level, props.input_level, Signal::new(false), Signal::new(false), theme, |_cx| {})
-                .height(Pixels(22.0));
+                .height(Pixels(24.0));
             Knob::plain(cx, props.input_gain_pos, 0.5, theme, |cx, p| cx.emit(RecorderModelEvent::SetInputGain(p)))
-                .size(Pixels(20.0));
+                .size(Pixels(22.0));
         })
         .gap(Pixels(SPACE_1))
         .alignment(Alignment::Center)
@@ -166,7 +180,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
         // CPU: the audio callback's share of its real-time budget.
-        Label::new(cx, "CPU").class("label");
+        Label::new(cx, "CPU").class("label").font_size(12.0);
         let cpu = props.cpu_load;
         HStack::new(cx, move |cx| {
             Element::new(cx).class("bar-fill").width(cpu.map(|c| Percentage((c * 100.0).clamp(0.0, 100.0))));
@@ -174,7 +188,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .class("bar")
         .width(Pixels(32.0))
         .height(Pixels(4.0));
-        Label::new(cx, cpu.map(|c| format!("{:.0}%", c * 100.0))).class("value").width(Pixels(30.0));
+        Label::new(cx, cpu.map(|c| format!("{:.0}%", c * 100.0))).class("value").font_size(12.0).width(Pixels(32.0));
 
         // Output level: signal up to -12 dB, warn above.
         let out_db = props.output_db;
@@ -191,13 +205,14 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .height(Pixels(4.0));
         Label::new(cx, out_db.map(|db| if *db <= -59.9 { "\u{2212}\u{221e}".to_string() } else { format!("{db:.1}").replace('-', "\u{2212}") }))
             .class("value")
-            .width(Pixels(34.0));
+            .font_size(12.0)
+            .width(Pixels(38.0));
     })
     .class("transport")
     .gap(Pixels(SPACE_2))
     .padding_left(Pixels(SPACE_3))
     .padding_right(Pixels(SPACE_3))
     .alignment(Alignment::Left)
-    .height(Pixels(SIZE_TOOLBAR))
+    .height(Pixels(HEADER_HEIGHT))
     .width(Stretch(1.0));
 }

@@ -319,6 +319,8 @@ fn write_block<T>(
     let click_enabled = params.click_enabled();
     let bpm = params.bpm();
     let samples_per_beat = (sample_rate as f64 * 60.0) / bpm;
+    let (loop_enabled, loop_start, loop_end) = params.loop_range();
+    let loop_active = loop_enabled && loop_end > loop_start;
 
     let mut peak_l = 0.0f32;
     let mut peak_r = 0.0f32;
@@ -378,6 +380,15 @@ fn write_block<T>(
 
         if playing {
             *sample_counter += 1;
+            // Wrap back to the loop start the instant playback reaches its
+            // end, so the section repeats seamlessly. Every position-
+            // derived thing downstream (the transport readout, the MIDI
+            // scheduler, clip playback) reads straight off `sample_counter`
+            // with no other persistent state, so jumping it back here is
+            // enough - nothing needs telling separately.
+            if loop_active && *sample_counter >= loop_end as u64 {
+                *sample_counter = loop_start as u64;
+            }
         }
         frames += 1;
     }

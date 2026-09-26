@@ -181,6 +181,7 @@ fn main() -> Result<(), ApplicationError> {
         // the timeline playhead from the transport's live position, and
         // schedules Carve to play whatever MIDI notes the playhead crossed.
         let last_tick = std::cell::Cell::new(Instant::now());
+        let loop_params = params.clone();
         let midi_scheduler = timeline::scheduler::MidiScheduler::new();
         let recording_coordinator = RecordingCoordinator::new();
         let render_timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
@@ -198,8 +199,20 @@ fn main() -> Result<(), ApplicationError> {
 
                 // Latest-wins: cheap to rebuild every tick, and avoids
                 // needing to dirty-track arrangement changes separately.
-                let plan = shared::playback::PlaybackPlan::from_arrangement(&tl_arrangement.get(), engine_sample_rate);
+                let arr = tl_arrangement.get();
+                let plan = shared::playback::PlaybackPlan::from_arrangement(&arr, engine_sample_rate);
                 let _ = playback_plan_tx.borrow_mut().push(plan);
+
+                // Same reasoning as the plan above: recomputed every tick
+                // from ticks (which depend on the tempo map) rather than
+                // threaded through as its own signal.
+                if let Some(range) = arr.loop_range {
+                    let start = arr.tempo_map.ticks_to_samples(range.start, engine_sample_rate);
+                    let end = arr.tempo_map.ticks_to_samples(range.end, engine_sample_rate);
+                    loop_params.set_loop(loop_on.get(), start, end);
+                } else {
+                    loop_params.set_loop(false, 0, 0);
+                }
 
                 recording_coordinator.advance(
                     cx,
@@ -343,6 +356,7 @@ fn main() -> Result<(), ApplicationError> {
                         recording_preview,
                         tl_tool,
                         selected_track,
+                        loop_on,
                     );
 
                     Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));

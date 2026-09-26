@@ -10,7 +10,7 @@ use shared::arrangement::{snap, Arrangement, LoopRange, Ticks, TimeSignature, Vi
 use crate::timeline::state::TimelineEvent;
 use crate::tokens::ThemeId;
 
-const LOOP_BAR_HEIGHT: f32 = 4.0;
+const LOOP_BAR_HEIGHT: f32 = 5.0;
 const BAR_TICK_HEIGHT: f32 = 10.0;
 const BEAT_TICK_HEIGHT: f32 = 4.0;
 const MIN_BEAT_PX: f64 = 6.0;
@@ -29,6 +29,7 @@ pub struct Ruler {
     transform: Signal<ViewTransform>,
     playhead: Signal<Ticks>,
     theme: Signal<ThemeId>,
+    loop_on: Signal<bool>,
     drag: Option<Drag>,
     /// Live loop-range preview while dragging; committed as one command on
     /// mouse-up so a drag is a single undo step.
@@ -42,13 +43,15 @@ impl Ruler {
         transform: Signal<ViewTransform>,
         playhead: Signal<Ticks>,
         theme: Signal<ThemeId>,
+        loop_on: Signal<bool>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, transform, playhead, theme, drag: None, loop_preview: None }
+        Self { arrangement, transform, playhead, theme, loop_on, drag: None, loop_preview: None }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(transform, |mut h| h.needs_redraw())
             .bind(playhead, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
+            .bind(loop_on, |mut h| h.needs_redraw())
     }
 
     fn loop_range(&self) -> Option<LoopRange> {
@@ -148,6 +151,20 @@ impl View for Ruler {
         bg.set_anti_alias(true);
         canvas.draw_path(&vg::Path::rect(vg::Rect::new(bounds.x, bounds.y, bounds.x + bounds.w, bounds.y + bounds.h), None), &bg);
 
+        // The loop/section range: a full-height wash first (so it sits
+        // behind the bar numbers), brighter once Loop is actually on -
+        // a range can be drawn and kept without looping, so the ruler
+        // shouldn't look identical to "this is now playing on repeat".
+        let loop_range = self.loop_range();
+        if let Some(range) = loop_range {
+            let x0 = (bounds.x as f64 + transform.tick_to_x(range.start)) as f32;
+            let x1 = (bounds.x as f64 + transform.tick_to_x(range.end)) as f32;
+            let mut wash = vg::Paint::default();
+            wash.set_color(if self.loop_on.get() { palette.mod_soft } else { palette.bg_200 });
+            wash.set_anti_alias(true);
+            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, bounds.y, x1, bounds.y + bounds.h), None), &wash);
+        }
+
         let start_tick = transform.x_to_tick(0.0).max(0);
         let end_tick = transform.x_to_tick(bounds.w as f64) + ticks_per_bar;
 
@@ -198,11 +215,13 @@ impl View for Ruler {
             }
         }
 
-        if let Some(range) = self.loop_range() {
+        // The crisp handle bar on top of everything else, so it stays the
+        // obvious thing to grab even where it crosses bar numbers.
+        if let Some(range) = loop_range {
             let x0 = (bounds.x as f64 + transform.tick_to_x(range.start)) as f32;
             let x1 = (bounds.x as f64 + transform.tick_to_x(range.end)) as f32;
             let mut loop_paint = vg::Paint::default();
-            loop_paint.set_color(palette.md);
+            loop_paint.set_color(if self.loop_on.get() { palette.md } else { palette.ink_faint });
             loop_paint.set_anti_alias(true);
             canvas.draw_path(
                 &vg::Path::rect(vg::Rect::new(x0, bounds.y, x1, bounds.y + LOOP_BAR_HEIGHT), None),

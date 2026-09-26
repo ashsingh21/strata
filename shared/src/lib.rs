@@ -11,7 +11,7 @@
 //! audio callback can use it directly.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 pub mod arrangement;
 pub mod playback;
@@ -38,6 +38,12 @@ pub struct Params {
     /// `TimelineEvent::SetTempo`), rather than the engine reading the
     /// arrangement directly.
     bpm: AtomicU32,
+    /// Arrangement loop range, in samples at the engine's sample rate -
+    /// recomputed and pushed every UI frame (ticks depend on the tempo
+    /// map, which the engine doesn't have), alongside `PlaybackPlan`.
+    loop_enabled: AtomicBool,
+    loop_start_sample: AtomicU64,
+    loop_end_sample: AtomicU64,
 }
 
 /// Default tempo, matching `shared::arrangement::seed::empty_arrangement`'s
@@ -54,6 +60,9 @@ impl Params {
             stop_requested: AtomicBool::new(false),
             click_enabled: AtomicBool::new(false),
             bpm: AtomicU32::new((DEFAULT_BPM as f32).to_bits()),
+            loop_enabled: AtomicBool::new(false),
+            loop_start_sample: AtomicU64::new(0),
+            loop_end_sample: AtomicU64::new(0),
         }
     }
 
@@ -105,6 +114,24 @@ impl Params {
 
     pub fn bpm(&self) -> f64 {
         f32::from_bits(self.bpm.load(Ordering::Relaxed)) as f64
+    }
+
+    /// `start`/`end` in samples at the engine's rate; `enabled` is the
+    /// transport's Loop toggle - a range can be set (drawn in the ruler)
+    /// without actually looping playback until this is on.
+    pub fn set_loop(&self, enabled: bool, start_samples: i64, end_samples: i64) {
+        self.loop_enabled.store(enabled, Ordering::Relaxed);
+        self.loop_start_sample.store(start_samples.max(0) as u64, Ordering::Relaxed);
+        self.loop_end_sample.store(end_samples.max(0) as u64, Ordering::Relaxed);
+    }
+
+    /// `(enabled, start_samples, end_samples)`.
+    pub fn loop_range(&self) -> (bool, u64, u64) {
+        (
+            self.loop_enabled.load(Ordering::Relaxed),
+            self.loop_start_sample.load(Ordering::Relaxed),
+            self.loop_end_sample.load(Ordering::Relaxed),
+        )
     }
 }
 

@@ -60,20 +60,24 @@ impl<M: SignalGet<bool> + Copy + 'static> View for Glyph<M> {
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let b = cx.bounds();
-        let s = cx.scale_factor();
         let color = (self.color)(&self.theme.get().palette(), self.on.get());
-        // All geometry is in a 12-unit box, centred in the bounds.
-        let size = 12.0 * s;
+        // All geometry is drawn in a 12-unit box, scaled to fill whatever
+        // size the caller gave it (the default is a 12px box, so `unit`
+        // is 1px there; a caller asking for a bigger glyph - the header's
+        // transport icons - gets everything, strokes included, scaled up
+        // with it instead of a bigger box around a still-tiny icon).
+        let size = b.w.min(b.h);
+        let unit = size / 12.0;
         let ox = b.x + (b.w - size) * 0.5;
         let oy = b.y + (b.h - size) * 0.5;
-        let pt = |x: f32, y: f32| vg::Point::new(ox + x * s, oy + y * s);
+        let pt = |x: f32, y: f32| vg::Point::new(ox + x * unit, oy + y * unit);
 
         let mut fill = vg::Paint::default();
         fill.set_color(color);
         fill.set_anti_alias(true);
         let mut stroke = fill.clone();
         stroke.set_style(vg::PaintStyle::Stroke);
-        stroke.set_stroke_width(1.25 * s);
+        stroke.set_stroke_width(1.25 * unit);
         stroke.set_stroke_join(vg::PaintJoin::Round);
         stroke.set_stroke_cap(vg::PaintCap::Round);
 
@@ -96,13 +100,13 @@ impl<M: SignalGet<bool> + Copy + 'static> View for Glyph<M> {
                 canvas.draw_path(&p.detach(), &fill);
             }
             GlyphKind::Stop => {
-                canvas.draw_path(&vg::Path::rect(vg::Rect::new(ox + 2.5 * s, oy + 2.5 * s, ox + 9.5 * s, oy + 9.5 * s), None), &fill);
+                canvas.draw_path(&vg::Path::rect(vg::Rect::new(ox + 2.5 * unit, oy + 2.5 * unit, ox + 9.5 * unit, oy + 9.5 * unit), None), &fill);
             }
             GlyphKind::Record => {
-                canvas.draw_path(&vg::Path::circle(pt(6.0, 6.0), 3.75 * s, None), &fill);
+                canvas.draw_path(&vg::Path::circle(pt(6.0, 6.0), 3.75 * unit, None), &fill);
             }
             GlyphKind::Rewind => {
-                canvas.draw_path(&vg::Path::rect(vg::Rect::new(ox + 2.0 * s, oy + 2.5 * s, ox + 3.5 * s, oy + 9.5 * s), None), &fill);
+                canvas.draw_path(&vg::Path::rect(vg::Rect::new(ox + 2.0 * unit, oy + 2.5 * unit, ox + 3.5 * unit, oy + 9.5 * unit), None), &fill);
                 let mut p = poly(&[(10.0, 2.5), (4.0, 6.0), (10.0, 9.5)]);
                 p.close();
                 canvas.draw_path(&p.detach(), &fill);

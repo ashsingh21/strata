@@ -48,6 +48,7 @@ pub fn timeline_view(
     recording_preview: Signal<Option<crate::recorder::RecordingPreview>>,
     tool: Signal<TimelineTool>,
     selected_track: Signal<Option<shared::arrangement::TrackId>>,
+    loop_on: Signal<bool>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -140,7 +141,7 @@ pub fn timeline_view(
         .height(Stretch(1.0));
 
         VStack::new(cx, move |cx| {
-            Ruler::new(cx, arrangement, transform, playhead, theme)
+            Ruler::new(cx, arrangement, transform, playhead, theme, loop_on)
                 .height(Pixels(tokens::SIZE_RULER))
                 .width(Stretch(1.0));
 

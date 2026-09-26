@@ -250,25 +250,25 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   font-weight: 400;
 }}
 .readout-big {{
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 600;
 }}
 .tgroup {{
   border-width: 1px;
   border-radius: {radius_sm}px;
-  height: 26px;
+  height: 30px;
   padding: 1px;
   gap: 1px;
 }}
 .tbtn {{
-  width: 30px;
-  height: 22px;
+  width: 34px;
+  height: 28px;
   border-width: 0px;
   border-radius: 2px;
   padding: 0px;
 }}
 .position {{
-  height: 26px;
+  height: 30px;
 }}
 .bar {{
   border-radius: 2px;
@@ -317,7 +317,11 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   height: 1px;
 }}
 .transport {{
-  height: {toolbar}px;
+  /* A fixed size, not {{toolbar}}: transport.rs's own HEADER_HEIGHT
+     constant is the single source of truth here, deliberately bigger
+     than the size-toolbar token every other device/editor header uses -
+     see that constant's doc comment for why. */
+  height: 48px;
   border-bottom-width: 1px;
 }}
 .swatch {{
@@ -463,7 +467,6 @@ scrollview > scroll-content {{
 .clip-pink {{ background-color: {pink}; }}
 "#,
         control = space("size-control"),
-        toolbar = space("size-toolbar"),
         radius_sm = space("radius-sm"),
         radius_md = space("radius-md"),
         radius_pill = space("radius-pill"),
@@ -615,7 +618,13 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".sidebar", vec![("background-color", c("bg-100"))]);
     rule(".side-row", vec![("background-color", "transparent".to_string()), ("color", c("ink"))]);
     rule(".side-row:hover", vec![("background-color", c("bg-300"))]);
-    rule(".side-row.is-on", vec![("background-color", c("bg-400"))]);
+    // A colored highlight, not another neutral bg-400 toggle: the sidebar
+    // is navigation (which instrument/preset is active), not a device
+    // control, so it reads better picking out a track-independent accent
+    // (mod, already "this is the active/engaged thing" everywhere else -
+    // Loop, LFO routing) than staying fully neutral.
+    rule(".side-row.is-on", vec![("background-color", c("mod-soft"))]);
+    rule(".side-row.is-on .body", vec![("color", c("mod"))]);
     rule(".side-row.nested", vec![("color", c("ink-muted"))]);
     rule(".side-head", vec![("color", c("ink-muted"))]);
     rule(".count", vec![("color", c("ink-faint"))]);

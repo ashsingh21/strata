@@ -110,7 +110,7 @@ impl<V: SignalGet<f64> + Copy + 'static> View for BpmField<V> {
         // than `value`, which only updates once the drag commits.
         let display = if self.is_dragging { self.continuous } else { self.value.get() };
         let text = format!("{display:.2}");
-        let font = crate::canvas_text::canvas_font(12.0);
+        let font = crate::canvas_text::canvas_font(13.0);
         let mut paint = vg::Paint::default();
         paint.set_color(palette.ink);
         paint.set_anti_alias(true);
