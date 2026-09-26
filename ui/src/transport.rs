@@ -168,7 +168,12 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         // Input gain-staging stays by the transport: that's when it matters.
         HStack::new(cx, move |cx| {
             Label::new(cx, "In").class("label").font_size(12.0);
+            // Every other Meter call sets an explicit width (it has no
+            // default) - this one didn't, so it was rendering at zero
+            // width: invisible, not just narrow. 10px matches Carve's own
+            // output meter, the other two-channel-width instance.
             Meter::new(cx, props.input_level, props.input_level, Signal::new(false), Signal::new(false), theme, |_cx| {})
+                .width(Pixels(10.0))
                 .height(Pixels(24.0));
             Knob::plain(cx, props.input_gain_pos, 0.5, theme, |cx, p| cx.emit(RecorderModelEvent::SetInputGain(p)))
                 .size(Pixels(22.0));
