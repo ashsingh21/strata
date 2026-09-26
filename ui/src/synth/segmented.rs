@@ -6,13 +6,14 @@
 use vizia::prelude::*;
 
 /// `count` items; `content` builds each button's label content, `is_on`
-/// reports whether index `i` is selected, `on_select` fires with the
-/// clicked index.
+/// gives a reactive "is index `i` selected" (a `Memo`, not a plain bool -
+/// a bool is read once at build time, so the highlight never followed the
+/// selection), `on_select` fires with the clicked index.
 pub fn segmented<V: View>(
     cx: &mut Context,
     count: usize,
     mut content: impl FnMut(&mut Context, usize) -> Handle<'_, V>,
-    mut is_on: impl FnMut(usize) -> bool,
+    mut is_on: impl FnMut(usize) -> Memo<bool>,
     on_select: impl Fn(&mut EventContext, usize) + Copy + Send + Sync + 'static,
 ) {
     HStack::new(cx, move |cx| {

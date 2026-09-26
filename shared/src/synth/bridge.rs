@@ -5,7 +5,7 @@
 //! matters here, not just the latest), and level metering flows back
 //! engine -> UI the same way the transport's peak meter does.
 
-use super::{seed_synth, Envelope, Filter, LfoTarget, Mix, Oscillator, SynthState, VoiceMode};
+use super::{seed_synth, Envelope, Filter, Fx, LfoTarget, Mix, Oscillator, SynthState, Unison, VoiceMode};
 
 /// A DSP-relevant snapshot of `SynthState`: everything the audio thread
 /// needs to render a block, with the UI-only fields (name, held notes,
@@ -30,6 +30,8 @@ pub struct SynthParams {
     pub lfo2_target: LfoTarget,
     pub glide_ms: f32,
     pub volume_db: f32,
+    pub unison: Unison,
+    pub fx: Fx,
 }
 
 impl SynthParams {
@@ -51,6 +53,8 @@ impl SynthParams {
             lfo2_target: s.lfo2.target,
             glide_ms: s.output.glide_ms,
             volume_db: s.output.volume_db,
+            unison: s.unison,
+            fx: s.fx,
         }
     }
 }
@@ -86,6 +90,10 @@ pub struct NoteEvent {
 pub struct SynthTelemetry {
     pub peak_l: f32,
     pub peak_r: f32,
+    /// Where each LFO is in its cycle (0..1) at the end of the block, so
+    /// the scopes show the real LFOs rather than an animation of their own.
+    pub lfo1_phase: f32,
+    pub lfo2_phase: f32,
 }
 
 pub const SYNTH_PARAMS_CAPACITY: usize = 64;

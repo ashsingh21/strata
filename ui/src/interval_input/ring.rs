@@ -104,11 +104,11 @@ impl View for Ring {
             }
             path.close();
             let mut fill = vg::Paint::default();
-            fill.set_color(palette.volt_soft);
+            fill.set_color(palette.signal_soft);
             fill.set_anti_alias(true);
             canvas.draw_path(&path.detach(), &fill);
             let mut stroke = vg::Paint::default();
-            stroke.set_color(palette.volt);
+            stroke.set_color(palette.signal);
             stroke.set_style(vg::PaintStyle::Stroke);
             stroke.set_stroke_width(1.5);
             stroke.set_anti_alias(true);
@@ -131,7 +131,7 @@ impl View for Ring {
             }
 
             let mut fill = vg::Paint::default();
-            fill.set_color(if held_here { palette.volt } else { palette.bg_200 });
+            fill.set_color(if held_here { palette.signal } else { palette.bg_200 });
             fill.set_anti_alias(true);
             canvas.draw_circle(p, NODE_R, &fill);
 
@@ -142,7 +142,7 @@ impl View for Ring {
             border.set_anti_alias(true);
             canvas.draw_circle(p, NODE_R, &border);
 
-            let text_color = if held_here { palette.on_volt } else { palette.ink };
+            let text_color = if held_here { palette.on_signal } else { palette.ink };
             let mut text_paint = vg::Paint::default();
             text_paint.set_color(text_color);
             text_paint.set_anti_alias(true);

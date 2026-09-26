@@ -54,22 +54,25 @@ pub fn timeline_view(
                 let snap_label = snap.map(|s| s.label().to_string());
                 Button::new(cx, move |cx| Label::new(cx, snap_label))
                     .class("readout")
+                    .class("snap")
                     .on_press(|cx| cx.emit(TimelineEvent::CycleSnap));
 
-                // Select (default: rubber-band selection, drag clips) vs
-                // Draw (click/drag empty space on a MIDI track to create
-                // a clip there directly, instead of only via step-entry).
-                // Both options always visible (not one button whose label
-                // silently swaps) and styled exactly like the piano roll's
-                // own Select/Draw toggle, so there's one consistent visual
-                // language for "this is a two-state mode switch" instead
-                // of a small single button that was easy to miss entirely.
-                tool_button(cx, "Select", TimelineTool::Select, tool);
-                tool_button(cx, "Draw", TimelineTool::Draw, tool);
-
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+
+                // Select (rubber-band selection, drag clips) vs Draw
+                // (click/drag empty space on a MIDI track to create a clip).
+                // The same segmented control as every other mode switch.
+                let tools = [TimelineTool::Select, TimelineTool::Draw];
+                crate::synth::segmented::segmented(
+                    cx,
+                    2,
+                    |cx, i| Label::new(cx, if i == 0 { "Select" } else { "Draw" }),
+                    move |i| tool.map(move |t| *t == tools[i]),
+                    move |cx, i| cx.emit(TimelineEvent::SetTool(tools[i])),
+                );
             })
             .class("tl-corner")
+            .alignment(Alignment::Left)
             .gap(Pixels(tokens::SPACE_2))
             .width(Pixels(HEAD_WIDTH))
             .height(Pixels(tokens::SIZE_RULER));
@@ -97,27 +100,29 @@ pub fn timeline_view(
                     }
                 });
 
+                // Quiet actions under the last track, not a toolbar.
                 HStack::new(cx, move |cx| {
-                    Button::new(cx, |cx| Label::new(cx, "+ Audio"))
+                    Button::new(cx, |cx| Label::new(cx, "+ Audio track"))
                         .class("btn")
-                        .class("sm")
+                        .class("quiet")
                         .on_press(|cx| {
                             cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Audio))
                         });
-                    Button::new(cx, |cx| Label::new(cx, "+ MIDI"))
+                    Button::new(cx, |cx| Label::new(cx, "+ MIDI track"))
                         .class("btn")
-                        .class("sm")
+                        .class("quiet")
                         .on_press(|cx| {
                             cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi))
                         });
-                    Button::new(cx, |cx| Label::new(cx, "Drums"))
+                    Button::new(cx, |cx| Label::new(cx, "+ Drums"))
                         .class("btn")
-                        .class("sm")
+                        .class("quiet")
                         .on_press(|cx| cx.emit(TimelineEvent::ToggleDrumsMenu));
                 })
-                .gap(Pixels(tokens::SPACE_2))
-                .padding(Pixels(tokens::SPACE_2))
-                .height(Auto)
+                .gap(Pixels(tokens::SPACE_1))
+                .padding_left(Pixels(tokens::SPACE_1))
+                .padding_top(Pixels(tokens::SPACE_1))
+                .height(Pixels(tokens::SIZE_CONTROL + tokens::SPACE_2))
                 .width(Pixels(HEAD_WIDTH));
             })
             .class("tl-heads")
@@ -157,18 +162,6 @@ pub fn timeline_view(
     .width(Stretch(1.0));
 }
 
-/// One segment of the Select/Draw toggle - same shape as the piano roll's
-/// own `mode_button`, so both places a mode switch shows up look and
-/// behave identically.
-fn tool_button(cx: &mut Context, label: &'static str, this: TimelineTool, tool: Signal<TimelineTool>) {
-    let on = tool.map(move |t| *t == this);
-    Button::new(cx, move |cx| Label::new(cx, label))
-        .class("btn")
-        .class("sm")
-        .toggle_class("is-mute", on)
-        .on_press(move |cx| cx.emit(TimelineEvent::SetTool(this)));
-}
-
 /// The "Drums" button's dropdown: every `.wav` under `assets/drums/`,
 /// clicking one imports it as a new track. See
 /// `TimelineEvent::AddDrumSample`'s own doc comment for what that does.
@@ -179,7 +172,8 @@ fn tool_button(cx: &mut Context, label: &'static str, this: TimelineTool, tool: 
 /// parent produced unexplained offsets earlier in this project (see
 /// `timeline_view`'s layout comment), so floating panels here stay
 /// top-level instead.
-pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
+/// The drum sample file names in `assets/drums/`, sorted.
+pub fn drum_samples() -> Vec<String> {
     let mut samples: Vec<String> = std::fs::read_dir(assets_dir().join("drums"))
         .map(|entries| {
             entries
@@ -194,6 +188,11 @@ pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
         })
         .unwrap_or_default();
     samples.sort();
+    samples
+}
+
+pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
+    let samples = drum_samples();
 
     VStack::new(cx, move |cx| {
         Label::new(cx, "Drum samples").class("label");
@@ -216,8 +215,9 @@ pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
     .gap(Pixels(tokens::SPACE_1))
     .padding(Pixels(tokens::SPACE_2))
     .position_type(PositionType::Absolute)
-    .top(Pixels(48.0))
-    .left(Pixels(20.0))
+    // Just right of the sidebar, under the header and ruler.
+    .top(Pixels(tokens::SIZE_TOOLBAR + tokens::SIZE_RULER + 8.0))
+    .left(Pixels(216.0))
     .width(Pixels(160.0))
     .height(Auto);
 }

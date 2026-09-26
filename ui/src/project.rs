@@ -21,6 +21,28 @@ pub fn project_path() -> PathBuf {
 pub struct ProjectModel {
     arrangement: Signal<Arrangement>,
     synth: Signal<SynthState>,
+    /// The project as last saved (or loaded), serialized - the header
+    /// compares the live project against it to show "Saved" or "Edited".
+    pub saved: Signal<String>,
+}
+
+/// The project's saved form, for comparing against the last save. Held
+/// keys are play state, not an edit, so they're left out.
+pub fn snapshot(arrangement: &Arrangement, synth: &SynthState) -> String {
+    let mut synth = synth.clone();
+    synth.held_notes.clear();
+    serde_json::to_string(&Project { arrangement: arrangement.clone(), synth }).unwrap_or_default()
+}
+
+/// The project's display name, from its file name ("project.json" ->
+/// "Project").
+pub fn project_name() -> String {
+    let stem = project_path().file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut chars = stem.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => "Untitled".to_string(),
+    }
 }
 
 pub enum ProjectEvent {
@@ -29,7 +51,8 @@ pub enum ProjectEvent {
 
 impl ProjectModel {
     pub fn new(arrangement: Signal<Arrangement>, synth: Signal<SynthState>) -> Self {
-        Self { arrangement, synth }
+        let saved = Signal::new(snapshot(&arrangement.get(), &synth.get()));
+        Self { arrangement, synth, saved }
     }
 }
 
@@ -40,7 +63,10 @@ impl Model for ProjectModel {
                 let project = Project { arrangement: self.arrangement.get(), synth: self.synth.get() };
                 let path = project_path();
                 match save(&project, &path) {
-                    Ok(()) => eprintln!("project: saved to {}", path.display()),
+                    Ok(()) => {
+                        eprintln!("project: saved to {}", path.display());
+                        self.saved.set(snapshot(&project.arrangement, &project.synth));
+                    }
                     Err(e) => eprintln!("project: failed to save to {}: {e}", path.display()),
                 }
             }

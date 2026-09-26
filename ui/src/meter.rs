@@ -1,5 +1,5 @@
-//! The Strata stereo meter: two 4px channels, `volt` up to -6 dBFS and `hot`
-//! above, with a latching `record`-coloured clip LED. This view is a pure
+//! The Strata stereo meter: two 4px channels, `signal` up to -12 dBFS and
+//! `warn` from there to 0, with a latching `record`-coloured clip LED. This view is a pure
 //! renderer: the dB mapping, peak-hold decay and clip latching all happen in
 //! the app's telemetry timer (`app.rs`), which feeds it ready-to-draw 0..1
 //! fill fractions.
@@ -12,9 +12,9 @@ use crate::tokens::ThemeId;
 const CHANNEL_WIDTH: f32 = 4.0;
 const CHANNEL_GAP: f32 = 2.0;
 const LED_HEIGHT: f32 = 4.0;
-/// Fraction of full scale at which volt meter colour switches to hot
-/// (corresponds to -6 dBFS on the meter's -60..0 dB scale).
-pub const HOT_THRESHOLD: f32 = 0.9;
+/// Fraction of full scale at which the meter switches from `signal` to
+/// `warn` (-12 dBFS on the meter's -60..0 dB scale).
+pub const HOT_THRESHOLD: f32 = 0.8;
 
 type ClipResetCallback = Box<dyn Fn(&mut EventContext)>;
 
@@ -95,7 +95,7 @@ impl<L: SignalGet<f32> + Copy + 'static> View for Meter<L> {
                     bounds.y + bounds.h,
                 );
                 let mut lo_paint = vg::Paint::default();
-                lo_paint.set_color(palette.volt);
+                lo_paint.set_color(palette.signal);
                 lo_paint.set_anti_alias(true);
                 canvas.draw_path(&vg::Path::rect(lo_rect, None), &lo_paint);
             }
@@ -108,7 +108,7 @@ impl<L: SignalGet<f32> + Copy + 'static> View for Meter<L> {
                     bounds.y + bounds.h * (1.0 - HOT_THRESHOLD),
                 );
                 let mut hi_paint = vg::Paint::default();
-                hi_paint.set_color(palette.hot);
+                hi_paint.set_color(palette.warn);
                 hi_paint.set_anti_alias(true);
                 canvas.draw_path(&vg::Path::rect(hi_rect, None), &hi_paint);
             }

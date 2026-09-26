@@ -49,8 +49,14 @@ pub enum SynthEvent {
     NoteOn(u8),
     NoteOff(u8),
     ToggleHelp,
-    /// Advances the LFO scope's animated phase, pushes the latest params
-    /// snapshot to the engine and drains its peak meter; `dt` in seconds.
+    /// Replaces the whole patch with a preset (keeping held keys held).
+    LoadPreset(fn() -> SynthState),
+    /// An LFO pill was pressed: the start of dragging it onto a knob.
+    BeginLfoDrag(usize),
+    /// An LFO pill was released over a routable knob: patch LFO `.0` there.
+    RouteLfo(usize, LfoTarget),
+    /// Pushes the latest params snapshot to the engine and drains its peak
+    /// meter and LFO phases; `dt` in seconds.
     Tick(f32),
 }
 
@@ -100,11 +106,15 @@ fn db_to_meter_fraction(db: f32) -> f32 {
 
 pub struct SynthModel {
     pub state: Signal<SynthState>,
-    pub lfo_scope_phase: Signal<f32>,
+    /// Each LFO's live phase (0..1), as reported by the engine.
+    pub lfo1_phase: Signal<f32>,
+    pub lfo2_phase: Signal<f32>,
     pub octave_shift: Signal<i8>,
     pub meter_l: Signal<f32>,
     pub meter_r: Signal<f32>,
     pub help_open: Signal<bool>,
+    /// The LFO pill being dragged, if any (drop targets light up).
+    pub lfo_drag: Signal<Option<usize>>,
 
     // Engine bridge (not reactive).
     params_tx: rtrb::Producer<SynthParams>,
@@ -132,11 +142,13 @@ impl SynthModel {
     ) -> Self {
         Self {
             state: Signal::new(seed_synth()),
-            lfo_scope_phase: Signal::new(0.0),
+            lfo1_phase: Signal::new(0.0),
+            lfo2_phase: Signal::new(0.0),
             octave_shift: Signal::new(0),
             meter_l: Signal::new(0.0),
             meter_r: Signal::new(0.0),
             help_open: Signal::new(false),
+            lfo_drag: Signal::new(None),
             params_tx,
             note_tx,
             telemetry_rx,
@@ -183,8 +195,6 @@ impl SynthModel {
     }
 }
 
-const LFO_SCOPE_HZ: f32 = 0.5;
-
 impl Model for SynthModel {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
@@ -218,16 +228,31 @@ impl Model for SynthModel {
             SynthEvent::NoteOn(note) => self.sound_on(*note),
             SynthEvent::NoteOff(note) => self.sound_off(*note),
             SynthEvent::ToggleHelp => self.help_open.update(|v| *v = !*v),
-            SynthEvent::Tick(dt) => {
-                self.lfo_scope_phase.update(|p| {
-                    *p = (*p + LFO_SCOPE_HZ * std::f32::consts::TAU * dt) % std::f32::consts::TAU;
+            SynthEvent::LoadPreset(build) => {
+                let preset = build();
+                self.state.update(|s| {
+                    let held = std::mem::take(&mut s.held_notes);
+                    *s = preset.clone();
+                    s.held_notes = held;
                 });
-
+            }
+            SynthEvent::BeginLfoDrag(lfo) => self.lfo_drag.set(Some(*lfo)),
+            SynthEvent::RouteLfo(lfo, target) => {
+                let target = *target;
+                self.state.update(|s| if *lfo == 0 { s.lfo1.target = target } else { s.lfo2.target = target });
+            }
+            SynthEvent::Tick(dt) => {
                 let mut peak_l = 0.0f32;
                 let mut peak_r = 0.0f32;
-                while let Ok(SynthTelemetry { peak_l: l, peak_r: r }) = self.telemetry_rx.pop() {
+                let mut phases = None;
+                while let Ok(SynthTelemetry { peak_l: l, peak_r: r, lfo1_phase, lfo2_phase }) = self.telemetry_rx.pop() {
                     peak_l = peak_l.max(l);
                     peak_r = peak_r.max(r);
+                    phases = Some((lfo1_phase, lfo2_phase));
+                }
+                if let Some((p1, p2)) = phases {
+                    self.lfo1_phase.set(p1);
+                    self.lfo2_phase.set(p2);
                 }
                 let decay = METER_DECAY_DB_PER_SEC * dt;
                 let target_l = gain_to_db(peak_l).max(METER_FLOOR_DB);
@@ -275,6 +300,13 @@ impl Model for SynthModel {
                     }
                 }
             },
+            // A release anywhere ends an LFO drag; a knob under the pointer
+            // has already routed it (it sees the release first).
+            WindowEvent::MouseUp(MouseButton::Left) => {
+                if self.lfo_drag.get().is_some() {
+                    self.lfo_drag.set(None);
+                }
+            }
             WindowEvent::KeyUp(code, _) => {
                 if *code == Code::Backquote {
                     self.rest_held = false;

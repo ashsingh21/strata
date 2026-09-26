@@ -123,7 +123,7 @@ impl View for Spacing {
             let rect = vg::Rect::new(x - PAD_W / 2.0, mid_y - PAD_H / 2.0, x + PAD_W / 2.0, mid_y + PAD_H / 2.0);
 
             let mut fill = vg::Paint::default();
-            fill.set_color(if is_held { palette.volt } else { palette.bg_200 });
+            fill.set_color(if is_held { palette.signal } else { palette.bg_200 });
             fill.set_anti_alias(true);
             canvas.draw_path(&vg::Path::rect(rect, None), &fill);
 
@@ -134,7 +134,7 @@ impl View for Spacing {
             border.set_anti_alias(true);
             canvas.draw_path(&vg::Path::rect(rect, None), &border);
 
-            let text_color = if is_held { palette.on_volt } else { palette.ink };
+            let text_color = if is_held { palette.on_signal } else { palette.ink };
             let mut text_paint = vg::Paint::default();
             text_paint.set_color(text_color);
             text_paint.set_anti_alias(true);
@@ -143,7 +143,7 @@ impl View for Spacing {
             canvas.draw_str(degree_text, vg::Point::new(dx, mid_y - 4.0), &label_font, &text_paint);
 
             let mut sub_paint = vg::Paint::default();
-            sub_paint.set_color(if is_held { palette.on_volt } else { palette.ink_muted });
+            sub_paint.set_color(if is_held { palette.on_signal } else { palette.ink_muted });
             sub_paint.set_anti_alias(true);
             let note_text = note_name((key + offset) % 12);
             let nx = x - (note_text.len() as f32 * 2.6);

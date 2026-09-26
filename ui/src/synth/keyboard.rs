@@ -1,5 +1,5 @@
 //! The keyboard strip: 3 octaves (21 white keys, 15 black), held notes lit
-//! `volt`. There's no MIDI input wired up, so this is a stand-in for a
+//! `signal`. There's no MIDI input wired up, so this is a stand-in for a
 //! real controller: press-and-hold, same as the computer-keyboard input -
 //! a note sounds only as long as the mouse button stays down on it, not
 //! a click-to-toggle latch.
@@ -101,7 +101,7 @@ impl View for Keyboard {
             let x0 = bounds.x + white_index as f32 * white_w;
             let mut paint = vg::Paint::default();
             let is_held = held.contains(&white_note(white_index));
-            paint.set_color(if is_held { palette.volt } else { palette.key_white });
+            paint.set_color(if is_held { palette.signal } else { palette.key_white });
             paint.set_anti_alias(true);
             let rect = vg::Rect::new(x0 + 0.5, bounds.y, x0 + white_w - 0.5, bounds.y + bounds.h);
             canvas.draw_path(&vg::Path::rect(rect, None), &paint);
@@ -113,7 +113,7 @@ impl View for Keyboard {
             let half = BLACK_WIDTH_FRAC * bounds.w * 0.5;
             let mut paint = vg::Paint::default();
             let is_held = held.contains(&note);
-            paint.set_color(if is_held { palette.volt } else { palette.key_black });
+            paint.set_color(if is_held { palette.signal } else { palette.key_black });
             paint.set_anti_alias(true);
             let rect = vg::Rect::new(center - half, bounds.y, center + half, bounds.y + bounds.h * BLACK_HEIGHT_FRAC);
             canvas.draw_path(&vg::Path::rect(rect, None), &paint);

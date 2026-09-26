@@ -42,13 +42,6 @@ pub fn clip_color_to_rgb(color: ClipColor) -> Color {
     }
 }
 
-/// A track's clip colour at low alpha, for tinting its header row so it
-/// reads as the same track at a glance next to its (fully-saturated) clips.
-fn clip_color_to_soft_rgb(color: ClipColor) -> Color {
-    let c = clip_color_to_rgb(color);
-    Color::rgba(c.r(), c.g(), c.b(), 70)
-}
-
 pub fn track_header<'a>(
     cx: &'a mut Context,
     arrangement: Signal<Arrangement>,
@@ -59,7 +52,7 @@ pub fn track_header<'a>(
         arr.track(track_id).map(|t| t.name.clone()).unwrap_or_default()
     });
     let kind_label = arrangement.map(move |arr| match arr.track(track_id).map(|t| t.kind) {
-        Some(TrackKind::Audio) => "AUDIO",
+        Some(TrackKind::Audio) => "Audio",
         Some(TrackKind::Midi) => "MIDI",
         None => "",
     });
@@ -82,10 +75,11 @@ pub fn track_header<'a>(
                 Element::new(cx)
                     .class("swatch")
                     .background_color(color.map(|c| clip_color_to_rgb(*c)));
-                Label::new(cx, name).class("control");
+                Label::new(cx, name).class("title");
+                Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, kind_label).class("meta");
             })
-            .gap(Pixels(tokens::SPACE_1))
+            .gap(Pixels(tokens::SPACE_2))
             .alignment(Alignment::Left)
             .height(Auto);
 
@@ -140,7 +134,6 @@ pub fn track_header<'a>(
     .class("tl-head")
     .gap(Pixels(tokens::SPACE_3))
     .padding(Pixels(tokens::SPACE_2))
-    .background_color(color.map(|c| clip_color_to_soft_rgb(*c)))
     .width(Pixels(crate::timeline::HEAD_WIDTH))
     .height(Pixels(crate::timeline::LANE_HEIGHT))
 }

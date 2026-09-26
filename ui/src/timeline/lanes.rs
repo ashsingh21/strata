@@ -737,11 +737,13 @@ impl LaneArea {
                 let y0 = bounds.y + row_top - scroll_y + CLIP_INSET;
                 let y1 = bounds.y + row_top - scroll_y + row_height - CLIP_INSET;
                 let mut fill = vg::Paint::default();
-                fill.set_color(Color::rgba(palette.volt.r(), palette.volt.g(), palette.volt.b(), 130));
+                // A clip being drawn isn't sounding: a neutral selection wash
+                // with an ink outline, not `signal`.
+                fill.set_color(palette.selection);
                 fill.set_anti_alias(true);
                 canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, x1, y1), None), &fill);
                 let mut border = vg::Paint::default();
-                border.set_color(palette.volt);
+                border.set_color(palette.ink);
                 border.set_style(vg::PaintStyle::Stroke);
                 border.set_stroke_width(1.5);
                 border.set_anti_alias(true);
@@ -817,6 +819,15 @@ impl LaneArea {
         fill.set_anti_alias(true);
         canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, x1, y1), None), &fill);
 
+        // `clip-edge`: a 1px inner edge (transparent in Studio) so the muted
+        // clip colours hold their shape on Daylight's light ground.
+        let mut edge = vg::Paint::default();
+        edge.set_color(palette.clip_edge);
+        edge.set_style(vg::PaintStyle::Stroke);
+        edge.set_stroke_width(1.0);
+        edge.set_anti_alias(true);
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0 + 0.5, y0 + 0.5, x1 - 0.5, y1 - 0.5), None), &edge);
+
         let header_bottom = (y0 + CLIP_HEADER_H).min(y1);
         let on_clip = tokens::ON_CLIP;
         let divider_color = Color::rgba(on_clip.r(), on_clip.g(), on_clip.b(), 77);
@@ -831,7 +842,7 @@ impl LaneArea {
         let mut text_paint = vg::Paint::default();
         text_paint.set_color(tokens::ON_CLIP);
         text_paint.set_anti_alias(true);
-        let font = crate::canvas_text::canvas_font(10.0);
+        let font = crate::canvas_text::canvas_font(11.0);
         canvas.draw_str(&clip.name, vg::Point::new(x0 + 4.0, y0 + 10.0), &font, &text_paint);
 
         if y1 > header_bottom {

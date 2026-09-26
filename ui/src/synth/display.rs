@@ -1,7 +1,8 @@
 //! The synth's canvas displays: oscillator waveform, filter response,
-//! envelope shape and the LFO scope. One shared colour rule (README):
-//! the current shape is a 2px volt line over a volt-soft fill; modulation
-//! is mod; grid/axis use grid-beat/line.
+//! envelope shape and the LFO scope. One shared colour rule (Strata 2):
+//! every shape is a 1.5px `ink` line over a faint `selection` fill - the
+//! only colour on a display is modulation (`mod`); grid/axis use
+//! grid-beat/line.
 
 use vizia::prelude::*;
 use vizia::vg;
@@ -39,16 +40,16 @@ fn draw_signal(canvas: &Canvas, bounds: BoundingBox, palette: &crate::tokens::Pa
     let (line, fill) = line_and_fill_path(points, bounds.w, bounds.h, baseline_frac);
 
     let mut fill_paint = vg::Paint::default();
-    fill_paint.set_color(palette.volt_soft);
+    fill_paint.set_color(palette.selection);
     fill_paint.set_anti_alias(true);
     canvas.save();
     canvas.translate((bounds.x, bounds.y));
     canvas.draw_path(&fill, &fill_paint);
 
     let mut line_paint = vg::Paint::default();
-    line_paint.set_color(palette.volt);
+    line_paint.set_color(palette.ink);
     line_paint.set_style(vg::PaintStyle::Stroke);
-    line_paint.set_stroke_width(2.0);
+    line_paint.set_stroke_width(1.5);
     line_paint.set_anti_alias(true);
     canvas.draw_path(&line, &line_paint);
     canvas.restore();
@@ -163,9 +164,15 @@ impl View for FilterDisplay {
         band_line.set_style(vg::PaintStyle::Stroke);
         band_line.set_stroke_width(1.0);
         band_line.set_anti_alias(true);
-        for frac in [band_lo, band_hi] {
-            let x = bounds.x + bounds.w * frac;
-            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x, bounds.y, x + 1.0, bounds.y + bounds.h), None), &band_line);
+        band_line.set_path_effect(vg::PathEffect::dash(&[3.0, 3.0], 0.0));
+        if band_hi > band_lo {
+            for frac in [band_lo, band_hi] {
+                let x = (bounds.x + bounds.w * frac).round() + 0.5;
+                let mut edge = vg::PathBuilder::new();
+                edge.move_to(vg::Point::new(x, bounds.y));
+                edge.line_to(vg::Point::new(x, bounds.y + bounds.h));
+                canvas.draw_path(&edge.detach(), &band_line);
+            }
         }
 
         draw_signal(canvas, bounds, &palette, &points, 1.0);
@@ -184,7 +191,7 @@ impl View for FilterDisplay {
         let cutoff_x = bounds.x + cutoff_frac * bounds.w;
         canvas.draw_path(&vg::Path::rect(vg::Rect::new(cutoff_x, bounds.y, cutoff_x + 1.0, bounds.y + bounds.h), None), &marker);
 
-        let font = canvas_font(10.0);
+        let font = canvas_font(11.0);
         let mut text_paint = vg::Paint::default();
         text_paint.set_color(palette.ink_muted);
         text_paint.set_anti_alias(true);
@@ -202,7 +209,7 @@ fn format_hz(hz: f32) -> String {
     }
 }
 
-/// An ADSR envelope shape, with static 6px handles at the attack peak,
+/// An ADSR envelope shape, with static 6px ring handles at the attack peak,
 /// decay-end and release-start points (display only - dragging them is an
 /// alternative input method the spec allows but this milestone doesn't
 /// wire; the knobs below each display are the editing path).
@@ -236,29 +243,43 @@ impl View for EnvelopeDisplay {
 
         draw_signal(canvas, bounds, &palette, &points, 1.0);
 
-        let mut handle_paint = vg::Paint::default();
-        handle_paint.set_color(palette.ink);
-        handle_paint.set_anti_alias(true);
+        // 6px rings: a bg-000 centre (the display well) inside an ink edge.
+        let mut ring_fill = vg::Paint::default();
+        ring_fill.set_color(palette.bg_000);
+        ring_fill.set_anti_alias(true);
+        let mut ring_edge = vg::Paint::default();
+        ring_edge.set_color(palette.ink);
+        ring_edge.set_style(vg::PaintStyle::Stroke);
+        ring_edge.set_stroke_width(1.25);
+        ring_edge.set_anti_alias(true);
         for &(t, y) in &points[1..4] {
-            let cx_px = bounds.x + t * bounds.w;
-            let cy_px = bounds.y + y * bounds.h;
-            let rect = vg::Rect::new(cx_px - 3.0, cy_px - 3.0, cx_px + 3.0, cy_px + 3.0);
-            canvas.draw_path(&vg::Path::rect(rect, None), &handle_paint);
+            let centre = vg::Point::new(bounds.x + t * bounds.w, bounds.y + y * bounds.h);
+            let ring = vg::Path::circle(centre, 3.0, None);
+            canvas.draw_path(&ring, &ring_fill);
+            canvas.draw_path(&ring, &ring_edge);
         }
     }
 }
 
-/// An animated LFO scope: a sine wave with a moving playhead. Phase is
-/// driven externally (the app's shared 60fps timer) via `SynthEvent::Tick`.
+/// One LFO's scope: a single cycle of its sine, as tall as its Depth, with
+/// a marker riding it at the LFO's real current phase (reported by the
+/// engine) - so the marker's speed is the Rate and its swing the Depth.
 pub struct LfoScope {
     state: Signal<SynthState>,
     theme: Signal<ThemeId>,
     phase: Signal<f32>,
+    lfo: fn(&SynthState) -> &shared::synth::Lfo,
 }
 
 impl LfoScope {
-    pub fn new(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>, phase: Signal<f32>) -> Handle<'_, Self> {
-        Self { state, theme, phase }
+    pub fn new(
+        cx: &mut Context,
+        state: Signal<SynthState>,
+        theme: Signal<ThemeId>,
+        phase: Signal<f32>,
+        lfo: fn(&SynthState) -> &shared::synth::Lfo,
+    ) -> Handle<'_, Self> {
+        Self { state, theme, phase, lfo }
             .build(cx, |_| {})
             .bind(state, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
@@ -270,25 +291,24 @@ impl View for LfoScope {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let bounds = cx.bounds();
         let palette = self.theme.get().palette();
-        let phase = self.phase.get();
-        let lfo1 = self.state.get().lfo1;
-        let cycles = 1.0 + lfo1.rate_norm * 3.0;
-        let amplitude = 0.1 + lfo1.depth * 0.32;
+        let state = self.state.get();
+        let depth = (self.lfo)(&state).depth.clamp(0.0, 1.0);
+        let amplitude = depth * 0.42;
+        let y_at = |t: f32| bounds.y + bounds.h * (0.5 - (t * std::f32::consts::TAU).sin() * amplitude);
 
         let mut axis = vg::Paint::default();
         axis.set_color(palette.line);
         axis.set_anti_alias(true);
-        canvas.draw_path(
-            &vg::Path::rect(vg::Rect::new(bounds.x, bounds.y + bounds.h * 0.5, bounds.x + bounds.w, bounds.y + bounds.h * 0.5 + 1.0), None),
-            &axis,
-        );
+        let mid = bounds.y + bounds.h * 0.5;
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(bounds.x, mid, bounds.x + bounds.w, mid + 1.0), None), &axis);
 
-        let n = 160usize;
+        let pad = 4.0;
+        let x_at = |t: f32| bounds.x + pad + t * (bounds.w - 2.0 * pad);
+        let n = 96usize;
         let mut path = vg::PathBuilder::new();
         for i in 0..n {
             let t = i as f32 / (n - 1) as f32;
-            let y = 0.5 - (t * std::f32::consts::TAU * cycles).sin() * amplitude;
-            let p = vg::Point::new(bounds.x + t * bounds.w, bounds.y + y * bounds.h);
+            let p = vg::Point::new(x_at(t), y_at(t));
             if i == 0 {
                 path.move_to(p);
             } else {
@@ -302,11 +322,16 @@ impl View for LfoScope {
         wave_paint.set_anti_alias(true);
         canvas.draw_path(&path.detach(), &wave_paint);
 
-        let playhead_t = (phase / std::f32::consts::TAU).fract();
-        let ph_x = bounds.x + playhead_t * bounds.w;
-        let mut ph_paint = vg::Paint::default();
-        ph_paint.set_color(palette.ink);
-        ph_paint.set_anti_alias(true);
-        canvas.draw_path(&vg::Path::rect(vg::Rect::new(ph_x, bounds.y, ph_x + 1.0, bounds.y + bounds.h), None), &ph_paint);
+        // Where the LFO is right now: a hairline plus a dot on the wave.
+        let phase = self.phase.get().fract();
+        let x = x_at(phase);
+        let mut marker = vg::Paint::default();
+        marker.set_color(palette.ink_faint);
+        marker.set_anti_alias(true);
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(x, bounds.y, x + 1.0, bounds.y + bounds.h), None), &marker);
+        let mut dot = vg::Paint::default();
+        dot.set_color(palette.ink);
+        dot.set_anti_alias(true);
+        canvas.draw_path(&vg::Path::circle(vg::Point::new(x + 0.5, y_at(phase)), 3.0, None), &dot);
     }
 }

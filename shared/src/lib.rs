@@ -130,6 +130,10 @@ pub struct Telemetry {
     pub peak_l: f32,
     pub peak_r: f32,
     pub position: Position,
+    /// Time spent rendering this block as a fraction of its duration.
+    pub cpu_load: f32,
+    /// Frames in this block (the device's buffer size).
+    pub block_frames: u32,
 }
 
 /// Generous relative to a typical block size, so the producer never blocks

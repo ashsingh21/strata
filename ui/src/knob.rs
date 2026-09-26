@@ -4,18 +4,21 @@
 //! `strata/components/Knob/preview.html` in the design handoff): a 270deg
 //! sweep starting at 135deg (bottom-left) and ending at 45deg (bottom-right),
 //! all proportions expressed relative to the knob's diameter so the same
-//! code draws both the 32px standard size and the 24px mixer-strip size.
+//! code draws all three sizes (`SIZE_KNOB_SM`/`SIZE_KNOB`/`SIZE_KNOB_LG`).
 //!
+//! The value arc is `ink` unless the knob lives on a track's device or
+//! strip, in which case it takes that track's `clip-*-line` colour (see
+//! [`KnobAccentExt::accent`]) - one muted hue per device, no glow, no gradient.
 use vizia::prelude::*;
 use vizia::vg;
 
-use crate::tokens::ThemeId;
+use crate::tokens::{Palette, ThemeId};
 
 const START_ANGLE_DEG: f32 = 135.0;
 const SWEEP_DEG: f32 = 270.0;
 
 const TRACK_RADIUS_FRAC: f32 = 12.0 / 32.0;
-const TRACK_STROKE_FRAC: f32 = 3.0 / 32.0;
+const TRACK_STROKE_FRAC: f32 = 2.5 / 32.0;
 const CAP_RADIUS_FRAC: f32 = 8.5 / 32.0;
 const MOD_RING_RADIUS_FRAC: f32 = 15.5 / 32.0;
 const MOD_RING_STROKE_FRAC: f32 = 1.5 / 32.0;
@@ -29,6 +32,10 @@ const WHEEL_SCALAR: f32 = 0.02;
 
 type ChangeCallback = Box<dyn Fn(&mut EventContext, f32)>;
 
+/// Picks the value arc's colour out of the current theme's palette, so a
+/// track colour's darker Daylight `-line` variant follows a theme switch.
+pub type Accent = fn(&Palette) -> Color;
+
 /// Generic over the value source (a plain `Signal<f32>` or a derived
 /// `Memo<f32>`, e.g. read out of a larger model like `SynthState`) and,
 /// separately, the modulation centre/depth source.
@@ -39,6 +46,7 @@ pub struct Knob<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + '
     /// `[centre - depth, centre + depth]`, clamped to 0..1.
     modulation: Option<(M, M)>,
     theme: Signal<ThemeId>,
+    accent: Option<Accent>,
     is_dragging: bool,
     prev_drag_y: f32,
     continuous: f32,
@@ -63,6 +71,7 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Kno
             default_value,
             modulation,
             theme,
+            accent: None,
             is_dragging: false,
             prev_drag_y: 0.0,
             continuous: initial,
@@ -93,6 +102,17 @@ impl<V: SignalGet<f32> + Copy + 'static> Knob<V, Signal<f32>> {
         on_changing: impl 'static + Fn(&mut EventContext, f32),
     ) -> Handle<'_, Self> {
         Self::new(cx, value, default_value, theme, None, on_changing)
+    }
+}
+
+pub trait KnobAccentExt {
+    /// Colours the value arc with a track's colour instead of `ink`.
+    fn accent(self, accent: Accent) -> Self;
+}
+
+impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> KnobAccentExt for Handle<'_, Knob<V, M>> {
+    fn accent(self, accent: Accent) -> Self {
+        self.modify(|knob| knob.accent = Some(accent))
     }
 }
 
@@ -190,7 +210,7 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Vie
             START_ANGLE_DEG,
             SWEEP_DEG * value,
             false,
-            &arc_paint(palette.volt, track_stroke),
+            &arc_paint(self.accent.map_or(palette.ink, |accent| accent(&palette)), track_stroke),
         );
 
         // Modulation ring.

@@ -2,6 +2,7 @@ mod app;
 mod bpm_field;
 mod canvas_text;
 mod fader;
+mod glyph;
 mod interval_input;
 mod knob;
 mod lfo_demo;
@@ -11,6 +12,8 @@ mod piano_roll;
 mod pill;
 mod project;
 mod recorder;
+mod sidebar;
+mod status;
 mod synth;
 mod timeline;
 mod tokens;
@@ -55,6 +58,10 @@ fn main() -> Result<(), ApplicationError> {
     let input_telemetry_rx = std::cell::RefCell::new(recorder_bridge.telemetry_rx);
 
     Application::new(move |cx| {
+        // Strata 2's one typeface; the stylesheet's `font-family` names it.
+        for font in canvas_text::PLEX_SANS {
+            cx.add_font_mem(font);
+        }
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");
         cx.add_stylesheet(include_style!("styles/studio.css")).expect("failed to add studio.css");
         cx.add_stylesheet(include_style!("styles/daylight.css")).expect("failed to add daylight.css");
@@ -66,6 +73,11 @@ fn main() -> Result<(), ApplicationError> {
         let record_armed = app_data.record_armed;
         let click_on = app_data.click_on;
         let position = app_data.position;
+        let sidebar_open = app_data.sidebar_open;
+        let cpu_load = app_data.cpu_load;
+        let output_db = app_data.output_db;
+        let block_frames = app_data.block_frames;
+        let sample_rate = app_data.sample_rate;
 
         app_data.build(cx);
 
@@ -121,17 +133,28 @@ fn main() -> Result<(), ApplicationError> {
 
         let synth_model = SynthModel::new(synth_bridge.params_tx, synth_bridge.note_tx, synth_bridge.telemetry_rx);
         let synth_state = synth_model.state;
-        let synth_lfo_phase = synth_model.lfo_scope_phase;
+        let synth_lfo_phases = (synth_model.lfo1_phase, synth_model.lfo2_phase);
         let synth_octave_shift = synth_model.octave_shift;
         let synth_meter_l = synth_model.meter_l;
         let synth_meter_r = synth_model.meter_r;
         let synth_help_open = synth_model.help_open;
+        let synth_lfo_drag = synth_model.lfo_drag;
         synth_model.build(cx);
         if let Some(project) = &loaded_project {
             synth_state.set(project.synth.clone());
         }
 
-        ProjectModel::new(tl_arrangement, synth_state).build(cx);
+        let project_model = ProjectModel::new(tl_arrangement, synth_state);
+        let project_saved = project_model.saved;
+        project_model.build(cx);
+        let save_status = Memo::new(move |_| {
+            let edited = project::snapshot(&tl_arrangement.get(), &synth_state.get()) != project_saved.get();
+            if edited { "Edited".to_string() } else { "Saved".to_string() }
+        });
+
+        let status_model = status::StatusModel::new();
+        let status_touched = status_model.touched;
+        status_model.build(cx);
 
         let interval_model = IntervalInputModel::new();
         let interval_key = interval_model.key;
@@ -246,62 +269,131 @@ fn main() -> Result<(), ApplicationError> {
                 KeyChord::new(Modifiers::SUPER, Code::KeyS),
                 KeymapEntry::new(15u8, |cx| cx.emit(ProjectEvent::Save)),
             ),
+            (
+                KeyChord::new(Modifiers::CTRL, Code::KeyB),
+                KeymapEntry::new(16u8, |cx| cx.emit(AppEvent::ToggleSidebar)),
+            ),
+            (
+                KeyChord::new(Modifiers::SUPER, Code::KeyB),
+                KeymapEntry::new(17u8, |cx| cx.emit(AppEvent::ToggleSidebar)),
+            ),
         ])
         .build(cx);
 
         VStack::new(cx, move |cx| {
-            transport::transport_bar(
+            transport::header(
                 cx,
-                playing,
-                loop_on,
-                record_armed,
-                click_on,
-                position,
-                interval_open,
-                input_level,
-                input_gain_pos,
-                theme,
+                transport::HeaderProps {
+                    theme,
+                    playing,
+                    loop_on,
+                    record_armed,
+                    click_on,
+                    position,
+                    interval_open,
+                    key: interval_key,
+                    scale_mask: interval_scale_mask,
+                    input_level,
+                    input_gain_pos,
+                    cpu_load,
+                    output_db,
+                    arrangement: tl_arrangement,
+                    save_status,
+                },
                 tl_bpm,
             );
-
-            timeline::timeline_view(
-                cx,
-                theme,
-                tl_arrangement,
-                tl_transform,
-                tl_snap,
-                tl_selection,
-                tl_playhead,
-                recording_preview,
-                tl_tool,
-            );
-
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
-            synth::synth_view(
-                cx,
-                theme,
-                synth_state,
-                synth_lfo_phase,
-                synth_octave_shift,
-                synth_meter_l,
-                synth_meter_r,
-                synth_help_open,
-            );
+            HStack::new(cx, move |cx| {
+                sidebar::sidebar(cx, synth_state, sidebar_open);
+                Element::new(cx)
+                    .class("hairline")
+                    .toggle_class("hidden", sidebar_open.map(|o| !*o))
+                    .width(Pixels(1.0))
+                    .height(Stretch(1.0));
+
+                VStack::new(cx, move |cx| {
+                    timeline::timeline_view(
+                        cx,
+                        theme,
+                        tl_arrangement,
+                        tl_transform,
+                        tl_snap,
+                        tl_selection,
+                        tl_playhead,
+                        recording_preview,
+                        tl_tool,
+                    );
+
+                    Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
+
+                    // The lower panel spans the arrangement's width and sizes to
+                    // its device; the device fills it rather than floating.
+                    VStack::new(cx, move |cx| {
+                        // The device chain: the track's one device, raised,
+                        // and the interval input's toggle as a quiet action.
+                        HStack::new(cx, move |cx| {
+                            Button::new(cx, |cx| {
+                                HStack::new(cx, |cx| {
+                                    Element::new(cx).class("swatch").background_color(tokens::CLIP_VIOLET);
+                                    Label::new(cx, "Carve");
+                                })
+                                .gap(Pixels(tokens::SPACE_1))
+                                .alignment(Alignment::Center)
+                                .size(Auto)
+                            })
+                            .class("btn")
+                            .class("is-on");
+                            Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+                            Button::new(cx, |cx| Label::new(cx, "Show input"))
+                                .class("btn")
+                                .class("quiet")
+                                .toggle_class("is-on", interval_open)
+                                .on_press(|cx| cx.emit(interval_input::state::IntervalInputEvent::ToggleOpen));
+                        })
+                        .gap(Pixels(tokens::SPACE_2))
+                        .padding_left(Pixels(tokens::SPACE_1))
+                        .alignment(Alignment::Left)
+                        .width(Stretch(1.0))
+                        .height(Pixels(tokens::SIZE_CONTROL + 6.0));
+
+                        synth::synth_view(
+                            cx,
+                            theme,
+                            synth_state,
+                            synth_lfo_phases,
+                            synth_octave_shift,
+                            synth_meter_l,
+                            synth_meter_r,
+                            synth_help_open,
+                            synth_lfo_drag,
+                        );
+
+                        interval_input::interval_input_view(
+                            cx,
+                            theme,
+                            synth_state,
+                            interval_key,
+                            interval_scale_mask,
+                            interval_open,
+                            interval_show_note_names,
+                        );
+                    })
+                    .gap(Pixels(tokens::SPACE_2))
+                    .class("lower-panel")
+                    .width(Stretch(1.0))
+                    .height(Auto);
+                })
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
+            })
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
+            sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status);
 
             timeline::drums_menu_view(cx, tl_drums_menu_open);
-
-            interval_input::interval_input_view(
-                cx,
-                theme,
-                synth_state,
-                interval_key,
-                interval_scale_mask,
-                interval_open,
-                interval_show_note_names,
-            );
 
             piano_roll::piano_roll_view(
                 cx,

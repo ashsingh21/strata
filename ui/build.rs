@@ -26,7 +26,7 @@ fn main() {
 
     let styles_dir = manifest_dir.join("styles");
     fs::create_dir_all(&styles_dir).unwrap();
-    fs::write(styles_dir.join("base.css"), render_base_css(&scalars, &fonts)).unwrap();
+    fs::write(styles_dir.join("base.css"), render_base_css(&scalars, &fonts, &studio)).unwrap();
     fs::write(styles_dir.join("studio.css"), render_theme_css(&studio, None, &shadow_studio)).unwrap();
     fs::write(
         styles_dir.join("daylight.css"),
@@ -44,53 +44,51 @@ type ColorMap = HashMap<String, String>;
 fn resolve_colors(tokens: &Value) -> (ColorMap, ColorMap) {
     let entries = tokens["color"]["tokens"].as_array().expect("color.tokens array");
 
-    let mut studio = ColorMap::new();
-    let mut daylight = ColorMap::new();
-    let mut aliases: Vec<(String, String)> = Vec::new();
-
+    // Raw per-theme values first: a value is either one string for both
+    // themes or a {studio, daylight} pair, and any of them may be a
+    // `{other-token}` alias (Strata 2 aliases per theme, e.g. a
+    // `clip-*-line` is its clip colour in Studio but its own darker hex
+    // in Daylight).
+    let mut raw: Vec<(String, String, String)> = Vec::new();
     for entry in entries {
         let name = entry["name"].as_str().unwrap().to_string();
         match &entry["value"] {
-            Value::Object(map) => {
-                let s = map["studio"].as_str().unwrap_or_default().to_string();
-                let d = map["daylight"].as_str().unwrap_or_default().to_string();
-                studio.insert(name.clone(), s);
-                daylight.insert(name.clone(), d);
-            }
-            Value::String(s) => {
-                if let Some(target) = s.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
-                    aliases.push((name, target.to_string()));
-                } else {
-                    studio.insert(name.clone(), s.clone());
-                    daylight.insert(name.clone(), s.clone());
-                }
-            }
+            Value::Object(map) => raw.push((
+                name,
+                map["studio"].as_str().expect("studio value").to_string(),
+                map["daylight"].as_str().expect("daylight value").to_string(),
+            )),
+            Value::String(v) => raw.push((name, v.clone(), v.clone())),
             other => panic!("unexpected value for token {name}: {other:?}"),
         }
     }
 
-    // Aliases reference tokens that may themselves be defined later in the
-    // file, so resolve in a few fixed-point passes rather than assuming
-    // declaration order.
-    for _ in 0..4 {
-        let mut remaining = Vec::new();
-        for (name, target) in aliases {
-            match (studio.get(&target).cloned(), daylight.get(&target).cloned()) {
-                (Some(s), Some(d)) => {
-                    studio.insert(name.clone(), s);
-                    daylight.insert(name, d);
+    let resolve_theme = |pick: fn(&(String, String, String)) -> &String| -> ColorMap {
+        let alias = |v: &str| v.strip_prefix('{').and_then(|v| v.strip_suffix('}')).map(str::to_string);
+        let mut out = ColorMap::new();
+        // Aliases may point at tokens declared later in the file, so
+        // resolve in fixed-point passes rather than assuming order.
+        for _ in 0..8 {
+            for entry in &raw {
+                let value = pick(entry);
+                match alias(value) {
+                    None => {
+                        out.insert(entry.0.clone(), value.clone());
+                    }
+                    Some(target) => {
+                        if let Some(resolved) = out.get(&target).cloned() {
+                            out.insert(entry.0.clone(), resolved);
+                        }
+                    }
                 }
-                _ => remaining.push((name, target)),
             }
         }
-        aliases = remaining;
-        if aliases.is_empty() {
-            break;
-        }
-    }
-    assert!(aliases.is_empty(), "unresolved color aliases: {aliases:?}");
+        let missing: Vec<_> = raw.iter().filter(|e| !out.contains_key(&e.0)).map(|e| e.0.clone()).collect();
+        assert!(missing.is_empty(), "unresolved color aliases: {missing:?}");
+        out
+    };
 
-    (studio, daylight)
+    (resolve_theme(|e| &e.1), resolve_theme(|e| &e.2))
 }
 
 /// name -> pixel value, for spacing/radius/size (theme-invariant).
@@ -113,7 +111,6 @@ fn resolve_scalars(tokens: &Value) -> ScalarMap {
 
 struct Fonts {
     sans: String,
-    mono: String,
 }
 
 /// The two font stacks from `type.families` - never actually read before
@@ -123,7 +120,6 @@ fn resolve_fonts(tokens: &Value) -> Fonts {
     let families = &tokens["type"]["families"];
     Fonts {
         sans: families["sans"].as_str().expect("type.families.sans").to_string(),
-        mono: families["mono"].as_str().expect("type.families.mono").to_string(),
     }
 }
 
@@ -138,15 +134,14 @@ fn resolve_shadow_pop(tokens: &Value) -> (String, String) {
     (studio, daylight)
 }
 
-/// Parses either `#rrggbb` or `rgba(r, g, b, a)` (`a` in 0..1) into 8-bit
-/// RGBA. Opaque hex colors get alpha 255.
+/// Parses `#rrggbb`, `#rrggbbaa` or `rgba(r, g, b, a)` (`a` in 0..1) into
+/// 8-bit RGBA. Opaque hex colors get alpha 255.
 fn parse_color(value: &str) -> (u8, u8, u8, u8) {
     if let Some(hex) = value.strip_prefix('#') {
-        assert_eq!(hex.len(), 6, "expected 6-digit hex color, got {value}");
-        let r = u8::from_str_radix(&hex[0..2], 16).unwrap();
-        let g = u8::from_str_radix(&hex[2..4], 16).unwrap();
-        let b = u8::from_str_radix(&hex[4..6], 16).unwrap();
-        (r, g, b, 255)
+        assert!(hex.len() == 6 || hex.len() == 8, "expected #rrggbb or #rrggbbaa, got {value}");
+        let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).unwrap();
+        let a = if hex.len() == 8 { byte(6) } else { 255 };
+        (byte(0), byte(2), byte(4), a)
     } else if let Some(inner) = value.strip_prefix("rgba(").and_then(|s| s.strip_suffix(')')) {
         let parts: Vec<f32> = inner.split(',').map(|p| p.trim().parse().unwrap()).collect();
         assert_eq!(parts.len(), 4, "expected rgba(r,g,b,a), got {value}");
@@ -156,21 +151,73 @@ fn parse_color(value: &str) -> (u8, u8, u8, u8) {
     }
 }
 
+/// A token value as CSS Vizia is sure to parse: opaque colours stay hex,
+/// translucent ones become `rgba()` rather than 8-digit hex.
+fn css_color(value: &str) -> String {
+    let (r, g, b, a) = parse_color(value);
+    if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("rgba({r}, {g}, {b}, {:.3})", a as f32 / 255.0)
+    }
+}
+
 // --- CSS rendering ---------------------------------------------------
 
-/// Structural rules shared by both themes: sizes, radii and type, plus the
-/// handful of colours that never change between themes (clip colours and
-/// their `on-clip` text).
-fn render_base_css(scalars: &ScalarMap, fonts: &Fonts) -> String {
+/// Structural rules shared by both themes: sizes, radii and the type
+/// scale, plus the clip colours (identical in both themes) as fill classes.
+fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> String {
     let space = |n: &str| scalars[n];
     let sans = &fonts.sans;
-    let mono = &fonts.mono;
+    let clip = |name: &str| css_color(&colors[name]);
     format!(
         r#"/* GENERATED by ui/build.rs from design/tokens.json. Do not edit by hand. */
 
 .app {{
   font-family: {sans};
+  font-size: 12px;
 }}
+
+/* Type scale: IBM Plex Sans only, in 11 / 12 / 13 / 15px. Values use
+   Plex too (its figures are tabular), so `.meta`/`.mono` - the classes
+   the views already put on values - are Plex `value` style now. */
+.heading {{
+  font-size: 15px;
+  font-weight: 600;
+}}
+.title {{
+  font-size: 13px;
+  font-weight: 600;
+}}
+.control {{
+  font-size: 12px;
+  font-weight: 500;
+}}
+.body {{
+  font-size: 12px;
+  font-weight: 400;
+}}
+.label {{
+  font-size: 11px;
+  font-weight: 500;
+}}
+.label-lg {{
+  font-size: 12px;
+  font-weight: 600;
+}}
+.meta {{
+  font-size: 11px;
+  font-weight: 400;
+}}
+.mono {{
+  font-size: 11px;
+  font-weight: 400;
+}}
+.value {{
+  font-size: 11px;
+  font-weight: 400;
+}}
+
 .btn {{
   height: {control}px;
   min-width: {control}px;
@@ -183,35 +230,77 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts) -> String {
 .btn.sm {{
   height: 18px;
   min-width: 18px;
-  font-size: 10px;
+  font-size: 11px;
+  padding: 0px 4px;
+}}
+.btn.quiet {{
+  border-width: 0px;
   padding: 0px 4px;
 }}
 .readout {{
   height: {control}px;
   border-radius: {radius_sm}px;
   border-width: 1px;
-  font-size: 11px;
-  font-family: {mono};
+  font-size: 13px;
+  font-weight: 500;
   padding: 0px 8px;
 }}
 .readout .unit {{
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 400;
 }}
-.label {{
-  font-size: 10px;
+.readout-big {{
+  font-size: 15px;
   font-weight: 600;
 }}
-.meta {{
-  font-size: 10px;
-  font-family: {mono};
+.tgroup {{
+  border-width: 1px;
+  border-radius: {radius_sm}px;
+  height: 26px;
+  padding: 1px;
+  gap: 1px;
 }}
-.mono {{
-  font-family: {mono};
-  font-size: 11px;
+.tbtn {{
+  width: 30px;
+  height: 22px;
+  border-width: 0px;
+  border-radius: 2px;
+  padding: 0px;
 }}
-.control {{
-  font-size: 12px;
-  font-weight: 500;
+.position {{
+  height: 26px;
+}}
+.bar {{
+  border-radius: 2px;
+}}
+.bar-fill {{
+  height: 1s;
+  border-radius: 2px;
+}}
+.statusbar {{
+  height: 24px;
+  padding: 0px {space3}px;
+}}
+.sidebar {{
+  width: 200px;
+}}
+.side-row {{
+  height: 24px;
+  padding: 0px {space3}px;
+  border-radius: 0px;
+}}
+.side-row.nested {{
+  padding-left: 24px;
+}}
+.side-head {{
+  height: 24px;
+  padding: 8px {space3}px 0px {space3}px;
+}}
+.search {{
+  height: {control}px;
+  border-width: 1px;
+  border-radius: {radius_sm}px;
+  padding: 0px {space2}px;
 }}
 .panel {{
   border-radius: {radius_md}px;
@@ -228,19 +317,23 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts) -> String {
   height: 1px;
 }}
 .transport {{
+  height: {toolbar}px;
   border-bottom-width: 1px;
 }}
 .swatch {{
-  width: {space1}px;
-  height: {space1}px;
+  width: {space2}px;
+  height: {space2}px;
   border-radius: {radius_xs}px;
 }}
 
 .tl-corner {{
   height: {ruler}px;
-  border-right-width: 1px;
-  border-bottom-width: 1px;
   padding: 0px {space2}px;
+}}
+.readout.snap {{
+  height: 20px;
+  font-size: 12px;
+  padding: 0px 6px;
 }}
 .tl-heads {{
   border-right-width: 1px;
@@ -255,15 +348,19 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts) -> String {
   padding-left: {space6}px;
 }}
 
-.synth-devhead {{
-  height: 32px;
+/* Devices: one flat panel, sections split by hairlines, never boxed. */
+.lower-panel {{
+  padding: {space2}px;
+}}
+.device {{
   border-radius: {radius_md}px;
   border-width: 1px;
-  padding: 0px {space2}px;
+}}
+.synth-devhead {{
+  padding: 0px {space3}px;
 }}
 .synth-sec {{
-  border-radius: {radius_md}px;
-  padding: {space2}px;
+  padding: {space3}px;
 }}
 .synth-disp {{
   border-radius: {radius_sm}px;
@@ -271,16 +368,24 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts) -> String {
 .synth-seg {{
   border-width: 1px;
   border-radius: {radius_sm}px;
-  height: 20px;
+  height: {control}px;
 }}
 .synth-seg-btn {{
   height: 20px;
   min-width: 22px;
-  font-size: 10px;
+  font-size: 11px;
+  font-weight: 500;
   padding: 0px 6px;
+  border-width: 0px;
 }}
 .synth-keys {{
   border-radius: {radius_sm}px;
+  border-width: 1px;
+}}
+.knob-col {{
+  border-radius: {radius_sm}px;
+}}
+.knob-col.drop-target {{
   border-width: 1px;
 }}
 .synth-help-panel {{
@@ -303,28 +408,61 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts) -> String {
   z-index: 150;
 }}
 
+/* Vizia's own layout for ScrollView's inner content lives in its default
+   theme, which main.rs opts out of - without this the content has no size.
+   Vertical-only: width follows the container so wrapped text wraps to it. */
+scrollview {{
+  overflow: hidden;
+}}
+scrollview > scroll-content {{
+  width: 1s;
+  height: auto;
+  min-height: 100%;
+}}
+.guide-h {{
+  font-size: 15px;
+  font-weight: 600;
+}}
+.guide-term {{
+  font-size: 12px;
+  font-weight: 600;
+}}
+.guide-body {{
+  font-size: 12px;
+}}
+.guide-tip {{
+  font-size: 11px;
+}}
+
 .hidden {{
   display: none;
 }}
 
-.clip-coral {{ background-color: #ff8a5c; }}
-.clip-amber {{ background-color: #f5c84c; }}
-.clip-teal {{ background-color: #4fd8bd; }}
-.clip-blue {{ background-color: #7aa9ff; }}
-.clip-violet {{ background-color: #c29bff; }}
-.clip-pink {{ background-color: #ff86bd; }}
+.clip-coral {{ background-color: {coral}; }}
+.clip-amber {{ background-color: {amber}; }}
+.clip-teal {{ background-color: {teal}; }}
+.clip-blue {{ background-color: {blue}; }}
+.clip-violet {{ background-color: {violet}; }}
+.clip-pink {{ background-color: {pink}; }}
 "#,
         control = space("size-control"),
+        toolbar = space("size-toolbar"),
         radius_sm = space("radius-sm"),
         radius_md = space("radius-md"),
         radius_pill = space("radius-pill"),
         radius_xs = space("radius-xs"),
-        space1 = space("space-1"),
         space2 = space("space-2"),
+        space3 = space("space-3"),
         space6 = space("space-6"),
         ruler = space("size-ruler"),
         lane = space("size-lane"),
         lane_auto = space("size-lane-auto"),
+        coral = clip("clip-coral"),
+        amber = clip("clip-amber"),
+        teal = clip("clip-teal"),
+        blue = clip("clip-blue"),
+        violet = clip("clip-violet"),
+        pink = clip("clip-pink"),
     )
 }
 
@@ -337,7 +475,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
         Some(c) => format!(".{c} "),
         None => String::new(),
     };
-    let c = |name: &str| colors.get(name).cloned().unwrap_or_else(|| panic!("missing color {name}"));
+    let c = |name: &str| css_color(colors.get(name).unwrap_or_else(|| panic!("missing color {name}")));
 
     let mut rules: Vec<(String, Vec<(&'static str, String)>)> = Vec::new();
     let mut rule = |selector: &str, decls: Vec<(&'static str, String)>| {
@@ -345,14 +483,17 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     };
 
     rule(".app", vec![("background-color", c("bg-000")), ("color", c("ink"))]);
+    // The theme class sits *on* the `.app` root, so the descendant rule
+    // above (".theme-daylight .app") never matches it: the root needs a
+    // compound selector too, or Daylight keeps Studio's ground and text.
+    let root_rule = scope_class.map(|class| {
+        (format!(".app.{class}"), vec![("background-color", c("bg-000")), ("color", c("ink"))])
+    });
     rule(".panel", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".transport", vec![("background-color", c("bg-000")), ("border-bottom-color", c("line"))]);
     rule(".hairline", vec![("background-color", c("line"))]);
 
-    // shadow-pop's own usage note: "Popovers and menus only. Panels are
-    // flat." - these four are the app's only floating/popover surfaces
-    // (a synth help card, Interval Input, the piano roll, the drums
-    // import menu); every other `.panel` stays flat, matching the spec.
+    // shadow-pop: "Popovers and menus only. Panels are flat."
     for popover in [".synth-help-panel", ".interval-overlay", ".piano-roll-panel", ".drums-menu"] {
         rule(popover, vec![("shadow", shadow_pop.to_string())]);
     }
@@ -366,31 +507,32 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
         ],
     );
     rule(".btn:hover", vec![("background-color", c("bg-300"))]);
+    rule(".btn.quiet", vec![("background-color", "transparent".to_string()), ("color", c("ink-muted"))]);
+    rule(".btn.quiet:hover", vec![("background-color", c("bg-300")), ("color", c("ink"))]);
+    // State buttons fill with their state's colour...
     rule(
         ".btn.is-play",
-        vec![
-            ("background-color", c("volt")),
-            ("border-color", c("volt")),
-            ("color", c("on-volt")),
-        ],
+        vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))],
     );
     rule(
         ".btn.is-rec",
-        vec![
-            ("background-color", c("record")),
-            ("border-color", c("record")),
-            ("color", c("on-record")),
-        ],
+        vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))],
     );
     rule(
         ".btn.is-solo",
-        vec![("background-color", c("hot")), ("border-color", c("hot")), ("color", c("on-hot"))],
+        vec![("background-color", c("warn")), ("border-color", c("warn")), ("color", c("on-warn"))],
     );
+    // ...Loop uses mod-soft with a mod edge and icon, matching the loop
+    // range drawn in mod...
     rule(
         ".btn.is-mod",
-        vec![("background-color", c("mod")), ("border-color", c("mod")), ("color", c("on-mod"))],
+        vec![("background-color", c("mod-soft")), ("border-color", c("mod")), ("color", c("mod"))],
     );
-    rule(".btn.is-mute", vec![("background-color", c("ink")), ("border-color", c("ink")), ("color", c("bg-100"))]);
+    // ...and neutral toggles (Mute, Sync, Click, ...) go bg-400 with ink
+    // text - never an accent, never inverted.
+    for on in [".btn.is-mute", ".btn.is-on"] {
+        rule(on, vec![("background-color", c("bg-400")), ("color", c("ink"))]);
+    }
 
     rule(
         ".readout",
@@ -402,7 +544,17 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     );
     rule(".readout .unit", vec![("color", c("ink-muted"))]);
     rule(".label", vec![("color", c("ink-muted"))]);
+    rule(".label-lg", vec![("color", c("ink"))]);
+    rule(".heading", vec![("color", c("ink"))]);
+    rule(".title", vec![("color", c("ink"))]);
+    rule(".control", vec![("color", c("ink"))]);
+    rule(".body", vec![("color", c("ink"))]);
     rule(".meta", vec![("color", c("ink-muted"))]);
+    rule(".value", vec![("color", c("ink-muted"))]);
+    rule(".guide-h", vec![("color", c("ink"))]);
+    rule(".guide-term", vec![("color", c("ink"))]);
+    rule(".guide-body", vec![("color", c("ink"))]);
+    rule(".guide-tip", vec![("color", c("ink-muted"))]);
 
     rule(
         ".pill",
@@ -415,25 +567,42 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
 
     rule(".tl-corner", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
     rule(".tl-heads", vec![("border-color", c("line"))]);
-    rule(".tl-head", vec![("border-color", c("line"))]);
+    rule(".tl-head", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".tl-head-auto", vec![("background-color", c("bg-000"))]);
 
-    rule(".synth-devhead", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
-    rule(".synth-sec", vec![("background-color", c("bg-200"))]);
+    rule(".lower-panel", vec![("background-color", c("bg-000"))]);
+    rule(".tgroup", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
+    rule(".tbtn", vec![("background-color", "transparent".to_string())]);
+    rule(".tbtn:hover", vec![("background-color", c("bg-300"))]);
+    rule(".readout-big", vec![("color", c("ink"))]);
+    rule(".bar", vec![("background-color", c("bg-300"))]);
+    rule(".bar-fill", vec![("background-color", c("ink-muted"))]);
+    rule(".bar-fill.level", vec![("background-color", c("signal"))]);
+    rule(".bar-fill.level.hot", vec![("background-color", c("warn"))]);
+    rule(".statusbar", vec![("background-color", c("bg-000"))]);
+    rule(".sidebar", vec![("background-color", c("bg-100"))]);
+    rule(".side-row", vec![("background-color", "transparent".to_string()), ("color", c("ink"))]);
+    rule(".side-row:hover", vec![("background-color", c("bg-300"))]);
+    rule(".side-row.is-on", vec![("background-color", c("bg-400"))]);
+    rule(".side-row.nested", vec![("color", c("ink-muted"))]);
+    rule(".side-head", vec![("color", c("ink-muted"))]);
+    rule(".count", vec![("color", c("ink-faint"))]);
+    rule(".search", vec![("background-color", c("bg-000")), ("border-color", c("line-control")), ("color", c("ink"))]);
+    rule(".device", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".synth-disp", vec![("background-color", c("bg-000"))]);
-    rule(".synth-seg", vec![("border-color", c("line-control"))]);
+    rule(".synth-seg", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
     rule(
         ".synth-seg-btn",
-        vec![("background-color", c("bg-200")), ("color", c("ink-muted"))],
+        vec![("background-color", "transparent".to_string()), ("color", c("ink-muted"))],
     );
-    rule(
-        ".synth-seg-btn.is-on",
-        vec![("background-color", c("ink")), ("color", c("bg-100"))],
-    );
+    rule(".synth-seg-btn:hover", vec![("color", c("ink"))]);
+    rule(".synth-seg-btn.is-on", vec![("background-color", c("bg-400")), ("color", c("ink"))]);
     rule(".synth-keys", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
+    // An LFO pill being dragged: every knob it can land on lights up in mod.
+    rule(".knob-col.drop-target", vec![("background-color", c("mod-soft")), ("border-color", c("mod"))]);
 
     let mut out = String::from("/* GENERATED by ui/build.rs from design/tokens.json. Do not edit by hand. */\n\n");
-    for (selector, decls) in rules {
+    for (selector, decls) in rules.into_iter().chain(root_rule) {
         out.push_str(&selector);
         out.push_str(" {\n");
         for (prop, value) in decls {
@@ -457,16 +626,17 @@ fn render_tokens_rs(studio: &ColorMap, daylight: &ColorMap, scalars: &ScalarMap)
         ("ink", "ink"),
         ("ink_muted", "ink-muted"),
         ("ink_faint", "ink-faint"),
-        ("volt", "volt"),
-        ("on_volt", "on-volt"),
-        ("volt_soft", "volt-soft"),
+        ("bg_400", "bg-400"),
+        ("signal", "signal"),
+        ("on_signal", "on-signal"),
+        ("signal_soft", "signal-soft"),
         ("md", "mod"),
         ("on_mod", "on-mod"),
         ("mod_soft", "mod-soft"),
         ("record", "record"),
         ("on_record", "on-record"),
-        ("hot", "hot"),
-        ("on_hot", "on-hot"),
+        ("warn", "warn"),
+        ("on_warn", "on-warn"),
         ("focus", "focus"),
         ("playhead", "playhead"),
         ("grid_bar", "grid-bar"),
@@ -474,6 +644,13 @@ fn render_tokens_rs(studio: &ColorMap, daylight: &ColorMap, scalars: &ScalarMap)
         ("selection", "selection"),
         ("key_white", "key-white"),
         ("key_black", "key-black"),
+        ("clip_edge", "clip-edge"),
+        ("clip_coral_line", "clip-coral-line"),
+        ("clip_amber_line", "clip-amber-line"),
+        ("clip_teal_line", "clip-teal-line"),
+        ("clip_blue_line", "clip-blue-line"),
+        ("clip_violet_line", "clip-violet-line"),
+        ("clip_pink_line", "clip-pink-line"),
     ];
 
     let color_lit = |map: &ColorMap, token: &str| {
@@ -498,20 +675,17 @@ fn render_tokens_rs(studio: &ColorMap, daylight: &ColorMap, scalars: &ScalarMap)
         out.push_str("};\n\n");
     }
 
-    // Theme-invariant clip colours + on-clip.
-    for (name, hex) in [
-        ("CLIP_CORAL", "#ff8a5c"),
-        ("CLIP_AMBER", "#f5c84c"),
-        ("CLIP_TEAL", "#4fd8bd"),
-        ("CLIP_BLUE", "#7aa9ff"),
-        ("CLIP_VIOLET", "#c29bff"),
-        ("CLIP_PINK", "#ff86bd"),
-        ("ON_CLIP", "#0e0f11"),
+    // Theme-invariant clip colours + on-clip, straight from the tokens.
+    for (name, token) in [
+        ("CLIP_CORAL", "clip-coral"),
+        ("CLIP_AMBER", "clip-amber"),
+        ("CLIP_TEAL", "clip-teal"),
+        ("CLIP_BLUE", "clip-blue"),
+        ("CLIP_VIOLET", "clip-violet"),
+        ("CLIP_PINK", "clip-pink"),
+        ("ON_CLIP", "on-clip"),
     ] {
-        let (r, g, b, a) = parse_color(hex);
-        out.push_str(&format!(
-            "pub const {name}: Color = Color::rgba(0x{r:02x}, 0x{g:02x}, 0x{b:02x}, 0x{a:02x});\n"
-        ));
+        out.push_str(&format!("pub const {name}: Color = {};\n", color_lit(studio, token)));
     }
     out.push('\n');
 
@@ -529,7 +703,10 @@ fn render_tokens_rs(studio: &ColorMap, daylight: &ColorMap, scalars: &ScalarMap)
         ("SIZE_CONTROL", "size-control"),
         ("SIZE_CLIP", "size-clip"),
         ("SIZE_ROW", "size-row"),
+        ("SIZE_KNOB_SM", "size-knob-sm"),
         ("SIZE_KNOB", "size-knob"),
+        ("SIZE_KNOB_LG", "size-knob-lg"),
+        ("SIZE_TOOLBAR", "size-toolbar"),
         ("SIZE_LANE", "size-lane"),
         ("SIZE_LANE_AUTO", "size-lane-auto"),
         ("SIZE_RULER", "size-ruler"),

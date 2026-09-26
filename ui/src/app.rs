@@ -34,6 +34,20 @@ pub struct AppData {
     pub record_armed: Signal<bool>,
     pub click_on: Signal<bool>,
     pub position: Signal<Position>,
+    pub sidebar_open: Signal<bool>,
+
+    // Engine status for the header and status bar.
+    /// Audio-callback CPU load, 0..1 (the peak over the last ~half second,
+    /// so short spikes stay visible).
+    pub cpu_load: Signal<f32>,
+    /// The device's buffer size in frames (0 until the first block).
+    pub block_frames: Signal<u32>,
+    pub sample_rate: u32,
+    /// Master output peak in dBFS, with meter ballistics.
+    pub output_db: Signal<f32>,
+    cpu_peak: f32,
+    cpu_peak_age: f32,
+    taps: Vec<Instant>,
 
     // The one mixer strip.
     pub fader: Signal<f32>,
@@ -64,8 +78,13 @@ pub struct AppData {
 #[derive(Debug)]
 pub enum AppEvent {
     ToggleTheme,
+    ToggleSidebar,
     TogglePlay,
     Stop,
+    /// Back to 1.1.1 without stopping.
+    Rewind,
+    /// One tap of tap-tempo.
+    Tap,
     ToggleLoop,
     ToggleArm,
     ToggleClick,
@@ -99,6 +118,14 @@ impl AppData {
             record_armed: Signal::new(false),
             click_on: Signal::new(false),
             position: Signal::new(Position::default()),
+            sidebar_open: Signal::new(true),
+            cpu_load: Signal::new(0.0),
+            block_frames: Signal::new(0),
+            sample_rate: engine.sample_rate,
+            output_db: Signal::new(METER_FLOOR_DB),
+            cpu_peak: 0.0,
+            cpu_peak_age: 0.0,
+            taps: Vec::with_capacity(8),
             fader: Signal::new(0.75),
             pan: Signal::new(0.5),
             mute: Signal::new(false),
@@ -153,6 +180,7 @@ impl Model for AppData {
             AppEvent::ToggleTheme => {
                 self.theme.update(|t| *t = t.toggled());
             }
+            AppEvent::ToggleSidebar => self.sidebar_open.update(|o| *o = !*o),
             AppEvent::TogglePlay => {
                 let now_playing = !self.playing.get();
                 self.playing.set(now_playing);
@@ -162,6 +190,29 @@ impl Model for AppData {
                 self.playing.set(false);
                 self.params.request_stop();
                 self.position.set(Position::default());
+            }
+            AppEvent::Rewind => {
+                self.params.request_stop();
+                self.position.set(Position::default());
+            }
+            AppEvent::Tap => {
+                // Average the last few intervals; a pause over two seconds
+                // starts a fresh count.
+                let now = Instant::now();
+                if self.taps.last().is_some_and(|t| now - *t > std::time::Duration::from_secs(2)) {
+                    self.taps.clear();
+                }
+                self.taps.push(now);
+                if self.taps.len() > 5 {
+                    self.taps.remove(0);
+                }
+                if self.taps.len() >= 2 {
+                    let span = (*self.taps.last().unwrap() - self.taps[0]).as_secs_f64();
+                    let bpm = (60.0 * (self.taps.len() - 1) as f64 / span).clamp(40.0, 300.0);
+                    let bpm = (bpm * 100.0).round() / 100.0;
+                    self.params.set_bpm(bpm);
+                    cx.emit(crate::timeline::state::TimelineEvent::SetTempo(bpm));
+                }
             }
             AppEvent::ToggleLoop => {
                 self.loop_on.update(|v| *v = !*v);
@@ -217,10 +268,21 @@ impl AppData {
         let mut peak_l = 0.0f32;
         let mut peak_r = 0.0f32;
         let mut latest_position = None;
-        while let Ok(Telemetry { peak_l: l, peak_r: r, position }) = self.telemetry.pop() {
+        let mut cpu = 0.0f32;
+        while let Ok(Telemetry { peak_l: l, peak_r: r, position, cpu_load, block_frames }) = self.telemetry.pop() {
             peak_l = peak_l.max(l);
             peak_r = peak_r.max(r);
             latest_position = Some(position);
+            cpu = cpu.max(cpu_load);
+            if block_frames != self.block_frames.get() {
+                self.block_frames.set(block_frames);
+            }
+        }
+        self.cpu_peak_age += dt;
+        if cpu >= self.cpu_peak || self.cpu_peak_age > 0.5 {
+            self.cpu_peak = cpu;
+            self.cpu_peak_age = 0.0;
+            self.cpu_load.set(cpu);
         }
         if let Some(position) = latest_position {
             self.position.set(position);
@@ -233,6 +295,7 @@ impl AppData {
         self.meter_db_r = if target_r > self.meter_db_r { target_r } else { (self.meter_db_r - decay).max(target_r) };
         self.meter_level_l.set(db_to_meter_fraction(self.meter_db_l));
         self.meter_level_r.set(db_to_meter_fraction(self.meter_db_r));
+        self.output_db.set(self.meter_db_l.max(self.meter_db_r));
         let _ = HOT_THRESHOLD;
 
         if peak_l >= CLIP_THRESHOLD {

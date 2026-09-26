@@ -1,7 +1,5 @@
-//! The audio engine: a 220 Hz test tone, Carve's synth voices, the
-//! arrangement's audio clips and a metronome click, mixed through a
-//! gain/pan stage driven by [`shared::Params`], with post-fader peak
-//! metering and transport position reported back through a
+//! The audio engine: Carve's synth voices, the arrangement's audio clips
+//! and a metronome click, mixed, with peak metering and transport position reported back through a
 //! [`shared::Telemetry`] ring buffer.
 //!
 //! Everything in the audio callback ([`write_block`]) is allocation-, lock-
@@ -11,6 +9,8 @@
 //! `shared::playback` for why that's an acceptable trade here.
 
 mod input;
+mod dsp;
+mod fx;
 mod synth;
 
 use std::fmt;
@@ -30,14 +30,8 @@ use synth::SynthEngine;
 /// slow disk) doesn't drop audio.
 const CAPTURE_CAPACITY: usize = 1 << 16;
 
-const TEST_TONE_HZ: f32 = 220.0;
-/// -18 dBFS.
-const TEST_TONE_AMPLITUDE: f32 = 0.125_892_5;
 const BEATS_PER_BAR: u64 = 4;
 const SIXTEENTHS_PER_BEAT: u64 = 4;
-/// One-pole smoothing time constant for gain/pan, in milliseconds. Short
-/// enough to feel immediate, long enough to kill zipper noise.
-const SMOOTHING_MS: f32 = 5.0;
 /// Metronome click: a short decaying sine blip, higher-pitched on the
 /// downbeat so bar starts are audible over the mix.
 const CLICK_HZ_DOWNBEAT: f32 = 1600.0;
@@ -228,18 +222,9 @@ where
     let channels = config.channels as usize;
     let sample_rate = config.sample_rate as f32;
 
-    let mut phase = 0.0f32;
-    let phase_step = TEST_TONE_HZ * std::f32::consts::TAU / sample_rate;
-
-    let mut smoothed_gain = params.gain();
-    let mut smoothed_pan = params.pan();
-    let mut smoothed_play = 0.0f32;
-    // One-pole coefficient: how far smoothed value moves toward target per
-    // sample. Derived from the desired smoothing time constant.
-    let smoothing_coeff = 1.0 - (-1.0 / (SMOOTHING_MS * 0.001 * sample_rate)).exp();
 
     let mut sample_counter: u64 = 0;
-    let mut synth_engine = SynthEngine::new();
+    let mut synth_engine = SynthEngine::new(sample_rate);
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -280,12 +265,6 @@ where
                     channels,
                     &params,
                     &mut telemetry,
-                    &mut phase,
-                    phase_step,
-                    &mut smoothed_gain,
-                    &mut smoothed_pan,
-                    &mut smoothed_play,
-                    smoothing_coeff,
                     &mut sample_counter,
                     sample_rate,
                     &mut synth_engine,
@@ -311,12 +290,6 @@ fn write_block<T>(
     channels: usize,
     params: &Params,
     telemetry: &mut rtrb::Producer<Telemetry>,
-    phase: &mut f32,
-    phase_step: f32,
-    smoothed_gain: &mut f32,
-    smoothed_pan: &mut f32,
-    smoothed_play: &mut f32,
-    smoothing_coeff: f32,
     sample_counter: &mut u64,
     sample_rate: f32,
     synth_engine: &mut SynthEngine,
@@ -330,12 +303,13 @@ fn write_block<T>(
 ) where
     T: Sample + FromSample<f32>,
 {
+    // CPU load: how much of the block's real-time budget rendering it
+    // took. `Instant::now` reads the vDSO clock - no syscall, no lock.
+    let started = std::time::Instant::now();
     if params.take_stop_request() {
         *sample_counter = 0;
     }
     let playing = params.playing();
-    let target_gain = params.gain();
-    let target_pan = params.pan();
     let click_enabled = params.click_enabled();
     let bpm = params.bpm();
     let samples_per_beat = (sample_rate as f64 * 60.0) / bpm;
@@ -347,23 +321,8 @@ fn write_block<T>(
     let mut frames = 0u64;
 
     for frame in output.chunks_mut(channels) {
-        *smoothed_gain += (target_gain - *smoothed_gain) * smoothing_coeff;
-        *smoothed_pan += (target_pan - *smoothed_pan) * smoothing_coeff;
-        let play_target = if playing { 1.0 } else { 0.0 };
-        *smoothed_play += (play_target - *smoothed_play) * smoothing_coeff;
 
-        let tone = (*phase).sin() * TEST_TONE_AMPLITUDE * *smoothed_play;
-        *phase += phase_step;
-        if *phase >= std::f32::consts::TAU {
-            *phase -= std::f32::consts::TAU;
-        }
-
-        // Equal-power pan law: pan in [-1, 1] maps to a quarter turn.
-        let angle = (*smoothed_pan + 1.0) * std::f32::consts::FRAC_PI_4;
-        let left_gain = angle.cos() * *smoothed_gain;
-        let right_gain = angle.sin() * *smoothed_gain;
-
-        let (synth_l, synth_r) = synth_engine.process(sample_rate);
+        let (synth_l, synth_r) = synth_engine.process();
         synth_peak_l = synth_peak_l.max(synth_l.abs());
         synth_peak_r = synth_peak_r.max(synth_r.abs());
 
@@ -390,8 +349,8 @@ fn write_block<T>(
             (0.0, 0.0)
         };
 
-        let out_l = tone * left_gain + synth_l + click + clip_l;
-        let out_r = tone * right_gain + synth_r + click + clip_r;
+        let out_l = synth_l + click + clip_l;
+        let out_r = synth_r + click + clip_r;
 
         peak_l = peak_l.max(out_l.abs());
         peak_r = peak_r.max(out_r.abs());
@@ -411,13 +370,14 @@ fn write_block<T>(
         }
         frames += 1;
     }
-    let _ = frames;
-
     let position = position_from_samples(*sample_counter, sample_rate, bpm);
+    let budget = frames as f32 / sample_rate;
+    let cpu_load = if budget > 0.0 { started.elapsed().as_secs_f32() / budget } else { 0.0 };
     // Best-effort: if the UI hasn't drained recently the ring buffer may be
     // full. Dropping a telemetry frame is harmless; never block.
-    let _ = telemetry.push(Telemetry { peak_l, peak_r, position });
-    let _ = synth_telemetry.push(SynthTelemetry { peak_l: synth_peak_l, peak_r: synth_peak_r });
+    let _ = telemetry.push(Telemetry { peak_l, peak_r, position, cpu_load, block_frames: frames as u32 });
+    let (lfo1_phase, lfo2_phase) = synth_engine.lfo_phases();
+    let _ = synth_telemetry.push(SynthTelemetry { peak_l: synth_peak_l, peak_r: synth_peak_r, lfo1_phase, lfo2_phase });
 }
 
 /// Sums every clip in `plan` that's currently sounding at `pos` (samples

@@ -27,13 +27,76 @@ pub enum VoiceMode {
     Poly,
 }
 
-/// What an LFO's output is patched to.
+/// What an LFO's output is patched to - set by dragging its pill onto a
+/// knob, or by cycling its target button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LfoTarget {
     /// Filter cutoff, in octaves either side of the Cutoff knob's setting.
     Cutoff,
     /// Pitch (vibrato), in cents either side of the played note.
     Pitch,
+    /// Osc 2's pulse width / shape (pulse-width modulation).
+    PulseWidth,
+    /// Filter resonance.
+    Resonance,
+}
+
+impl LfoTarget {
+    pub const ALL: [LfoTarget; 4] = [LfoTarget::Cutoff, LfoTarget::Pitch, LfoTarget::PulseWidth, LfoTarget::Resonance];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            LfoTarget::Cutoff => "Cutoff",
+            LfoTarget::Pitch => "Pitch",
+            LfoTarget::PulseWidth => "Pulse width",
+            LfoTarget::Resonance => "Resonance",
+        }
+    }
+
+    pub fn next(self) -> LfoTarget {
+        let i = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+}
+
+/// Unison: several detuned copies of both oscillators per note, spread
+/// across the stereo field - the standard way a synth gets width.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Unison {
+    /// Copies per note, 1 (off) to `MAX_UNISON`.
+    pub voices: u8,
+    /// Total spread between the outermost copies, in cents.
+    pub detune_cents: f32,
+    /// Stereo spread of the copies, 0 (mono) to 1 (hard left/right).
+    pub width: f32,
+}
+
+pub const MAX_UNISON: u8 = 4;
+
+impl Default for Unison {
+    fn default() -> Self {
+        Self { voices: 1, detune_cents: 14.0, width: 0.7 }
+    }
+}
+
+/// The post-synth effects: a stereo chorus and a reverb. (The output
+/// limiter is always on and has no controls.)
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Fx {
+    /// Chorus modulation depth, 0..1.
+    pub chorus_depth: f32,
+    /// Chorus wet/dry, 0..1 (0 = off).
+    pub chorus_mix: f32,
+    /// Reverb room size, 0..1.
+    pub reverb_size: f32,
+    /// Reverb wet/dry, 0..1 (0 = off).
+    pub reverb_mix: f32,
+}
+
+impl Default for Fx {
+    fn default() -> Self {
+        Self { chorus_depth: 0.4, chorus_mix: 0.0, reverb_size: 0.5, reverb_mix: 0.0 }
+    }
 }
 
 /// An oscillator's three knobs mean different things per-oscillator (Tune
@@ -118,24 +181,50 @@ pub struct SynthState {
     pub lfo1: Lfo,
     pub lfo2: Lfo,
     pub output: Output,
+    /// `default` so projects saved before these existed still load.
+    #[serde(default)]
+    pub unison: Unison,
+    #[serde(default)]
+    pub fx: Fx,
     /// MIDI-style note numbers currently held, for the keyboard strip.
     pub held_notes: Vec<u8>,
 }
 
-/// How much LFO modulation currently reaches the filter cutoff, in the
-/// Cutoff knob's own 0..1 space - the sum of any LFO patched to
-/// `LfoTarget::Cutoff`. Drives both the Cutoff knob's modulation ring and
-/// the filter response display's dashed band, so they always match what's
-/// actually being applied.
-pub fn cutoff_mod_depth(s: &SynthState) -> f32 {
+/// How far an LFO at 100% depth swings each target. Shared by the engine
+/// (which applies them) and the UI (which draws the swing as a ring), so
+/// the two can't disagree.
+pub const LFO_CUTOFF_MAX_OCT: f32 = 2.0;
+pub const LFO_PITCH_MAX_CENTS: f32 = 50.0;
+pub const LFO_PULSE_WIDTH_MAX: f32 = 0.4;
+pub const LFO_RESONANCE_MAX: f32 = 0.5;
+
+/// The Cutoff knob's range in octaves (20 Hz to 20 kHz, log taper).
+const CUTOFF_KNOB_OCTAVES: f32 = 9.965_784; // log2(20_000 / 20)
+/// The Tune knob's range in cents (-100..100).
+const TUNE_KNOB_CENTS: f32 = 200.0;
+
+/// How far LFO modulation currently swings `target`, in that target's own
+/// knob's 0..1 space - the sum of every LFO patched to it. Drives the
+/// knob's modulation ring (and, for Cutoff, the filter display's dashed
+/// band), so what's drawn always matches what's applied.
+pub fn lfo_mod_depth(s: &SynthState, target: LfoTarget) -> f32 {
     let mut depth = 0.0;
-    if s.lfo1.target == LfoTarget::Cutoff {
-        depth += s.lfo1.depth;
+    for lfo in [&s.lfo1, &s.lfo2] {
+        if lfo.target == target {
+            depth += lfo.depth;
+        }
     }
-    if s.lfo2.target == LfoTarget::Cutoff {
-        depth += s.lfo2.depth;
-    }
-    depth.clamp(0.0, 1.0)
+    let per_unit = match target {
+        LfoTarget::Cutoff => LFO_CUTOFF_MAX_OCT / CUTOFF_KNOB_OCTAVES,
+        LfoTarget::Pitch => LFO_PITCH_MAX_CENTS / TUNE_KNOB_CENTS,
+        LfoTarget::PulseWidth => LFO_PULSE_WIDTH_MAX,
+        LfoTarget::Resonance => LFO_RESONANCE_MAX,
+    };
+    (depth * per_unit).clamp(0.0, 1.0)
+}
+
+pub fn cutoff_mod_depth(s: &SynthState) -> f32 {
+    lfo_mod_depth(s, LfoTarget::Cutoff)
 }
 
 pub fn seed_synth() -> SynthState {
@@ -173,11 +262,81 @@ pub fn seed_synth() -> SynthState {
         lfo1: Lfo { rate_label: "1/8", rate_norm: 0.45, depth: 0.6, sync: true, target: LfoTarget::Cutoff, target_count: 1 },
         lfo2: Lfo { rate_label: "3.2 Hz", rate_norm: 0.3, depth: 0.4, sync: false, target: LfoTarget::Pitch, target_count: 1 },
         output: Output { glide_ms: 40.0, volume_db: -3.0, meter_l: 0.62, meter_r: 0.58 },
+        unison: Unison::default(),
+        fx: Fx::default(),
         // Not a demo chord: a fresh session starting with notes already
         // held meant they rang immediately with zero interaction, and
         // (since `held_notes.is_empty()` never went true) silently
         // blocked the very first step-entry recording until those 3
         // keys were clicked to release them by hand.
         held_notes: vec![],
+    }
+}
+
+/// Carve's factory presets, as listed in the browser: (name, builder).
+pub const PRESETS: [(&str, fn() -> SynthState); 2] = [("Warm Bass", seed_synth), ("Deep Rave Bass", deep_rave_bass)];
+
+/// The "Deep Rave Bass" patch the help guide's recipe tab loads and then
+/// walks through knob by knob: two saws an octave down, detuned against
+/// each other for a slow reese-style beat (Sync off, or Osc 2 would lock
+/// to Osc 1 and the beat would vanish), a loud sine sub, a dark driven
+/// LP24 that a fast filter envelope pops open on each note, and Mono with
+/// glide so overlapping notes slide instead of stacking up into mud.
+pub fn deep_rave_bass() -> SynthState {
+    SynthState {
+        name: "Deep Rave Bass",
+        voice_mode: VoiceMode::Mono,
+        voices: 8,
+        osc1: Oscillator {
+            waveform: Waveform::Saw,
+            octave: -1,
+            knob_a_cents: 0.0,
+            knob_b: 0.0,
+            knob_c: 0.2,
+            sync: false,
+        },
+        osc2: Oscillator {
+            waveform: Waveform::Saw,
+            octave: -1,
+            knob_a_cents: 12.0,
+            knob_b: 0.0,
+            knob_c: 0.0,
+            sync: false,
+        },
+        mix: Mix { osc1_db: -4.0, osc2_db: -5.0, sub_db: -3.0, noise_db: -60.0 },
+        filter: Filter {
+            filter_type: FilterType::Lp24,
+            cutoff_hz: 220.0,
+            resonance: 0.35,
+            drive_db: 9.0,
+            env_amount_oct: 3.0,
+            key_track: 0.5,
+        },
+        filter_env: Envelope { attack_ms: 1.0, decay_ms: 220.0, sustain: 0.15, release_ms: 150.0 },
+        amp_env: Envelope { attack_ms: 2.0, decay_ms: 400.0, sustain: 0.85, release_ms: 90.0 },
+        lfo1: Lfo { rate_label: "", rate_norm: 0.2, depth: 0.05, sync: false, target: LfoTarget::Cutoff, target_count: 1 },
+        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1 },
+        output: Output { glide_ms: 70.0, volume_db: -3.0, meter_l: 0.0, meter_r: 0.0 },
+        // Bass stays mono and dry: width and reverb in the low end smear it.
+        unison: Unison { voices: 1, detune_cents: 14.0, width: 0.0 },
+        fx: Fx { chorus_depth: 0.4, chorus_mix: 0.0, reverb_size: 0.4, reverb_mix: 0.0 },
+        held_notes: vec![],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cutoff_mod_depth_matches_the_engines_sweep() {
+        let mut s = seed_synth();
+        s.lfo1.target = LfoTarget::Cutoff;
+        s.lfo1.depth = 1.0;
+        s.lfo2.target = LfoTarget::Pitch;
+        // 100% depth sweeps +-2 octaves; the knob spans ~10 octaves, so the
+        // ring should cover about a fifth of the knob either side.
+        let depth = cutoff_mod_depth(&s);
+        assert!((depth - 2.0 / (20_000f32 / 20.0).log2()).abs() < 1e-4, "{depth}");
     }
 }

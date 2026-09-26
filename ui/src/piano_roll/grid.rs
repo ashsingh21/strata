@@ -97,6 +97,17 @@ impl Grid {
         Some((id, clip.start, clip.length, notes.clone()))
     }
 
+    /// The open clip's track colour - notes are filled with it.
+    fn clip_color(&self) -> Color {
+        let arr = self.arrangement.get();
+        self.open_clip
+            .get()
+            .and_then(|id| arr.clip(id))
+            .and_then(|clip| arr.track(clip.track))
+            .map(|track| crate::timeline::header::clip_color_to_rgb(track.color))
+            .unwrap_or(crate::tokens::CLIP_VIOLET)
+    }
+
     /// Hit-tests `(tick, pitch)` against `notes`, returning the note under
     /// it if any.
     fn note_at(notes: &[MidiNote], tick: Ticks, pitch: u8) -> Option<MidiNote> {
@@ -171,7 +182,8 @@ impl View for Grid {
         let px_per_tick = bounds.w as f64 / clip_length as f64;
         let tick_to_x = |t: Ticks| bounds.x + (t as f64 * px_per_tick) as f32;
 
-        let label_font = crate::canvas_text::canvas_font(10.0);
+        let label_font = crate::canvas_text::canvas_font(11.0);
+        let clip_color = self.clip_color();
 
         // Rows: background band + separator + degree/note label.
         for (i, &pitch) in rows.iter().enumerate() {
@@ -230,19 +242,28 @@ impl View for Grid {
                 continue;
             }
 
+            // Clip colour at rest, `signal` while sounding (under the
+            // playhead, matching held pads), a 2px ink outline when selected.
             let is_selected = selected.contains(&(note.start, note.pitch));
+            let playhead = self.playhead.get() - clip_start;
+            let is_sounding = playhead >= note.start && playhead < note.start + note.length;
+            let note_rect = vg::Rect::new(x0, y0, x1, y1);
             let mut fill = vg::Paint::default();
-            fill.set_color(if is_selected { palette.selection } else { palette.volt });
+            fill.set_color(if is_sounding { palette.signal } else { clip_color });
             fill.set_anti_alias(true);
-            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, x1, y1), None), &fill);
+            canvas.draw_path(&vg::Path::rect(note_rect, None), &fill);
 
+            let mut edge = vg::Paint::default();
+            edge.set_style(vg::PaintStyle::Stroke);
+            edge.set_anti_alias(true);
             if is_selected {
-                let mut border = vg::Paint::default();
-                border.set_color(palette.ink);
-                border.set_style(vg::PaintStyle::Stroke);
-                border.set_stroke_width(1.5);
-                border.set_anti_alias(true);
-                canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, x1, y1), None), &border);
+                edge.set_color(palette.ink);
+                edge.set_stroke_width(2.0);
+                canvas.draw_path(&vg::Path::rect(note_rect.with_outset((1.0, 1.0)), None), &edge);
+            } else {
+                edge.set_color(palette.ink_faint);
+                edge.set_stroke_width(1.0);
+                canvas.draw_path(&vg::Path::rect(note_rect.with_inset((0.5, 0.5)), None), &edge);
             }
 
             if x1 - x0 >= 16.0 {
@@ -252,7 +273,7 @@ impl View for Grid {
                     LabelMode::Intervals => degree_name(rel).to_string(),
                 };
                 let mut text_paint = vg::Paint::default();
-                text_paint.set_color(palette.on_volt);
+                text_paint.set_color(crate::tokens::ON_CLIP);
                 text_paint.set_anti_alias(true);
                 canvas.draw_str(&text, vg::Point::new(x0 + 3.0, y0 + ROW_H * 0.5 + 3.0), &label_font, &text_paint);
             }

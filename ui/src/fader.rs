@@ -123,8 +123,8 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
         // Cap: vertically centred at (1 - value) from the top.
         let cap_center_y = bounds.y + bounds.h * (1.0 - value);
 
-        // Track hairline: empty (bg-300) above the cap, filled (volt) below
-        // it, so the fill reads as a live level indicator while dragging.
+        // Track hairline: empty (bg-300) above the cap, filled (ink) below
+        // it - a setting, not a sound, so it stays neutral.
         let mut empty_paint = vg::Paint::default();
         empty_paint.set_color(palette.bg_300);
         empty_paint.set_anti_alias(true);
@@ -133,7 +133,7 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
         canvas.draw_path(&vg::Path::rect(empty_rect, None), &empty_paint);
 
         let mut fill_paint = vg::Paint::default();
-        fill_paint.set_color(palette.volt);
+        fill_paint.set_color(palette.ink_muted);
         fill_paint.set_anti_alias(true);
         let fill_rect = vg::Rect::new(
             center_x - TRACK_WIDTH * 0.5,
