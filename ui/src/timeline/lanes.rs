@@ -24,6 +24,10 @@ const DEFAULT_DRAWN_CLIP_LENGTH: Ticks = shared::arrangement::PPQ * 4;
 
 const CLIP_HEADER_H: f32 = 14.0;
 const CLIP_INSET: f32 = 2.0;
+/// Waveforms drawn bigger than their true amplitude (clamped back to the
+/// row's height) - most real playing doesn't reach 0dBFS, and a waveform
+/// scaled to actual peak reads as flatter/quieter than it sounds.
+const WAVEFORM_BOOST: f32 = 1.6;
 const EDGE_GRAB_PX: f32 = 6.0;
 const BREAKPOINT_GRAB_PX: f32 = 6.0;
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -983,36 +987,45 @@ impl LaneArea {
     /// drawn symmetric around the centre line rather than true min/max -
     /// close enough for a live view that gets thrown away and replaced by
     /// the real waveform the moment the take is decoded.
+    ///
+    /// Each peak gets a fixed pixel width (`PX_PER_PEAK`) rather than
+    /// stretching the whole history to fill the clip's current width every
+    /// frame - the clip's pixel width and `peaks.len()` both grow every
+    /// frame but not in lockstep (one's tick-based, the other's however
+    /// many audio blocks happened to arrive since the last UI tick), so
+    /// re-stretching re-bins already-drawn bars slightly differently each
+    /// time and the whole envelope visibly swims. Fixed spacing means a
+    /// bar's x position is only ever a function of its own index, so
+    /// already-drawn bars never move - new ones just append past them.
     fn draw_live_waveform(&self, canvas: &Canvas, peaks: &[f32], x0: f32, y0: f32, x1: f32, y1: f32) {
-        let width_px = (x1 - x0).round().max(1.0) as usize;
+        const PX_PER_PEAK: f32 = 1.0;
         let mid = (y0 + y1) * 0.5;
         let half_h = (y1 - y0) * 0.5 - 1.0;
-        let n = peaks.len();
+        let n = (((x1 - x0) / PX_PER_PEAK).floor() as usize).min(peaks.len());
+        if n == 0 {
+            return;
+        }
 
-        let bin_max = |i: usize| -> f32 {
-            let start = i * n / width_px;
-            let end = (((i + 1) * n / width_px).max(start + 1)).min(n);
-            peaks[start..end].iter().cloned().fold(0.0f32, f32::max)
-        };
-
+        // Only an abs-peak per block is available here (no true signed
+        // min/max, unlike the decoded waveform below), so the sign
+        // alternates per entry to fake the same single-line zigzag rather
+        // than a flat one-sided trace.
         let mut path = vg::PathBuilder::new();
-        for i in 0..width_px {
-            let x = x0 + i as f32;
-            let y = mid - bin_max(i) * half_h;
+        for (i, &p) in peaks[..n].iter().enumerate() {
+            let x = x0 + i as f32 * PX_PER_PEAK;
+            let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+            let y = mid - (p * WAVEFORM_BOOST).min(1.0) * half_h * sign;
             if i == 0 {
                 path.move_to(vg::Point::new(x, y));
             } else {
                 path.line_to(vg::Point::new(x, y));
             }
         }
-        for i in (0..width_px).rev() {
-            let x = x0 + i as f32;
-            let y = mid + bin_max(i) * half_h;
-            path.line_to(vg::Point::new(x, y));
-        }
-        path.close();
 
         let mut paint = vg::Paint::default();
+        paint.set_style(vg::PaintStyle::Stroke);
+        paint.set_stroke_width(1.0);
+        paint.set_stroke_join(vg::PaintJoin::Round);
         paint.set_color(tokens::ON_CLIP);
         paint.set_anti_alias(true);
         canvas.draw_path(&path.detach(), &paint);
@@ -1042,24 +1055,27 @@ impl LaneArea {
                 let end_sample = start_sample + duration_samples.max(1);
                 let peaks = pyramid.peaks_for_range(start_sample, end_sample, width_px);
 
+                // A single zigzag line through each column's real min/max
+                // (rather than a filled min/max envelope) - a plainer, more
+                // minimal look, matching the in-progress take's own single-
+                // line waveform above.
                 let mut path = vg::PathBuilder::new();
-                for (i, (_, mx)) in peaks.iter().enumerate() {
+                for (i, (mn, mx)) in peaks.iter().enumerate() {
                     let x = x0 + i as f32;
-                    let y = mid - mx * half_h;
+                    let top = (mx * WAVEFORM_BOOST).min(1.0);
+                    let bottom = (mn * WAVEFORM_BOOST).max(-1.0);
                     if i == 0 {
-                        path.move_to(vg::Point::new(x, y));
+                        path.move_to(vg::Point::new(x, mid - top * half_h));
                     } else {
-                        path.line_to(vg::Point::new(x, y));
+                        path.line_to(vg::Point::new(x, mid - top * half_h));
                     }
+                    path.line_to(vg::Point::new(x, mid - bottom * half_h));
                 }
-                for (i, (mn, _)) in peaks.iter().enumerate().rev() {
-                    let x = x0 + i as f32;
-                    let y = mid - mn * half_h;
-                    path.line_to(vg::Point::new(x, y));
-                }
-                path.close();
 
                 let mut paint = vg::Paint::default();
+                paint.set_style(vg::PaintStyle::Stroke);
+                paint.set_stroke_width(1.0);
+                paint.set_stroke_join(vg::PaintJoin::Round);
                 paint.set_color(tokens::ON_CLIP);
                 paint.set_anti_alias(true);
                 canvas.draw_path(&path.detach(), &paint);
