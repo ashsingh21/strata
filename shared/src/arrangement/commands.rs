@@ -37,6 +37,7 @@ pub enum Command {
     InsertMarker { marker: Marker },
     RemoveMarker { marker: MarkerId },
     RenameMarker { marker: MarkerId, name: String },
+    RenameTrack { track: TrackId, name: String },
     /// Inserts `track` at `index` in the track list, along with any
     /// `clips`/`automation` it should already own - used both for a
     /// fresh "add track" (both empty) and as `DeleteTrack`'s inverse
@@ -311,6 +312,12 @@ impl Command {
                 let marker = arr.markers.iter_mut().find(|m| m.id == marker_id).expect("RenameMarker: unknown marker");
                 let old_name = std::mem::replace(&mut marker.name, name);
                 Command::RenameMarker { marker: marker_id, name: old_name }
+            }
+
+            Command::RenameTrack { track: track_id, name } => {
+                let track = arr.track_mut(track_id).expect("RenameTrack: unknown track");
+                let old_name = std::mem::replace(&mut track.name, name);
+                Command::RenameTrack { track: track_id, name: old_name }
             }
 
             Command::SetTempo { bpm } => {

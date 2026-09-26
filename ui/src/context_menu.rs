@@ -94,6 +94,8 @@ pub fn context_menu_view(
                 let is_midi = track.as_ref().map(|t| t.kind == TrackKind::Midi).unwrap_or(false);
                 let has_instrument = track.as_ref().is_some_and(|t| t.instrument.is_some());
 
+                item(cx, "Rename...", move |cx| cx.emit(TimelineEvent::BeginRenameTrack(track_id)));
+                separator(cx);
                 item(cx, if muted { "Unmute" } else { "Mute" }, move |cx| cx.emit(TimelineEvent::ToggleMute(track_id)));
                 item(cx, if soloed { "Unsolo" } else { "Solo" }, move |cx| cx.emit(TimelineEvent::ToggleSolo(track_id)));
                 if is_midi {

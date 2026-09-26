@@ -145,6 +145,7 @@ pub fn track_header<'a>(
     arrangement: Signal<Arrangement>,
     theme: Signal<ThemeId>,
     selected_track: Signal<Option<TrackId>>,
+    renaming_track: Signal<Option<TrackId>>,
     track_id: TrackId,
 ) -> Handle<'a, impl View> {
     let name = arrangement.map(move |arr| {
@@ -195,7 +196,34 @@ pub fn track_header<'a>(
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
             HStack::new(cx, move |cx| {
-                Label::new(cx, name).class("title");
+                // `renaming_track` lives outside `arrangement`, so it
+                // needs its own `Binding` here to switch this one row
+                // into rename mode - the outer header-list `Binding` (in
+                // `timeline/mod.rs`) only reruns when the arrangement
+                // itself changes.
+                Binding::new(cx, renaming_track, move |cx| {
+                    if renaming_track.get() == Some(track_id) {
+                        let draft: Signal<String> = Signal::new(name.get());
+                        Textbox::new(cx, draft)
+                            .class("title")
+                            // `.title` alone (a Label class: font only, no
+                            // box) is why this rendered with no visible
+                            // background/border/caret contrast - reuse the
+                            // sidebar search field's box styling so this
+                            // actually reads as an editable input.
+                            .class("search")
+                            .on_edit(move |_cx, text| draft.set(text))
+                            .on_submit(move |cx, text, _from_key| {
+                                cx.emit(TimelineEvent::CommitRenameTrack(track_id, text))
+                            })
+                            .on_cancel(move |cx| cx.emit(TimelineEvent::CancelRenameTrack))
+                            .width(Stretch(1.0));
+                    } else {
+                        Label::new(cx, name)
+                            .class("title")
+                            .on_double_click(move |cx, _| cx.emit(TimelineEvent::BeginRenameTrack(track_id)));
+                    }
+                });
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, kind_label).class("meta");
             })
@@ -224,15 +252,18 @@ pub fn track_header<'a>(
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
-                // No confirmation dialog: like every other destructive
-                // edit here (DeleteClip, DeleteSelected, ...), undo is
-                // the safety net, not a modal.
+                Label::new(cx, gain_text).class("meta");
+
+                // Trailing edge, away from the gain readout and fader -
+                // a destructive action sitting right next to those two
+                // read as though it belonged to them. No confirmation
+                // dialog: like every other destructive edit here
+                // (DeleteClip, DeleteSelected, ...), undo is the safety
+                // net, not a modal.
                 Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
                     .class("btn")
                     .class("sm")
                     .on_press(move |cx| cx.emit(TimelineEvent::RemoveTrack(track_id)));
-
-                Label::new(cx, gain_text).class("meta");
             })
             .gap(Pixels(2.0))
             .alignment(Alignment::Left)

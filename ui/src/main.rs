@@ -105,6 +105,7 @@ fn main() -> Result<(), ApplicationError> {
         let tl_context_menu = timeline_state.context_menu;
         let tl_clipboard_nonempty = timeline_state.clipboard_nonempty;
         let tl_renaming_marker = timeline_state.renaming_marker;
+        let tl_renaming_track = timeline_state.renaming_track;
 
         // A saved project (if any) replaces the empty starting arrangement
         // before anything downstream reads it - the peak/decode loaders in
@@ -364,6 +365,7 @@ fn main() -> Result<(), ApplicationError> {
                         selected_track,
                         loop_on,
                         tl_renaming_marker,
+                        tl_renaming_track,
                     );
 
                     Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));

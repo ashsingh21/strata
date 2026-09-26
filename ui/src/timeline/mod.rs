@@ -52,6 +52,7 @@ pub fn timeline_view(
     selected_track: Signal<Option<shared::arrangement::TrackId>>,
     loop_on: Signal<bool>,
     renaming_marker: Signal<Option<shared::arrangement::MarkerId>>,
+    renaming_track: Signal<Option<shared::arrangement::TrackId>>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -97,7 +98,7 @@ pub fn timeline_view(
                 Binding::new(cx, arrangement, move |cx| {
                     let arr = arrangement.get();
                     for track in arr.tracks.clone() {
-                        track_header(cx, arrangement, theme, selected_track, track.id);
+                        track_header(cx, arrangement, theme, selected_track, renaming_track, track.id);
                         for lane in arr.automation.iter().filter(|a| a.track == track.id) {
                             automation_header(cx, arrangement, lane.id);
                         }
@@ -183,6 +184,7 @@ pub fn timeline_view(
                 let x = transform.get().tick_to_x(marker.position) as f32;
                 let draft: Signal<String> = Signal::new(marker.name.clone());
                 Textbox::new(cx, draft)
+                    .class("search")
                     .font_size(11.0)
                     .on_edit(move |_cx, text| draft.set(text))
                     .on_submit(move |cx, text, _from_key| cx.emit(TimelineEvent::CommitRenameMarker(marker_id, text)))

@@ -73,6 +73,8 @@ pub struct TimelineState {
     pub context_menu: Signal<Option<ContextMenu>>,
     /// The marker currently showing an inline rename textbox, if any.
     pub renaming_marker: Signal<Option<MarkerId>>,
+    /// The track currently showing an inline rename textbox, if any.
+    pub renaming_track: Signal<Option<TrackId>>,
     /// Whether Copy/Cut has put anything aside - so a context menu on
     /// empty space knows whether to offer Paste.
     pub clipboard_nonempty: Signal<bool>,
@@ -193,6 +195,7 @@ impl TimelineState {
             drums_menu_open: Signal::new(false),
             context_menu: Signal::new(None),
             renaming_marker: Signal::new(None),
+            renaming_track: Signal::new(None),
             clipboard_nonempty: Signal::new(false),
             viewport: (ASSUMED_LANE_WIDTH, 400.0),
             command_stack: CommandStack::new(),
@@ -442,6 +445,11 @@ pub enum TimelineEvent {
     /// one undo step, same as any other clip insertion.
     InsertRecordedClip { track: TrackId, start: Ticks, length: Ticks, source: Arc<str> },
 
+    /// Opens a track's inline rename textbox.
+    BeginRenameTrack(TrackId),
+    /// Commits the track rename textbox's current text.
+    CommitRenameTrack(TrackId, String),
+    CancelRenameTrack,
     AddTrack(TrackKind),
     /// Imports a drum sample (a `.wav` under `assets/drums/`, named
     /// relative to the assets dir, e.g. `"drums/kick.wav"`) as a new
@@ -984,6 +992,22 @@ impl Model for TimelineState {
             TimelineEvent::RemoveTrack(track) => {
                 self.do_command(Command::DeleteTrack { track: *track });
                 self.selection.set(Selection::default());
+                if self.renaming_track.get() == Some(*track) {
+                    self.renaming_track.set(None);
+                }
+            }
+            TimelineEvent::BeginRenameTrack(track) => {
+                self.renaming_track.set(Some(*track));
+            }
+            TimelineEvent::CommitRenameTrack(track, name) => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    self.do_command(Command::RenameTrack { track: *track, name: name.to_string() });
+                }
+                self.renaming_track.set(None);
+            }
+            TimelineEvent::CancelRenameTrack => {
+                self.renaming_track.set(None);
             }
             TimelineEvent::LoadArrangement(arrangement) => {
                 self.arrangement.set(arrangement.clone());

@@ -127,6 +127,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                 if renaming.get() {
                     Textbox::new(cx, rename_draft)
                         .class("title")
+                        .class("search")
                         .font_size(14.0)
                         .on_edit(move |_cx, text| rename_draft.set(text))
                         .on_submit(move |cx, text, _from_key| {
