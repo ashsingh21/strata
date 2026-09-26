@@ -23,6 +23,9 @@ pub struct PlaybackClip {
     /// float index) that `start_sample` corresponds to - mirrors
     /// `ClipContent::Audio::source_offset_samples`.
     pub source_offset_samples: u64,
+    /// The owning track's mixer gain (`Track.gain_db`) at the moment this
+    /// plan was built - applied per-sample when mixing this clip in.
+    pub gain_db: f32,
 }
 
 /// A full snapshot of what should be audible, replacing whatever the
@@ -66,6 +69,7 @@ impl PlaybackPlan {
                     start_sample,
                     length_samples: end_sample - start_sample,
                     source_offset_samples: *source_offset_samples,
+                    gain_db: track.gain_db,
                 })
             })
             .collect();

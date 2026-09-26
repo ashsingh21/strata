@@ -419,10 +419,12 @@ impl Model for SynthModel {
                 // Every instrument's latest patch to its slot (the engine
                 // keeps the latest per slot).
                 let patches = self.patches.get();
+                let arr = self.arrangement.get();
                 for (slot, track) in self.slots.iter().enumerate() {
                     if let Some(patch) = track.and_then(|t| patches.get(&t)) {
                         let mut snapshot = SynthParams::from_state(patch);
                         snapshot.slot = slot as u8;
+                        snapshot.gain_db = track.and_then(|t| arr.track(t)).map(|t| t.gain_db).unwrap_or(0.0);
                         let _ = self.params_tx.push(snapshot);
                     }
                 }

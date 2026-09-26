@@ -38,6 +38,11 @@ pub struct SynthParams {
     pub volume_db: f32,
     pub unison: Unison,
     pub fx: Fx,
+    /// The owning track's mixer gain (`Track.gain_db`) - distinct from
+    /// `volume_db` (Carve's own Output knob, part of the patch itself).
+    /// Set by the caller after `from_state`, same as `slot`: this is
+    /// arrangement state, not something a saved patch carries.
+    pub gain_db: f32,
 }
 
 impl SynthParams {
@@ -62,6 +67,7 @@ impl SynthParams {
             volume_db: s.output.volume_db,
             unison: s.unison,
             fx: s.fx,
+            gain_db: 0.0,
         }
     }
 }

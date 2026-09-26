@@ -24,6 +24,10 @@ use shared::synth::{NoteEvent, SynthParams, SynthTelemetry, MAX_INSTRUMENTS};
 use shared::{Params, Position, Telemetry};
 use synth::SynthEngine;
 
+fn db_to_gain(db: f32) -> f32 {
+    10f32.powf(db / 20.0)
+}
+
 /// How many captured input samples can sit unwritten between the input
 /// callback and the writer thread - generous relative to a typical block
 /// size at common sample rates, so a brief writer-thread stall (e.g. a
@@ -227,6 +231,10 @@ where
     // One Carve per instrument track, all allocated here - before the
     // stream starts - so the audio thread never allocates.
     let mut synth_engines: Vec<SynthEngine> = (0..MAX_INSTRUMENTS).map(|_| SynthEngine::new(sample_rate)).collect();
+    // Each slot's owning track's mixer gain, as a linear multiplier - unity
+    // until the first `SynthParams` snapshot for that slot arrives, so a
+    // freshly added track isn't silent before the UI's first tick.
+    let mut slot_gain = [1.0f32; MAX_INSTRUMENTS];
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -243,6 +251,9 @@ where
             move |data: &mut [T], _info: &OutputCallbackInfo| {
                 // Latest-wins: only the most recent params snapshot matters.
                 while let Ok(next) = synth_params.pop() {
+                    if let Some(gain) = slot_gain.get_mut(next.slot as usize) {
+                        *gain = db_to_gain(next.gain_db);
+                    }
                     if let Some(engine) = synth_engines.get_mut(next.slot as usize) {
                         engine.set_params(next);
                     }
@@ -274,6 +285,7 @@ where
                     &mut sample_counter,
                     sample_rate,
                     &mut synth_engines,
+                    &slot_gain,
                     &mut synth_telemetry,
                     &mut click_phase,
                     &mut click_env,
@@ -299,6 +311,7 @@ fn write_block<T>(
     sample_counter: &mut u64,
     sample_rate: f32,
     synth_engines: &mut [SynthEngine],
+    slot_gain: &[f32],
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
     click_phase: &mut f32,
     click_env: &mut f32,
@@ -331,8 +344,9 @@ fn write_block<T>(
 
         let mut synth_l = 0.0f32;
         let mut synth_r = 0.0f32;
-        for (engine, peak) in synth_engines.iter_mut().zip(synth_peaks.iter_mut()) {
-            let (l, r) = engine.process();
+        for ((engine, peak), gain) in synth_engines.iter_mut().zip(synth_peaks.iter_mut()).zip(slot_gain.iter()) {
+            let (raw_l, raw_r) = engine.process();
+            let (l, r) = (raw_l * gain, raw_r * gain);
             synth_l += l;
             synth_r += r;
             peak.0 = peak.0.max(l.abs());
@@ -423,14 +437,16 @@ fn mix_audio_clips(plan: &PlaybackPlan, sources: &[DecodedSource], pos: i64) -> 
         if frame_index < 0 || frame_index >= frame_count {
             continue;
         }
+        let gain = db_to_gain(clip.gain_db);
         let base = (frame_index * channels) as usize;
         if source.channels <= 1 {
-            let s = source.samples[base];
+            let s = source.samples[base] * gain;
             out_l += s;
             out_r += s;
         } else {
-            let l = source.samples[base];
-            let r = source.samples.get(base + 1).copied().unwrap_or(l);
+            let raw_l = source.samples[base];
+            let l = raw_l * gain;
+            let r = source.samples.get(base + 1).copied().unwrap_or(raw_l) * gain;
             out_l += l;
             out_r += r;
         }
