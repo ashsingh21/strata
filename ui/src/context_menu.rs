@@ -19,10 +19,24 @@ use crate::synth::state::SynthEvent;
 use crate::timeline::state::{ContextMenu, ContextMenuTarget, TimelineEvent};
 use crate::tokens;
 
-/// One row: a label and an action, closing the menu after either way.
+/// One row: a label, an optional right-aligned shortcut hint (muted, like
+/// a native menu's), and an action - closing the menu after either way.
 fn item(cx: &mut Context, label: &'static str, action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static) {
+    item_with_shortcut(cx, label, "", action);
+}
+
+fn item_with_shortcut(
+    cx: &mut Context,
+    label: &'static str,
+    shortcut: &'static str,
+    action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
+) {
     HStack::new(cx, move |cx| {
         Label::new(cx, label).class("body");
+        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+        if !shortcut.is_empty() {
+            Label::new(cx, shortcut).class("value");
+        }
     })
     .class("menu-item")
     .on_press(move |cx| {
@@ -30,9 +44,10 @@ fn item(cx: &mut Context, label: &'static str, action: impl Fn(&mut EventContext
         cx.emit(TimelineEvent::CloseContextMenu);
     })
     .cursor(CursorIcon::Hand)
+    .gap(Pixels(tokens::SPACE_3))
     .alignment(Alignment::Left)
     .width(Stretch(1.0))
-    .height(Pixels(26.0));
+    .height(Pixels(28.0));
 }
 
 fn separator(cx: &mut Context) {
@@ -62,15 +77,15 @@ pub fn context_menu_view(
         VStack::new(cx, move |cx| match m.target {
             ContextMenuTarget::Clip(clip_id) => {
                 let is_midi = arr.clip(clip_id).map(|c| matches!(c.content, ClipContent::Midi { .. })).unwrap_or(false);
-                item(cx, "Cut", |cx| cx.emit(TimelineEvent::Cut));
-                item(cx, "Copy", |cx| cx.emit(TimelineEvent::Copy));
-                item(cx, "Duplicate", |cx| cx.emit(TimelineEvent::DuplicateSelected));
+                item_with_shortcut(cx, "Cut", "Ctrl+X", |cx| cx.emit(TimelineEvent::Cut));
+                item_with_shortcut(cx, "Copy", "Ctrl+C", |cx| cx.emit(TimelineEvent::Copy));
+                item_with_shortcut(cx, "Duplicate", "Ctrl+D", |cx| cx.emit(TimelineEvent::DuplicateSelected));
                 if is_midi {
                     separator(cx);
                     item(cx, "Open in piano roll", move |cx| cx.emit(PianoRollEvent::Open(clip_id)));
                 }
                 separator(cx);
-                item(cx, "Delete", |cx| cx.emit(TimelineEvent::DeleteSelected));
+                item_with_shortcut(cx, "Delete", "Del", |cx| cx.emit(TimelineEvent::DeleteSelected));
             }
             ContextMenuTarget::Track(track_id) => {
                 let track = arr.track(track_id).cloned();
@@ -98,7 +113,7 @@ pub fn context_menu_view(
                 item(cx, "Remove track", move |cx| cx.emit(TimelineEvent::RemoveTrack(track_id)));
             }
             ContextMenuTarget::Lane { tick, .. } => {
-                item(cx, "Paste", move |cx| {
+                item_with_shortcut(cx, "Paste", "Ctrl+V", move |cx| {
                     cx.emit(TimelineEvent::ScrubPlayhead(tick));
                     cx.emit(TimelineEvent::Paste);
                 });
@@ -118,9 +133,9 @@ pub fn context_menu_view(
         .left(Pixels(m.x))
         .top(Pixels(m.y))
         .gap(Pixels(2.0))
-        .padding_top(Pixels(tokens::SPACE_1))
-        .padding_bottom(Pixels(tokens::SPACE_1))
-        .width(Pixels(180.0))
+        .padding_top(Pixels(tokens::SPACE_2))
+        .padding_bottom(Pixels(tokens::SPACE_2))
+        .width(Pixels(212.0))
         .height(Auto);
     });
 }

@@ -411,7 +411,7 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   z-index: 170;
 }}
 .context-menu {{
-  border-radius: {radius_sm}px;
+  border-radius: {radius_md}px;
   border-width: 1px;
   z-index: 180;
 }}
@@ -512,6 +512,13 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     for popover in [".synth-help-panel", ".interval-overlay", ".piano-roll-panel", ".drums-menu", ".context-menu"] {
         rule(popover, vec![("shadow", shadow_pop.to_string())]);
     }
+
+    // A context menu reads as a distinct floating surface, not just a
+    // shadowed copy of the panel it's sitting on: one step lighter than
+    // `.panel`'s bg-100, with a more visible edge (line-control, the same
+    // border every button and readout uses) rather than the faint `line`
+    // hairline panels use between themselves.
+    rule(".context-menu", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
 
     rule(
         ".btn",
