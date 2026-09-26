@@ -56,6 +56,9 @@ pub fn start(
         SampleFormat::U16 => {
             build_input_stream::<u16>(&device, stream_config, channels, capture_tx, telemetry, record_params)
         }
+        SampleFormat::U8 => {
+            build_input_stream::<u8>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+        }
         other => {
             eprintln!("input: unsupported sample format {other}; recording disabled");
             return None;
