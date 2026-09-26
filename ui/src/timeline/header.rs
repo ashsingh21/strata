@@ -9,7 +9,7 @@ use shared::arrangement::{
     MIN_TRACK_HEIGHT,
 };
 
-use crate::fader::Fader;
+use crate::fader::{Fader, FaderModifiers};
 use crate::timeline::state::{ContextMenu, ContextMenuTarget, TimelineEvent};
 use crate::tokens::{self, ThemeId};
 
@@ -162,8 +162,16 @@ pub fn track_header<'a>(
     let mute = arrangement.map(move |arr| arr.track(track_id).map(|t| t.mute).unwrap_or(false));
     let solo = arrangement.map(move |arr| arr.track(track_id).map(|t| t.solo).unwrap_or(false));
     let arm = arrangement.map(move |arr| arr.track(track_id).map(|t| t.arm).unwrap_or(false));
+    // The fader's own drag position is committed to the arrangement only
+    // on release (see the `Fader::on_release` wiring below - committing on
+    // every intermediate move would rebuild this whole header list mid-
+    // drag). This local, non-arrangement signal is what lets the dB
+    // readout still track the live drag instead of only updating at the
+    // end of it.
+    let gain_preview: Signal<Option<f32>> = Signal::new(None);
     let gain_text = arrangement.map(move |arr| {
-        arr.track(track_id).map(|t| format!("{:+.1} dB", t.gain_db)).unwrap_or_default()
+        let committed = arr.track(track_id).map(|t| t.gain_db).unwrap_or(0.0);
+        format!("{:+.1} dB", gain_preview.get().unwrap_or(committed))
     });
     let fader_pos = arrangement.map(move |arr| {
         gain_db_to_fader_pos(arr.track(track_id).map(|t| t.gain_db).unwrap_or(0.0))
@@ -172,13 +180,21 @@ pub fn track_header<'a>(
         arr.track(track_id).map(|t| t.height).unwrap_or(DEFAULT_TRACK_HEIGHT)
     });
 
+    HStack::new(cx, move |cx| {
+    // A full-height color strip at the row's leading edge - the at-a-
+    // glance track identifier every other DAW's track list has, instead
+    // of (in addition to, previously) a small swatch buried in the title
+    // row.
+    Element::new(cx)
+        .class("track-color-bar")
+        .background_color(color.map(|c| clip_color_to_rgb(*c)))
+        .width(Pixels(4.0))
+        .height(Stretch(1.0));
+
     VStack::new(cx, move |cx| {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
             HStack::new(cx, move |cx| {
-                Element::new(cx)
-                    .class("swatch")
-                    .background_color(color.map(|c| clip_color_to_rgb(*c)));
                 Label::new(cx, name).class("title");
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, kind_label).class("meta");
@@ -226,7 +242,18 @@ pub fn track_header<'a>(
         .width(Stretch(1.0))
         .height(Stretch(1.0));
 
-        Fader::new(cx, fader_pos, 0.75, theme, move |cx, position| {
+        // The track header list rebuilds wholesale (`Binding` on the whole
+        // arrangement, in `timeline/mod.rs`) on any arrangement mutation -
+        // including this fader's own commit. Committing on every
+        // intermediate drag move would tear down and rebuild this very
+        // `Fader` mid-drag, so the commit happens only on release
+        // (`on_release`); the cap still tracks the live position via the
+        // fader's own local drag state (see `Fader::draw`).
+        Fader::new(cx, fader_pos, 0.75, theme, move |_, position| {
+            gain_preview.set(Some(fader_pos_to_gain_db(position)));
+        })
+        .on_release(move |cx, position| {
+            gain_preview.set(None);
             cx.emit(TimelineEvent::SetTrackGain {
                 track: track_id,
                 gain_db: fader_pos_to_gain_db(position),
@@ -247,6 +274,9 @@ pub fn track_header<'a>(
     })
     .width(Stretch(1.0))
     .height(Pixels(RESIZE_HANDLE_PX));
+    })
+    .width(Stretch(1.0))
+    .height(Stretch(1.0));
     })
     .class("tl-head")
     .toggle_class("is-selected", selected_track.map(move |s| *s == Some(track_id)))

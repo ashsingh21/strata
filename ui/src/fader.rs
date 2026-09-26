@@ -29,6 +29,7 @@ pub struct Fader<V: SignalGet<f32> + Copy + 'static> {
     prev_drag_y: f32,
     continuous: f32,
     on_changing: Option<ChangeCallback>,
+    on_release: Option<ChangeCallback>,
 }
 
 impl<V: SignalGet<f32> + Copy + 'static> Fader<V> {
@@ -48,10 +49,28 @@ impl<V: SignalGet<f32> + Copy + 'static> Fader<V> {
             prev_drag_y: 0.0,
             continuous: initial,
             on_changing: Some(Box::new(on_changing)),
+            on_release: None,
         }
         .build(cx, |_| {})
         .bind(value, |mut handle| handle.needs_redraw())
         .bind(theme, |mut handle| handle.needs_redraw())
+    }
+}
+
+pub trait FaderModifiers {
+    /// Fired once, with the final value, on mouse-up (and on the
+    /// double-click-to-reset gesture) - separate from `on_changing`, which
+    /// fires on every intermediate move. A caller whose `on_changing` write
+    /// would itself invalidate the fader mid-drag (e.g. writing into a
+    /// `Binding`-watched model that rebuilds this very view) should commit
+    /// there instead, passing a no-op to `on_changing`; the cap still
+    /// tracks the live drag position via the view's own local state.
+    fn on_release(self, on_release: impl 'static + Fn(&mut EventContext, f32)) -> Self;
+}
+
+impl<V: SignalGet<f32> + Copy + 'static> FaderModifiers for Handle<'_, Fader<V>> {
+    fn on_release(self, on_release: impl 'static + Fn(&mut EventContext, f32)) -> Self {
+        self.modify(|fader| fader.on_release = Some(Box::new(on_release)))
     }
 }
 
@@ -82,6 +101,9 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
             WindowEvent::MouseUp(button) if *button == MouseButton::Left => {
                 self.is_dragging = false;
                 cx.release();
+                if let Some(callback) = &self.on_release {
+                    (callback)(cx, self.continuous);
+                }
             }
 
             WindowEvent::MouseMove(_, y) => {
@@ -94,6 +116,7 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
                     // Screen y grows downward; dragging up should increase value.
                     let new_value = self.continuous - delta;
                     move_value(self, cx, new_value);
+                    cx.needs_redraw();
                 }
             }
 
@@ -101,12 +124,18 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
                 if *y != 0.0 {
                     let new_value = self.continuous + *y * WHEEL_SCALAR;
                     move_value(self, cx, new_value);
+                    if let Some(callback) = &self.on_release {
+                        (callback)(cx, self.continuous);
+                    }
                 }
             }
 
             WindowEvent::MouseDoubleClick(button) if *button == MouseButton::Left => {
                 self.is_dragging = false;
                 move_value(self, cx, self.default_value);
+                if let Some(callback) = &self.on_release {
+                    (callback)(cx, self.continuous);
+                }
             }
 
             _ => {}
@@ -116,7 +145,11 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let bounds = cx.bounds();
         let palette = self.theme.get().palette();
-        let value = self.value.get().clamp(0.0, 1.0);
+        // While dragging, follow the live local value rather than the
+        // external signal - the external commit may be deferred to
+        // mouse-up (see `on_release`), so the signal itself might not
+        // move until the drag ends.
+        let value = if self.is_dragging { self.continuous } else { self.value.get() }.clamp(0.0, 1.0);
 
         let center_x = bounds.x + bounds.w * 0.5;
 
