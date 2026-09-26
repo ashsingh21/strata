@@ -9,7 +9,13 @@
 
 use std::sync::Arc;
 
-use crate::arrangement::{Arrangement, ClipContent, TrackId};
+use crate::arrangement::{Arrangement, ClipContent, CompressorState, Effect, TrackId};
+
+/// How many distinct audio tracks can have their own persistent
+/// per-track Compressor state at once - generous relative to how many
+/// audio tracks a project is likely to use, matching `MAX_INSTRUMENTS`'s
+/// own "generous, not exact" sizing for synth slots.
+pub const MAX_BUS_TRACKS: usize = 32;
 
 /// One audio clip's position and source, already converted from ticks to
 /// samples at the engine's real output sample rate.
@@ -26,6 +32,18 @@ pub struct PlaybackClip {
     /// The owning track's mixer gain (`Track.gain_db`) at the moment this
     /// plan was built - applied per-sample when mixing this clip in.
     pub gain_db: f32,
+    /// The owning track's Compressor insert effect, if any -
+    /// `CompressorState::bypass()` when it has none. See `SynthParams`'s
+    /// own `compressor` field for why this is always concrete, never
+    /// `Option`.
+    pub compressor: CompressorState,
+    /// A stable small index for the owning track (its position in
+    /// `Arrangement::tracks` at the moment this plan was built, clamped
+    /// to `MAX_BUS_TRACKS`), so the engine can keep one persistent
+    /// Compressor per track across blocks and clips - the same
+    /// "producer assigns a small stable slot, consumer trusts it"
+    /// pattern `SynthParams::slot` already uses for Carve instances.
+    pub bus_slot: u8,
 }
 
 /// A full snapshot of what should be audible, replacing whatever the
@@ -63,6 +81,19 @@ impl PlaybackPlan {
                 };
                 let start_sample = arrangement.tempo_map.ticks_to_samples(clip.start, sample_rate);
                 let end_sample = arrangement.tempo_map.ticks_to_samples(clip.end(), sample_rate);
+                let bus_slot = arrangement
+                    .tracks
+                    .iter()
+                    .position(|t| t.id == clip.track)
+                    .unwrap_or(0)
+                    .min(MAX_BUS_TRACKS - 1) as u8;
+                let compressor = track
+                    .effects
+                    .iter()
+                    .find_map(|e| match e {
+                        Effect::Compressor(c) => Some(*c),
+                    })
+                    .unwrap_or_else(CompressorState::bypass);
                 Some(PlaybackClip {
                     track: clip.track,
                     source: source.clone(),
@@ -70,6 +101,8 @@ impl PlaybackPlan {
                     length_samples: end_sample - start_sample,
                     source_offset_samples: *source_offset_samples,
                     gain_db: track.gain_db,
+                    compressor,
+                    bus_slot,
                 })
             })
             .collect();
@@ -122,6 +155,7 @@ mod tests {
             gain_db: 0.0,
             height: 56.0,
             instrument: None,
+        effects: vec![],
         }
     }
 

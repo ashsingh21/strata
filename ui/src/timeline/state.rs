@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    Instrument,
+    CompressorState, Effect, Instrument,
     empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, Marker, MarkerId, MidiNote,
     PeakPyramid, SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
@@ -423,6 +423,15 @@ pub enum TimelineEvent {
     Paste,
     /// Gives a track an instrument, or removes it (`None`).
     SetInstrument { track: TrackId, instrument: Option<Instrument> },
+    /// Adds a Compressor to the track's effect chain - a no-op if it
+    /// already has one (only one instance of a given effect makes sense
+    /// until there's a real multi-slot chain UI).
+    AddCompressorEffect(TrackId),
+    RemoveCompressorEffect(TrackId),
+    /// Replaces the track's Compressor's whole config - not undoable
+    /// (like `SetTrackHeight`/gain, a knob-drag preference, not an edit
+    /// worth a history entry), and a no-op if the track has none.
+    SetCompressorState(TrackId, CompressorState),
     /// Drag on a track header's resize handle: absolute new height in px
     /// (clamped by the handler), not undoable - a view preference, like
     /// mute or gain.
@@ -729,6 +738,35 @@ impl Model for TimelineState {
             TimelineEvent::SetInstrument { track, instrument } => {
                 self.do_command(Command::SetInstrument { track: *track, instrument: *instrument });
             }
+            TimelineEvent::AddCompressorEffect(track) => {
+                let arr = self.arrangement.get();
+                if let Some(t) = arr.track(*track) {
+                    if !t.effects.iter().any(|e| matches!(e, Effect::Compressor(_))) {
+                        let mut effects = t.effects.clone();
+                        effects.push(Effect::Compressor(CompressorState::default()));
+                        self.do_command(Command::SetTrackEffects { track: *track, effects });
+                    }
+                }
+            }
+            TimelineEvent::RemoveCompressorEffect(track) => {
+                let arr = self.arrangement.get();
+                if let Some(t) = arr.track(*track) {
+                    let effects: Vec<Effect> =
+                        t.effects.iter().filter(|e| !matches!(e, Effect::Compressor(_))).cloned().collect();
+                    self.do_command(Command::SetTrackEffects { track: *track, effects });
+                }
+            }
+            TimelineEvent::SetCompressorState(track, state) => {
+                self.with_arrangement(|arr, _| {
+                    if let Some(t) = arr.track_mut(*track) {
+                        if let Some(Effect::Compressor(c)) =
+                            t.effects.iter_mut().find(|e| matches!(e, Effect::Compressor(_)))
+                        {
+                            *c = *state;
+                        }
+                    }
+                });
+            }
             TimelineEvent::SetTrackHeight { track, height } => {
                 let height = height.clamp(shared::arrangement::MIN_TRACK_HEIGHT, shared::arrangement::MAX_TRACK_HEIGHT);
                 self.with_arrangement(|arr, _| {
@@ -826,6 +864,7 @@ impl Model for TimelineState {
                         gain_db: 0.0,
                         height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
                         instrument: Instrument::default_for(*kind),
+                        effects: vec![],
                     };
                     stack.do_command(
                         Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] },
@@ -876,6 +915,7 @@ impl Model for TimelineState {
                         gain_db: 0.0,
                         height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
                         instrument: None,
+                        effects: vec![],
                     };
                     let clip = Clip {
                         id: clip_id,
@@ -962,6 +1002,7 @@ impl Model for TimelineState {
                             gain_db: 0.0,
                             height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
                             instrument: None,
+                            effects: vec![],
                         };
                         commands.push(Command::InsertTrack {
                             track: Box::new(track),

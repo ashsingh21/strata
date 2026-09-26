@@ -55,6 +55,12 @@ pub struct Track {
     /// `default` so projects saved before instruments existed still load.
     #[serde(default)]
     pub instrument: Option<Instrument>,
+    /// The track's insert effect chain - separate from `instrument`
+    /// (an audio track has effects but no instrument; a MIDI track can
+    /// have both). `default` so projects saved before effects existed
+    /// still load.
+    #[serde(default)]
+    pub effects: Vec<Effect>,
 }
 
 /// A track's instrument. Only Carve so far.
@@ -77,6 +83,53 @@ impl Instrument {
             TrackKind::Midi => Some(Instrument::Carve),
             TrackKind::Audio => None,
         }
+    }
+}
+
+/// A track's insert effect. Only Compressor so far - a single-variant
+/// enum, same convention as `Instrument`, so a second effect type is a
+/// clean addition later rather than a reshape.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Effect {
+    Compressor(CompressorState),
+}
+
+impl Effect {
+    pub fn name(self) -> &'static str {
+        match self {
+            Effect::Compressor(_) => "Compressor",
+        }
+    }
+}
+
+/// A feedforward compressor's knobs. The DSP itself (the envelope
+/// follower and its running state) lives in `engine` - this is just the
+/// config, mirroring the `SynthState`/`SynthParams` split.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CompressorState {
+    pub threshold_db: f32,
+    /// 1.0 = no compression, higher = harder. Not clamped at the top;
+    /// a very high ratio is how a user gets limiter-like behavior.
+    pub ratio: f32,
+    pub attack_ms: f32,
+    pub release_ms: f32,
+    /// Makeup gain, applied after gain reduction.
+    pub makeup_db: f32,
+}
+
+impl Default for CompressorState {
+    fn default() -> Self {
+        Self { threshold_db: -18.0, ratio: 4.0, attack_ms: 10.0, release_ms: 150.0, makeup_db: 0.0 }
+    }
+}
+
+impl CompressorState {
+    /// Ratio 1.0 is mathematically a no-op (zero gain reduction
+    /// regardless of threshold) - what every track without a Compressor
+    /// in its `effects` list is treated as, so the engine can always run
+    /// the same DSP unit rather than branching on `Option`.
+    pub fn bypass() -> Self {
+        Self { ratio: 1.0, ..Self::default() }
     }
 }
 

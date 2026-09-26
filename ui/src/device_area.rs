@@ -7,9 +7,10 @@ use std::collections::HashSet;
 
 use vizia::prelude::*;
 
-use shared::arrangement::{Arrangement, ClipId, Instrument, SnapGrid, Ticks, TrackId, TrackKind};
+use shared::arrangement::{Arrangement, ClipId, Effect, Instrument, SnapGrid, Ticks, TrackId, TrackKind};
 use shared::synth::SynthState;
 
+use crate::compressor_panel;
 use crate::interval_input;
 use crate::interval_input::state::IntervalInputEvent;
 use crate::piano_roll;
@@ -23,6 +24,7 @@ use crate::tokens::{self, ThemeId};
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Panel {
     Carve,
+    Compressor(TrackId),
     NoInstrument(TrackId),
     Audio,
     Nothing,
@@ -33,6 +35,9 @@ pub struct DeviceAreaProps {
     pub theme: Signal<ThemeId>,
     pub arrangement: Signal<Arrangement>,
     pub selected_track: Signal<Option<TrackId>>,
+    /// Whether the panel shows the Compressor instead of the instrument/
+    /// empty state - toggled by the Compressor chip.
+    pub viewing_effect: Signal<bool>,
     // Carve.
     pub synth_state: Signal<SynthState>,
     pub lfo_phases: (Signal<f32>, Signal<f32>),
@@ -59,6 +64,9 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
     let panel = Memo::new(move |_| {
         let arr = p.arrangement.get();
         match p.selected_track.get().and_then(|id| arr.track(id).cloned()) {
+            Some(t) if p.viewing_effect.get() && t.effects.iter().any(|e| matches!(e, Effect::Compressor(_))) => {
+                Panel::Compressor(t.id)
+            }
             Some(t) if t.kind == TrackKind::Audio => Panel::Audio,
             Some(t) if t.instrument.is_some() => Panel::Carve,
             Some(t) => Panel::NoInstrument(t.id),
@@ -107,6 +115,11 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                     color,
                 );
             }),
+            Panel::Compressor(track) => {
+                let color =
+                    p.arrangement.get().track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Violet);
+                compressor_panel::compressor_panel(cx, p.theme, p.arrangement, track, color);
+            }
             Panel::NoInstrument(track) => empty_state(cx, "No instrument on this track", move |cx| {
                 Button::new(cx, |cx| Label::new(cx, "Add Carve"))
                     .class("btn")
@@ -154,28 +167,80 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             .class("is-on")
             .toggle_class("hidden", editing.map(|e| !*e));
 
-        let has_carve = panel.map(|p| *p == Panel::Carve);
+        // "Carve"/"NoInstrument" reflect what's actually showing (`panel`,
+        // which already accounts for `viewing_effect`); the chips
+        // themselves only care whether the track *has* an instrument, so
+        // they still show even while the Compressor is the one on screen.
+        let has_instrument = Memo::new(move |_| {
+            p.selected_track.get().and_then(|id| p.arrangement.get().track(id).map(|t| t.instrument.is_some())).unwrap_or(false)
+        });
         Button::new(cx, |cx| Label::new(cx, "Carve"))
             .class("btn")
-            .toggle_class("is-on", Memo::new(move |_| has_carve.get() && !editing.get()))
-            .toggle_class("hidden", has_carve.map(|c| !*c))
-            .on_press(|cx| cx.emit(PianoRollEvent::Close));
+            .toggle_class("is-on", Memo::new(move |_| panel.get() == Panel::Carve && !editing.get()))
+            .toggle_class("hidden", has_instrument.map(|c| !*c))
+            .on_press(move |cx| {
+                p.viewing_effect.set(false);
+                cx.emit(PianoRollEvent::Close);
+            });
         Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
             .class("btn")
             .class("quiet")
-            .toggle_class("hidden", has_carve.map(|c| !*c))
+            .toggle_class("hidden", has_instrument.map(|c| !*c))
             .on_press(move |cx| {
                 if let Some(track) = p.selected_track.get() {
                     cx.emit(TimelineEvent::SetInstrument { track, instrument: None });
                 }
             });
 
-        let no_instrument = panel.map(|p| matches!(p, Panel::NoInstrument(_)));
+        let no_instrument = Memo::new(move |_| {
+            !has_instrument.get()
+                && p.selected_track
+                    .get()
+                    .and_then(|id| p.arrangement.get().track(id).map(|t| t.kind == TrackKind::Midi))
+                    .unwrap_or(false)
+        });
         Button::new(cx, |cx| Label::new(cx, "+ Carve"))
             .class("btn")
             .class("quiet")
             .toggle_class("hidden", no_instrument.map(|n| !*n))
             .on_press(|cx| cx.emit(SynthEvent::AddCarveToSelected));
+
+        let has_compressor = Memo::new(move |_| {
+            p.selected_track
+                .get()
+                .and_then(|id| p.arrangement.get().track(id).map(|t| t.effects.iter().any(|e| matches!(e, Effect::Compressor(_)))))
+                .unwrap_or(false)
+        });
+        Button::new(cx, |cx| Label::new(cx, "Compressor"))
+            .class("btn")
+            .toggle_class("is-on", Memo::new(move |_| matches!(panel.get(), Panel::Compressor(_))))
+            .toggle_class("hidden", has_compressor.map(|c| !*c))
+            .on_press(move |cx| {
+                p.viewing_effect.set(true);
+                cx.emit(PianoRollEvent::Close);
+            });
+        Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
+            .class("btn")
+            .class("quiet")
+            .toggle_class("hidden", has_compressor.map(|c| !*c))
+            .on_press(move |cx| {
+                if let Some(track) = p.selected_track.get() {
+                    cx.emit(TimelineEvent::RemoveCompressorEffect(track));
+                }
+            });
+        let can_add_compressor = Memo::new(move |_| {
+            p.selected_track.get().is_some_and(|id| !has_compressor.get() && p.arrangement.get().track(id).is_some())
+        });
+        Button::new(cx, |cx| Label::new(cx, "+ Compressor"))
+            .class("btn")
+            .class("quiet")
+            .toggle_class("hidden", can_add_compressor.map(|n| !*n))
+            .on_press(move |cx| {
+                if let Some(track) = p.selected_track.get() {
+                    cx.emit(TimelineEvent::AddCompressorEffect(track));
+                    p.viewing_effect.set(true);
+                }
+            });
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
         Button::new(cx, |cx| Label::new(cx, "Show input"))

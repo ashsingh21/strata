@@ -424,7 +424,15 @@ impl Model for SynthModel {
                     if let Some(patch) = track.and_then(|t| patches.get(&t)) {
                         let mut snapshot = SynthParams::from_state(patch);
                         snapshot.slot = slot as u8;
-                        snapshot.gain_db = track.and_then(|t| arr.track(t)).map(|t| t.gain_db).unwrap_or(0.0);
+                        let owning_track = track.and_then(|t| arr.track(t));
+                        snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
+                        snapshot.compressor = owning_track
+                            .and_then(|t| {
+                                t.effects.iter().find_map(|e| match e {
+                                    shared::arrangement::Effect::Compressor(c) => Some(*c),
+                                })
+                            })
+                            .unwrap_or_else(shared::arrangement::CompressorState::bypass);
                         let _ = self.params_tx.push(snapshot);
                     }
                 }

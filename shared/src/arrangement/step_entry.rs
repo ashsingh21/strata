@@ -79,6 +79,7 @@ mod tests {
             gain_db: 0.0,
             height: 56.0,
             instrument: None,
+        effects: vec![],
         });
         arr
     }

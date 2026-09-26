@@ -6,7 +6,7 @@
 
 use vizia::prelude::*;
 
-use shared::arrangement::{Arrangement, TrackId};
+use shared::arrangement::{Arrangement, Effect, TrackId};
 use shared::synth::{SynthState, PRESETS};
 
 use crate::synth::state::SynthEvent;
@@ -98,6 +98,27 @@ pub fn sidebar(
                     row(cx, template.name.to_string(), query, true)
                         .on_press(move |cx| cx.emit(TimelineEvent::AddDrumPattern(index)));
                 }
+
+                // Insert effects: works on any track kind (an audio track
+                // has effects but no instrument). Lit when the selected
+                // track already has one - clicking again is a no-op, same
+                // as "Carve" above.
+                let selected_has_compressor = Memo::new(move |_| {
+                    selected_track
+                        .get()
+                        .and_then(|id| {
+                            arrangement.get().track(id).map(|t| t.effects.iter().any(|e| matches!(e, Effect::Compressor(_))))
+                        })
+                        .unwrap_or(false)
+                });
+                section_head(cx, "Audio effects", 1);
+                row(cx, "Compressor".to_string(), query, true)
+                    .toggle_class("is-on", selected_has_compressor)
+                    .on_press(move |cx| {
+                        if let Some(track) = selected_track.get() {
+                            cx.emit(TimelineEvent::AddCompressorEffect(track));
+                        }
+                    });
             })
             .width(Stretch(1.0))
             .height(Auto);

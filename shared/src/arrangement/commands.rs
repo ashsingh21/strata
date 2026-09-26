@@ -5,7 +5,7 @@
 
 use super::model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
-    Instrument, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId,
+    Effect, Instrument, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId,
 };
 #[cfg(test)]
 use super::model::DEFAULT_VELOCITY;
@@ -28,6 +28,11 @@ pub enum Command {
     RemoveMidiNote { clip: ClipId, start: Ticks, pitch: u8 },
     /// Sets (or, with `None`, removes) a track's instrument.
     SetInstrument { track: TrackId, instrument: Option<Instrument> },
+    /// Replaces a track's whole effect chain - same "replace the value,
+    /// inverse carries the old one" shape as `SetInstrument`, rather than
+    /// index-based add/remove, since there's only ever one effect type to
+    /// toggle so far.
+    SetTrackEffects { track: TrackId, effects: Vec<Effect> },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -244,6 +249,12 @@ impl Command {
                 Command::SetInstrument { track, instrument: previous }
             }
 
+            Command::SetTrackEffects { track, effects } => {
+                let t = arr.track_mut(track).expect("SetTrackEffects: unknown track");
+                let previous = std::mem::replace(&mut t.effects, effects);
+                Command::SetTrackEffects { track, effects: previous }
+            }
+
             Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity } => {
                 let clip = arr.clip_mut(clip_id).expect("SetNoteVelocity: unknown clip");
                 let ClipContent::Midi { notes } = &mut clip.content else {
@@ -409,6 +420,7 @@ mod tests {
             gain_db: 0.0,
             height: 56.0,
             instrument: None,
+            effects: vec![],
         });
         arr
     }
@@ -598,6 +610,7 @@ mod tests {
             gain_db: 0.0,
             height: 56.0,
             instrument: None,
+            effects: vec![],
         }
     }
 

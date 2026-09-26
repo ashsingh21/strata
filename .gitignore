@@ -1,3 +1,13 @@
 /target
 ui/styles/*.css
 /project.json
+
+# Downloaded sample packs - kept locally for testing, not tracked (large
+# binaries, and not all of them are ours to redistribute from this repo).
+assets/drums/drum_loop_basic_120bpm.wav
+assets/drums/drum_loop_chorus_120bpm.wav
+assets/drums/drum_loop_reverb_120bpm.wav
+assets/drums/kick_80s.wav
+assets/drums/kick_loop.wav
+assets/drums/loop_fairy_130bpm.wav
+assets/drums/snare_classic.wav

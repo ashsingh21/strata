@@ -17,6 +17,7 @@ pub use model::{
     DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent,
     ClipId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
+    Effect, CompressorState,
 };
 pub use peaks::{PeakLevel, PeakPyramid};
 pub use schedule::{notes_in_range, ScheduledNotes};

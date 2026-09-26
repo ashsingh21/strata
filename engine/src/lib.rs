@@ -9,6 +9,7 @@
 //! `shared::playback` for why that's an acceptable trade here.
 
 mod input;
+mod compressor;
 mod dsp;
 mod fx;
 mod synth;
@@ -18,10 +19,11 @@ use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Error as CpalError, FromSample, OutputCallbackInfo, Sample, SampleFormat, SizedSample, StreamConfig};
-use shared::playback::{DecodedSource, PlaybackPlan, DECODED_SOURCE_CAPACITY};
+use shared::playback::{DecodedSource, PlaybackPlan, DECODED_SOURCE_CAPACITY, MAX_BUS_TRACKS};
 use shared::recorder::RecordCommand;
 use shared::synth::{NoteEvent, SynthParams, SynthTelemetry, MAX_INSTRUMENTS};
 use shared::{Params, Position, Telemetry};
+use compressor::Compressor;
 use synth::SynthEngine;
 
 fn db_to_gain(db: f32) -> f32 {
@@ -235,6 +237,14 @@ where
     // until the first `SynthParams` snapshot for that slot arrives, so a
     // freshly added track isn't silent before the UI's first tick.
     let mut slot_gain = [1.0f32; MAX_INSTRUMENTS];
+    // One persistent Compressor per Carve slot - persistent (not rebuilt
+    // per block) because its envelope follower needs continuity across
+    // blocks to sound like a compressor rather than clicking per block.
+    let mut slot_compressor: Vec<Compressor> = (0..MAX_INSTRUMENTS).map(|_| Compressor::new(sample_rate)).collect();
+    // Same, but per audio track (`PlaybackClip::bus_slot`) rather than
+    // per Carve slot - audio clips have no engine "slot" of their own
+    // otherwise.
+    let mut bus_compressor: Vec<Compressor> = (0..MAX_BUS_TRACKS).map(|_| Compressor::new(sample_rate)).collect();
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -254,6 +264,9 @@ where
                     if let Some(gain) = slot_gain.get_mut(next.slot as usize) {
                         *gain = db_to_gain(next.gain_db);
                     }
+                    if let Some(compressor) = slot_compressor.get_mut(next.slot as usize) {
+                        compressor.set_state(next.compressor);
+                    }
                     if let Some(engine) = synth_engines.get_mut(next.slot as usize) {
                         engine.set_params(next);
                     }
@@ -267,6 +280,13 @@ where
                 // Latest-wins: the clip layout only, not any one sample.
                 while let Ok(next) = playback_plan.pop() {
                     current_plan = next;
+                    // Config only - not per-sample - since it only needs
+                    // to catch up whenever the plan itself changes.
+                    for clip in &current_plan.clips {
+                        if let Some(compressor) = bus_compressor.get_mut(clip.bus_slot as usize) {
+                            compressor.set_state(clip.compressor);
+                        }
+                    }
                 }
                 // Ordered: each newly decoded source matters.
                 while let Ok(decoded) = decoded_sources.pop() {
@@ -286,6 +306,8 @@ where
                     sample_rate,
                     &mut synth_engines,
                     &slot_gain,
+                    &mut slot_compressor,
+                    &mut bus_compressor,
                     &mut synth_telemetry,
                     &mut click_phase,
                     &mut click_env,
@@ -312,6 +334,8 @@ fn write_block<T>(
     sample_rate: f32,
     synth_engines: &mut [SynthEngine],
     slot_gain: &[f32],
+    slot_compressor: &mut [Compressor],
+    bus_compressor: &mut [Compressor],
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
     click_phase: &mut f32,
     click_env: &mut f32,
@@ -344,11 +368,17 @@ fn write_block<T>(
 
         let mut synth_l = 0.0f32;
         let mut synth_r = 0.0f32;
-        for ((engine, peak), gain) in synth_engines.iter_mut().zip(synth_peaks.iter_mut()).zip(slot_gain.iter()) {
+        for (i, engine) in synth_engines.iter_mut().enumerate() {
             let (raw_l, raw_r) = engine.process();
-            let (l, r) = (raw_l * gain, raw_r * gain);
+            // Chain order: instrument -> Compressor insert -> track fader,
+            // same as a real device chain (the fader is the last thing
+            // before the master sum, not part of the chain itself).
+            let (comp_l, comp_r) = slot_compressor[i].process(raw_l, raw_r);
+            let gain = slot_gain[i];
+            let (l, r) = (comp_l * gain, comp_r * gain);
             synth_l += l;
             synth_r += r;
+            let peak = &mut synth_peaks[i];
             peak.0 = peak.0.max(l.abs());
             peak.1 = peak.1.max(r.abs());
         }
@@ -371,7 +401,7 @@ fn write_block<T>(
         *click_env *= click_decay_coeff;
 
         let (clip_l, clip_r) = if playing {
-            mix_audio_clips(plan, sources, *sample_counter as i64)
+            mix_audio_clips(plan, sources, *sample_counter as i64, bus_compressor)
         } else {
             (0.0, 0.0)
         };
@@ -419,13 +449,23 @@ fn write_block<T>(
 }
 
 /// Sums every clip in `plan` that's currently sounding at `pos` (samples
-/// since playback started) against its decoded source in `sources`. A
-/// clip whose source hasn't finished decoding yet, or whose source's
-/// sample rate doesn't match the engine's output, is silently skipped -
-/// no resampling in this pass (see `shared::playback`).
-fn mix_audio_clips(plan: &PlaybackPlan, sources: &[DecodedSource], pos: i64) -> (f32, f32) {
-    let mut out_l = 0.0f32;
-    let mut out_r = 0.0f32;
+/// since playback started) against its decoded source in `sources`,
+/// grouped by owning track (`bus_slot`) - so a track's Compressor sees
+/// that track's whole signal, not one clip in isolation - then applies
+/// each track's Compressor and gain before adding it into the master
+/// sum. A clip whose source hasn't finished decoding yet, or whose
+/// source's sample rate doesn't match the engine's output, is silently
+/// skipped - no resampling in this pass (see `shared::playback`).
+fn mix_audio_clips(
+    plan: &PlaybackPlan,
+    sources: &[DecodedSource],
+    pos: i64,
+    bus_compressor: &mut [Compressor],
+) -> (f32, f32) {
+    let mut bus_raw = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
+    let mut bus_gain_db = [0.0f32; MAX_BUS_TRACKS];
+    let mut bus_active = [false; MAX_BUS_TRACKS];
+
     for clip in &plan.clips {
         if pos < clip.start_sample || pos >= clip.start_sample + clip.length_samples {
             continue;
@@ -437,19 +477,33 @@ fn mix_audio_clips(plan: &PlaybackPlan, sources: &[DecodedSource], pos: i64) -> 
         if frame_index < 0 || frame_index >= frame_count {
             continue;
         }
-        let gain = db_to_gain(clip.gain_db);
         let base = (frame_index * channels) as usize;
-        if source.channels <= 1 {
-            let s = source.samples[base] * gain;
-            out_l += s;
-            out_r += s;
+        let (l, r) = if source.channels <= 1 {
+            let s = source.samples[base];
+            (s, s)
         } else {
-            let raw_l = source.samples[base];
-            let l = raw_l * gain;
-            let r = source.samples.get(base + 1).copied().unwrap_or(raw_l) * gain;
-            out_l += l;
-            out_r += r;
+            let l = source.samples[base];
+            let r = source.samples.get(base + 1).copied().unwrap_or(l);
+            (l, r)
+        };
+        let slot = (clip.bus_slot as usize).min(MAX_BUS_TRACKS - 1);
+        bus_raw[slot].0 += l;
+        bus_raw[slot].1 += r;
+        bus_gain_db[slot] = clip.gain_db;
+        bus_active[slot] = true;
+    }
+
+    let mut out_l = 0.0f32;
+    let mut out_r = 0.0f32;
+    for slot in 0..MAX_BUS_TRACKS {
+        if !bus_active[slot] {
+            continue;
         }
+        let (raw_l, raw_r) = bus_raw[slot];
+        let (comp_l, comp_r) = bus_compressor[slot].process(raw_l, raw_r);
+        let gain = db_to_gain(bus_gain_db[slot]);
+        out_l += comp_l * gain;
+        out_r += comp_r * gain;
     }
     (out_l, out_r)
 }

@@ -1,6 +1,7 @@
 mod app;
 mod bpm_field;
 mod canvas_text;
+mod compressor_panel;
 mod context_menu;
 mod device_area;
 mod fader;
@@ -93,6 +94,12 @@ fn main() -> Result<(), ApplicationError> {
         // The selected track: which instrument the panel shows, and where
         // pasted clips land. Shared by the synth and timeline models.
         let selected_track: Signal<Option<shared::arrangement::TrackId>> = Signal::new(None);
+        // Which of the selected track's devices the lower panel shows -
+        // Carve/empty by default; toggled to the Compressor by its own
+        // chip. Not reset when the selection changes: if the newly
+        // selected track has no Compressor, `device_area`'s own Panel
+        // computation falls back to its instrument/empty state anyway.
+        let viewing_effect: Signal<bool> = Signal::new(false);
         let mut timeline_state =
             TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected, selected_track);
         let tl_arrangement = timeline_state.arrangement;
@@ -379,6 +386,7 @@ fn main() -> Result<(), ApplicationError> {
                                 theme,
                                 arrangement: tl_arrangement,
                                 selected_track,
+                                viewing_effect,
                                 synth_state,
                                 lfo_phases: synth_lfo_phases,
                                 octave_shift: synth_octave_shift,

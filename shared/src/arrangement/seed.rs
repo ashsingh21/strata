@@ -39,6 +39,7 @@ pub fn seed_arrangement() -> Arrangement {
         gain_db: -3.0,
         height: DEFAULT_TRACK_HEIGHT,
         instrument: None,
+        effects: vec![],
     });
     arr.tracks.push(Track {
         id: bass,
@@ -51,6 +52,7 @@ pub fn seed_arrangement() -> Arrangement {
         gain_db: -6.0,
         height: DEFAULT_TRACK_HEIGHT,
         instrument: Some(Instrument::Carve),
+        effects: vec![],
     });
     arr.tracks.push(Track {
         id: lead,
@@ -63,6 +65,7 @@ pub fn seed_arrangement() -> Arrangement {
         gain_db: -1.5,
         height: DEFAULT_TRACK_HEIGHT,
         instrument: None,
+        effects: vec![],
     });
     arr.tracks.push(Track {
         id: pad,
@@ -75,6 +78,7 @@ pub fn seed_arrangement() -> Arrangement {
         gain_db: -9.0,
         height: DEFAULT_TRACK_HEIGHT,
         instrument: Some(Instrument::Carve),
+        effects: vec![],
     });
 
     // -- Drums: one continuous take, sliced into three clips. ---------
