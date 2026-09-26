@@ -530,7 +530,11 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     );
     rule(".btn:hover", vec![("background-color", c("bg-300"))]);
     rule(".menu-item:hover", vec![("background-color", c("bg-300"))]);
-    rule(".menu-sep", vec![("background-color", c("line"))]);
+    // `line` (the faint hairline .panel uses against its own bg-100) is
+    // nearly invisible on the menu's bg-200: line-control (ink-faint) is
+    // the same edge every button and readout already uses, and actually
+    // reads as a deliberate divider instead of a stray gap.
+    rule(".menu-sep", vec![("background-color", c("line-control"))]);
     rule(".btn.quiet", vec![("background-color", "transparent".to_string()), ("color", c("ink-muted"))]);
     rule(".btn.quiet:hover", vec![("background-color", c("bg-300")), ("color", c("ink"))]);
     // State buttons fill with their state's colour...
