@@ -51,6 +51,7 @@ pub fn timeline_view(
     tool: Signal<TimelineTool>,
     selected_track: Signal<Option<shared::arrangement::TrackId>>,
     loop_on: Signal<bool>,
+    renaming_marker: Signal<Option<shared::arrangement::MarkerId>>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -142,28 +143,56 @@ pub fn timeline_view(
         .width(Pixels(HEAD_WIDTH))
         .height(Stretch(1.0));
 
-        VStack::new(cx, move |cx| {
-            Ruler::new(cx, arrangement, transform, playhead, theme, loop_on)
-                .height(Pixels(tokens::SIZE_RULER))
+        ZStack::new(cx, move |cx| {
+            VStack::new(cx, move |cx| {
+                Ruler::new(cx, arrangement, transform, playhead, theme, loop_on)
+                    .height(Pixels(tokens::SIZE_RULER))
+                    .width(Stretch(1.0));
+
+                // PlayheadOverlay stacked on LaneArea rather than drawn as
+                // part of it, so moving the playhead during playback doesn't
+                // force a full redraw of every clip/waveform/grid line every
+                // frame - see PlayheadOverlay's own doc comment.
+                ZStack::new(cx, move |cx| {
+                    LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview, live_peaks, tool)
+                        .position_type(PositionType::Absolute)
+                        .height(Stretch(1.0))
+                        .width(Stretch(1.0));
+
+                    PlayheadOverlay::new(cx, transform, playhead, theme)
+                        .position_type(PositionType::Absolute)
+                        .height(Stretch(1.0))
+                        .width(Stretch(1.0));
+                })
+                .height(Stretch(1.0))
                 .width(Stretch(1.0));
-
-            // PlayheadOverlay stacked on LaneArea rather than drawn as
-            // part of it, so moving the playhead during playback doesn't
-            // force a full redraw of every clip/waveform/grid line every
-            // frame - see PlayheadOverlay's own doc comment.
-            ZStack::new(cx, move |cx| {
-                LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview, live_peaks, tool)
-                    .position_type(PositionType::Absolute)
-                    .height(Stretch(1.0))
-                    .width(Stretch(1.0));
-
-                PlayheadOverlay::new(cx, transform, playhead, theme)
-                    .position_type(PositionType::Absolute)
-                    .height(Stretch(1.0))
-                    .width(Stretch(1.0));
             })
-            .height(Stretch(1.0))
-            .width(Stretch(1.0));
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
+
+            // The marker rename textbox: a real widget positioned over the
+            // marker's own tab (drawn on the ruler's canvas, which can't
+            // host a widget itself), rather than a second way to edit its
+            // name. A sibling of the whole ruler+lanes stack (not nested
+            // with the ruler itself) so the ruler's own layout, and its
+            // mouse hit-testing, is untouched by this being here at all.
+            Binding::new(cx, renaming_marker, move |cx| {
+                let Some(marker_id) = renaming_marker.get() else { return };
+                let arr = arrangement.get();
+                let Some(marker) = arr.markers.iter().find(|m| m.id == marker_id) else { return };
+                let x = transform.get().tick_to_x(marker.position) as f32;
+                let draft: Signal<String> = Signal::new(marker.name.clone());
+                Textbox::new(cx, draft)
+                    .font_size(11.0)
+                    .on_edit(move |_cx, text| draft.set(text))
+                    .on_submit(move |cx, text, _from_key| cx.emit(TimelineEvent::CommitRenameMarker(marker_id, text)))
+                    .on_cancel(move |cx| cx.emit(TimelineEvent::CancelRenameMarker))
+                    .position_type(PositionType::Absolute)
+                    .left(Pixels(x))
+                    .top(Pixels(2.0))
+                    .width(Pixels(100.0))
+                    .height(Pixels(18.0));
+            });
         })
         .width(Stretch(1.0))
         .height(Stretch(1.0));

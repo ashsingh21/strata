@@ -7,7 +7,7 @@ use vizia::vg;
 
 use shared::arrangement::{snap, Arrangement, LoopRange, Ticks, TimeSignature, ViewTransform};
 
-use crate::timeline::state::TimelineEvent;
+use crate::timeline::state::{ContextMenu, ContextMenuTarget, TimelineEvent};
 use crate::tokens::ThemeId;
 
 const LOOP_BAR_HEIGHT: f32 = 5.0;
@@ -88,6 +88,29 @@ impl View for Ruler {
                     cx.emit(TimelineEvent::ScrubPlayhead(tick.max(0)));
                 }
                 cx.capture();
+            }
+
+            WindowEvent::MouseDown(button) if *button == MouseButton::Right => {
+                let bounds = cx.bounds();
+                let x = cx.mouse().cursor_x as f64 - bounds.x as f64;
+                let transform = self.transform.get();
+                let arr = self.arrangement.get();
+
+                let hit = arr.markers.iter().find(|m| {
+                    let mx = transform.tick_to_x(m.position);
+                    let width = (8.0 + m.name.len() as f32 * 6.0) as f64;
+                    x >= mx && x <= mx + width
+                });
+
+                let target = match hit {
+                    Some(marker) => ContextMenuTarget::Marker { marker: marker.id },
+                    None => ContextMenuTarget::Ruler { tick: transform.x_to_tick(x).max(0) },
+                };
+                cx.emit(TimelineEvent::OpenContextMenu(ContextMenu {
+                    target,
+                    x: cx.mouse().cursor_x,
+                    y: cx.mouse().cursor_y,
+                }));
             }
 
             WindowEvent::MouseMove(x, _) => {

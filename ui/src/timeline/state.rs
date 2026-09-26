@@ -11,8 +11,8 @@ use vizia::prelude::*;
 use shared::arrangement::{
     Instrument,
     empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
-    ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, MidiNote, PeakPyramid,
-    SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
+    ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, Marker, MarkerId, MidiNote,
+    PeakPyramid, SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
 };
 
 /// The lane area's viewport width isn't known to the model (Vizia only
@@ -71,6 +71,8 @@ pub struct TimelineState {
     pub drums_menu_open: Signal<bool>,
     /// The open right-click menu, if any.
     pub context_menu: Signal<Option<ContextMenu>>,
+    /// The marker currently showing an inline rename textbox, if any.
+    pub renaming_marker: Signal<Option<MarkerId>>,
     /// Whether Copy/Cut has put anything aside - so a context menu on
     /// empty space knows whether to offer Paste.
     pub clipboard_nonempty: Signal<bool>,
@@ -127,6 +129,11 @@ pub enum ContextMenuTarget {
     Track(TrackId),
     /// Empty track space: `tick` is where the click landed, for "Paste".
     Lane { track: TrackId, tick: Ticks },
+    /// Empty ruler space: `tick` is where the click landed, for "Add
+    /// marker here".
+    Ruler { tick: Ticks },
+    /// An existing marker's own tab.
+    Marker { marker: MarkerId },
 }
 
 /// A right-click context menu: what it's for, and where to draw it
@@ -185,6 +192,7 @@ impl TimelineState {
             playhead_ticks: Signal::new(0),
             drums_menu_open: Signal::new(false),
             context_menu: Signal::new(None),
+            renaming_marker: Signal::new(None),
             clipboard_nonempty: Signal::new(false),
             viewport: (ASSUMED_LANE_WIDTH, 400.0),
             command_stack: CommandStack::new(),
@@ -419,6 +427,14 @@ pub enum TimelineEvent {
     /// A right-click: opens the menu for that target at that position.
     OpenContextMenu(ContextMenu),
     CloseContextMenu,
+    /// A structural marker, added at `tick` with a default name.
+    AddMarker(Ticks),
+    DeleteMarker(MarkerId),
+    /// Opens the marker's inline rename textbox.
+    BeginRenameMarker(MarkerId),
+    /// Commits the rename textbox's current text.
+    CommitRenameMarker(MarkerId, String),
+    CancelRenameMarker,
     /// A velocity-lane drag ended: one undoable edit, not one per pixel.
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
 
@@ -718,6 +734,32 @@ impl Model for TimelineState {
             }
             TimelineEvent::CloseContextMenu => {
                 self.context_menu.set(None);
+            }
+            TimelineEvent::AddMarker(tick) => {
+                let name = format!("Marker {}", self.arrangement.get().markers.len() + 1);
+                self.with_arrangement(|arr, stack| {
+                    let id = arr.alloc_id();
+                    stack.do_command(Command::InsertMarker { marker: Marker { id, position: *tick, name } }, arr);
+                });
+            }
+            TimelineEvent::DeleteMarker(marker) => {
+                self.do_command(Command::RemoveMarker { marker: *marker });
+                if self.renaming_marker.get() == Some(*marker) {
+                    self.renaming_marker.set(None);
+                }
+            }
+            TimelineEvent::BeginRenameMarker(marker) => {
+                self.renaming_marker.set(Some(*marker));
+            }
+            TimelineEvent::CommitRenameMarker(marker, name) => {
+                let name = name.trim();
+                if !name.is_empty() {
+                    self.do_command(Command::RenameMarker { marker: *marker, name: name.to_string() });
+                }
+                self.renaming_marker.set(None);
+            }
+            TimelineEvent::CancelRenameMarker => {
+                self.renaming_marker.set(None);
             }
             TimelineEvent::SetNoteVelocity { clip, start, pitch, velocity } => {
                 self.do_command(Command::SetNoteVelocity { clip: *clip, start: *start, pitch: *pitch, velocity: *velocity });

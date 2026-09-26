@@ -118,6 +118,14 @@ pub fn context_menu_view(
                     cx.emit(TimelineEvent::Paste);
                 });
             }
+            ContextMenuTarget::Ruler { tick } => {
+                item(cx, "Add marker here", move |cx| cx.emit(TimelineEvent::AddMarker(tick)));
+            }
+            ContextMenuTarget::Marker { marker } => {
+                item(cx, "Rename...", move |cx| cx.emit(TimelineEvent::BeginRenameMarker(marker)));
+                separator(cx);
+                item(cx, "Delete", move |cx| cx.emit(TimelineEvent::DeleteMarker(marker)));
+            }
         })
         .class("panel")
         .class("context-menu")

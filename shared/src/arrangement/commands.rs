@@ -5,7 +5,7 @@
 
 use super::model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
-    Instrument, LoopRange, MidiNote, Track, TrackId,
+    Instrument, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId,
 };
 #[cfg(test)]
 use super::model::DEFAULT_VELOCITY;
@@ -34,6 +34,9 @@ pub enum Command {
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
     SetLoopRange { range: Option<LoopRange> },
+    InsertMarker { marker: Marker },
+    RemoveMarker { marker: MarkerId },
+    RenameMarker { marker: MarkerId, name: String },
     /// Inserts `track` at `index` in the track list, along with any
     /// `clips`/`automation` it should already own - used both for a
     /// fresh "add track" (both empty) and as `DeleteTrack`'s inverse
@@ -290,6 +293,24 @@ impl Command {
                 let old = arr.loop_range;
                 arr.loop_range = range;
                 Command::SetLoopRange { range: old }
+            }
+
+            Command::InsertMarker { marker } => {
+                let id = marker.id;
+                arr.markers.push(marker);
+                Command::RemoveMarker { marker: id }
+            }
+
+            Command::RemoveMarker { marker: marker_id } => {
+                let index = arr.markers.iter().position(|m| m.id == marker_id).expect("RemoveMarker: unknown marker");
+                let removed = arr.markers.remove(index);
+                Command::InsertMarker { marker: removed }
+            }
+
+            Command::RenameMarker { marker: marker_id, name } => {
+                let marker = arr.markers.iter_mut().find(|m| m.id == marker_id).expect("RenameMarker: unknown marker");
+                let old_name = std::mem::replace(&mut marker.name, name);
+                Command::RenameMarker { marker: marker_id, name: old_name }
             }
 
             Command::SetTempo { bpm } => {
