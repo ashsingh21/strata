@@ -16,7 +16,7 @@ pub struct FxCables {
     arrangement: Signal<Arrangement>,
     track: Option<TrackId>,
     theme: Signal<ThemeId>,
-    selected: Signal<Option<EffectNodeId>>,
+    selected: Memo<Option<EffectNodeId>>,
     drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
     wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>,
 }
@@ -27,7 +27,7 @@ impl FxCables {
         arrangement: Signal<Arrangement>,
         track: Option<TrackId>,
         theme: Signal<ThemeId>,
-        selected: Signal<Option<EffectNodeId>>,
+        selected: Memo<Option<EffectNodeId>>,
         drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
         wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>,
     ) -> Handle<'_, Self> {

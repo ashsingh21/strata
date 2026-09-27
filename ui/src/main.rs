@@ -137,6 +137,7 @@ fn main() -> Result<(), ApplicationError> {
         let tl_context_menu = timeline_state.context_menu;
         let tl_clipboard_nonempty = timeline_state.clipboard_nonempty;
         let tl_missing_sources = timeline_state.missing_sources;
+        let tl_fx_selected = timeline_state.fx_selected;
         let tl_renaming_marker = timeline_state.renaming_marker;
         let tl_renaming_track = timeline_state.renaming_track;
 
@@ -449,10 +450,19 @@ fn main() -> Result<(), ApplicationError> {
                     // its device; the device fills it rather than floating.
                     VStack::new(cx, move |cx| {
                         Binding::new(cx, board_open_track, move |cx| {
+                            // A selection from a previous board (or none
+                            // open) must never be what Delete removes.
+                            tl_fx_selected.set(None);
                             if let Some(track) = board_open_track.get() {
                                 fx_board::fx_board(
                                     cx,
-                                    fx_board::FxBoardProps { theme, arrangement: tl_arrangement, track, board_open_track },
+                                    fx_board::FxBoardProps {
+                                        theme,
+                                        arrangement: tl_arrangement,
+                                        track,
+                                        board_open_track,
+                                        selected: tl_fx_selected,
+                                    },
                                 );
                                 return;
                             }
@@ -501,6 +511,13 @@ fn main() -> Result<(), ApplicationError> {
             timeline::drums_menu_view(cx, tl_drums_menu_open);
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);
             transport::header_menu_backdrop(cx, header_menus);
+            // Selecting clips drops the Effects Board's node selection, so
+            // Delete removes what was picked last (see TimelineState::fx_selected).
+            Binding::new(cx, tl_selection, move |_cx| {
+                if !tl_selection.get().clips.is_empty() {
+                    tl_fx_selected.set(None);
+                }
+            });
 
         })
         .class("app")

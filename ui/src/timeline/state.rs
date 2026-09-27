@@ -89,6 +89,12 @@ pub struct TimelineState {
     /// Audio sources that failed to load (missing or unreadable file) -
     /// their clips say so instead of waiting forever on a waveform.
     pub missing_sources: Signal<HashSet<Arc<str>>>,
+    /// The Effects Board's selected node (board scope, node), if any - here
+    /// rather than local to the board so Delete/Backspace (DeleteSelected)
+    /// can remove it. Mutually exclusive with a clip selection (main.rs
+    /// clears it when clips get selected, the board clears clips when a
+    /// node does), and reset whenever the board opens/closes/switches.
+    pub fx_selected: Signal<Option<(Option<TrackId>, EffectNodeId)>>,
     /// The lane area's on-screen size in px, reported by `LaneArea`: what
     /// scrolling is clamped against, and what Follow keeps the playhead in.
     viewport: (f64, f64),
@@ -215,6 +221,7 @@ impl TimelineState {
             renaming_track: Signal::new(None),
             clipboard_nonempty: Signal::new(false),
             missing_sources: Signal::new(HashSet::new()),
+            fx_selected: Signal::new(None),
             viewport: (ASSUMED_LANE_WIDTH, 400.0),
             command_stack: CommandStack::new(),
             record_armed,
@@ -576,6 +583,9 @@ impl Model for TimelineState {
                         .collect();
                     self.do_command(Command::Batch(commands));
                     cx.emit(crate::piano_roll::state::PianoRollEvent::ClearSelection);
+                } else if let Some((track, node)) = self.fx_selected.get() {
+                    self.do_command(Command::RemoveEffectNode { track, node });
+                    self.fx_selected.set(None);
                 } else {
                     let selection = self.selection.get();
                     if !selection.clips.is_empty() {

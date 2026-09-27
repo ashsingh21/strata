@@ -35,6 +35,9 @@ pub struct FxBoardProps {
     /// device area. `Some(None)` is the master board open; `None` is
     /// no board open at all.
     pub board_open_track: Signal<Option<Option<TrackId>>>,
+    /// The board's selected node - owned by `TimelineState` so Delete can
+    /// remove it (see `TimelineState::fx_selected`).
+    pub selected: Signal<Option<(Option<TrackId>, EffectNodeId)>>,
 }
 
 /// One palette row: `bg-400` while its own effect is the one currently
@@ -118,7 +121,7 @@ fn output_port(cx: &mut Context, p: FxBoardProps, node: EffectNodeId, x: f32, y:
 }
 
 pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
-    let selected: Signal<Option<EffectNodeId>> = Signal::new(None);
+    let selected = p.selected.map(|s| s.map(|(_, node)| node));
     // Live drag preview: (node, x, y) while a node's being dragged, so
     // the node box and its cables can redraw without committing to the
     // model (and thus without an undo step) until the drag releases.
@@ -295,7 +298,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                     .class("quiet")
                                     .on_press(move |cx| {
                                         if selected.get() == Some(node.id) {
-                                            selected.set(None);
+                                            p.selected.set(None);
                                         }
                                         cx.emit(TimelineEvent::RemoveEffectNodeFromBoard(p.track, node.id));
                                     });
@@ -340,7 +343,10 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                         .cursor(CursorIcon::Hand)
                         .on_mouse_down(move |cx, button| {
                             if button == MouseButton::Left {
-                                selected.set(Some(node.id));
+                                p.selected.set(Some((p.track, node.id)));
+                                // One selection at a time, so Delete acts
+                                // on the node, not clips picked earlier.
+                                cx.emit(TimelineEvent::ClearSelection);
                                 cx.capture();
                                 drag_anchor.set(Some((
                                     node.id,
