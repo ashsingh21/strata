@@ -97,14 +97,18 @@ impl AppData {
         engine: EngineHandle,
     ) -> Self {
         Self {
-            theme: Signal::new(ThemeId::Studio),
+            // Remembered across launches (settings.json).
+            theme: Signal::new(match crate::settings::load_daylight() {
+                Some(true) => ThemeId::Daylight,
+                _ => ThemeId::Studio,
+            }),
             playing: Signal::new(false),
             loop_on: Signal::new(false),
             record_armed: Signal::new(false),
             click_on: Signal::new(false),
             position: Signal::new(Position::default()),
             sample_counter: Signal::new(0),
-            sidebar_open: Signal::new(true),
+            sidebar_open: Signal::new(crate::settings::load_sidebar_open().unwrap_or(true)),
             cpu_load: Signal::new(0.0),
             block_frames: Signal::new(0),
             sample_rate: engine.sample_rate,
@@ -135,8 +139,12 @@ impl Model for AppData {
         event.map(|app_event, _| match app_event {
             AppEvent::ToggleTheme => {
                 self.theme.update(|t| *t = t.toggled());
+                crate::settings::save_daylight(self.theme.get().is_daylight());
             }
-            AppEvent::ToggleSidebar => self.sidebar_open.update(|o| *o = !*o),
+            AppEvent::ToggleSidebar => {
+                self.sidebar_open.update(|o| *o = !*o);
+                crate::settings::save_sidebar_open(self.sidebar_open.get());
+            }
             AppEvent::TogglePlay => {
                 let now_playing = !self.playing.get();
                 self.playing.set(now_playing);
