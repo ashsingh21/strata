@@ -457,7 +457,7 @@ pub enum TimelineEvent {
     RemoveEffectNodeFromBoard(TrackId, EffectNodeId),
     /// Appends a new effect node of the given kind - the FxBoard's own
     /// add (from the palette or the empty-canvas search popover).
-    AddEffectNodeToBoard(TrackId, Effect),
+    AddEffectNodeToBoard(TrackId, Effect, Option<(f32, f32)>),
     SetEffectNodePosition(TrackId, EffectNodeId, (f32, f32)),
     /// Drag on a track header's resize handle: absolute new height in px
     /// (clamped by the handler), not undoable - a view preference, like
@@ -831,6 +831,7 @@ impl Model for TimelineState {
                         self.do_command(Command::AddEffectNode {
                             track: *track,
                             effect: Effect::Compressor(CompressorState::default()),
+                            position: None,
                         });
                     }
                 }
@@ -856,7 +857,11 @@ impl Model for TimelineState {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
                     if !t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Eq(_))) {
-                        self.do_command(Command::AddEffectNode { track: *track, effect: Effect::Eq(EqState::default()) });
+                        self.do_command(Command::AddEffectNode {
+                            track: *track,
+                            effect: Effect::Eq(EqState::default()),
+                            position: None,
+                        });
                     }
                 }
             }
@@ -900,8 +905,8 @@ impl Model for TimelineState {
             TimelineEvent::RemoveEffectNodeFromBoard(track, node) => {
                 self.do_command(Command::RemoveEffectNode { track: *track, node: *node });
             }
-            TimelineEvent::AddEffectNodeToBoard(track, effect) => {
-                self.do_command(Command::AddEffectNode { track: *track, effect: *effect });
+            TimelineEvent::AddEffectNodeToBoard(track, effect, position) => {
+                self.do_command(Command::AddEffectNode { track: *track, effect: *effect, position: *position });
             }
             TimelineEvent::SetEffectNodePosition(track, node, position) => {
                 self.do_command(Command::SetEffectNodePosition { track: *track, node: *node, position: *position });

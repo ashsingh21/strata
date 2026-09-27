@@ -155,6 +155,28 @@ impl View for FxCables {
     }
 }
 
+/// One palette row: `bg-400` while its own effect is the one currently
+/// being dragged (per the FxBoard spec); press-drag-release adds it.
+fn palette_row(cx: &mut Context, label: &'static str, effect: Effect, p: FxBoardProps, palette_drag: Signal<Option<Effect>>) {
+    Label::new(cx, label)
+        .class("side-row")
+        .toggle_class("is-on", palette_drag.map(move |d| *d == Some(effect)))
+        .cursor(CursorIcon::Hand)
+        .on_mouse_down(move |cx, button| {
+            if button == MouseButton::Left {
+                palette_drag.set(Some(effect));
+                cx.capture();
+            }
+        })
+        .on_mouse_up(move |cx, button| {
+            if button == MouseButton::Left && palette_drag.get() == Some(effect) {
+                cx.release();
+                palette_drag.set(None);
+                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect, None));
+            }
+        });
+}
+
 pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
     let selected: Signal<Option<EffectNodeId>> = Signal::new(None);
     // Live drag preview: (node, x, y) while a node's being dragged, so
@@ -204,14 +226,20 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
         .height(Pixels(tokens::SIZE_TOOLBAR));
 
         // Body: palette | canvas | inspector.
+        // Which effect (if any) is being dragged from the palette right
+        // now - drives the dragged row's bg-400 highlight, and on
+        // release (wherever the cursor ends up) adds it to the chain.
+        // Drop-point placement isn't tracked yet (it lands via the same
+        // auto-layout push_at_end position "+Effect" already uses) -
+        // the gesture itself is what this phase proves.
+        let palette_drag: Signal<Option<Effect>> = Signal::new(None);
         HStack::new(cx, move |cx| {
-            // Palette (static list - dragging is Phase 8).
             VStack::new(cx, move |cx| {
                 Textbox::new(cx, Signal::new(String::new())).class("search").width(Stretch(1.0));
                 Label::new(cx, "Dynamics").class("side-head");
-                Label::new(cx, "Compressor").class("side-row");
+                palette_row(cx, "Compressor", Effect::Compressor(shared::arrangement::CompressorState::default()), p, palette_drag);
                 Label::new(cx, "EQ and filter").class("side-head");
-                Label::new(cx, "EQ").class("side-row");
+                palette_row(cx, "EQ", Effect::Eq(shared::arrangement::EqState::default()), p, palette_drag);
             })
             .class("panel")
             .gap(Pixels(tokens::SPACE_1))
@@ -379,7 +407,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             ("EQ", Effect::Eq(shared::arrangement::EqState::default())),
                         ] {
                             Label::new(cx, label).class("menu-item").class("body").on_press(move |cx| {
-                                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect));
+                                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect, Some((x, y))));
                                 search_popover.set(None);
                             });
                         }

@@ -29,7 +29,11 @@ pub enum Command {
     /// Sets (or, with `None`, removes) a track's instrument.
     SetInstrument { track: TrackId, instrument: Option<Instrument> },
     /// Appends a new effect node at the end of a track's chain.
-    AddEffectNode { track: TrackId, effect: Effect },
+    /// `position`, when given, overrides the auto-layout position
+    /// `EffectGraph::push_at_end` would otherwise pick - used when the
+    /// node's coming from an explicit drop point (dragged from the
+    /// palette), not a generic "+Effect" add.
+    AddEffectNode { track: TrackId, effect: Effect, position: Option<(f32, f32)> },
     /// Removes an effect node, reconnecting its neighbours - inverse
     /// carries the exact removed node and its two edges so undo restores
     /// precisely where it was, not just "a node with this effect".
@@ -263,9 +267,12 @@ impl Command {
                 Command::SetInstrument { track, instrument: previous }
             }
 
-            Command::AddEffectNode { track, effect } => {
+            Command::AddEffectNode { track, effect, position } => {
                 let t = arr.track_mut(track).expect("AddEffectNode: unknown track");
                 let node = t.fx.push_at_end(effect);
+                if let Some(pos) = position {
+                    t.fx.set_position(node, pos);
+                }
                 Command::RemoveEffectNode { track, node }
             }
 
