@@ -8,7 +8,7 @@
 //! clip layout actually changed) drops the previous one's `Vec`. See
 //! `shared::playback` for why that's an acceptable trade here.
 
-mod input;
+pub mod input;
 mod compressor;
 mod dsp;
 mod fx;
@@ -85,7 +85,10 @@ impl std::error::Error for EngineError {}
 /// post-mix peak level back to the UI. `playback_plan`/`decoded_sources`
 /// feed the arrangement's audio clips into the mix - see
 /// `shared::playback`. `record_commands`/`input_telemetry` drive guitar/
-/// mic recording - see `shared::recorder` and `input`.
+/// mic recording - see `shared::recorder` and `input`. `preferred_input_device`
+/// names a specific input device (see `input::available_input_devices`) to
+/// open instead of the OS default; `None` (or a name that no longer
+/// matches anything) falls back to it.
 #[allow(clippy::too_many_arguments)]
 pub fn start(
     params: Arc<Params>,
@@ -98,6 +101,7 @@ pub fn start(
     record_commands: rtrb::Consumer<RecordCommand>,
     input_telemetry: rtrb::Producer<shared::recorder::InputTelemetry>,
     record_params: Arc<shared::recorder::RecordParams>,
+    preferred_input_device: Option<&str>,
 ) -> Result<EngineHandle, EngineError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or(EngineError::NoOutputDevice)?;
@@ -146,7 +150,7 @@ pub fn start(
     stream.play()?;
 
     let (capture_tx, capture_rx) = rtrb::RingBuffer::<f32>::new(CAPTURE_CAPACITY);
-    let input_stream = match input::start(sample_rate, capture_tx, input_telemetry, record_params) {
+    let input_stream = match input::start(sample_rate, preferred_input_device, capture_tx, input_telemetry, record_params) {
         Some((stream, input_sample_rate)) => {
             spawn_writer_thread(capture_rx, record_commands, input_sample_rate);
             Some(stream)

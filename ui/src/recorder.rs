@@ -48,6 +48,17 @@ pub struct RecorderModel {
     /// live envelope instead of sitting flat until the take is decoded.
     /// Empty whenever nothing's being recorded.
     pub live_peaks: Signal<Arc<[f32]>>,
+    /// The saved input device name (`settings::load_input_device`), or
+    /// `None` for the OS default - read once at startup. Changing it
+    /// only updates the save file (`settings::save_input_device`); the
+    /// engine already opened its input stream by the time this model
+    /// exists, so it takes effect on the next launch, not immediately -
+    /// see `input_device_menu` for where that's shown to the user.
+    pub selected_input_device: Signal<Option<Arc<str>>>,
+    /// Every input device the host can currently see, for the picker -
+    /// captured once at startup (device lists don't change often enough
+    /// to justify re-enumerating every frame).
+    pub available_input_devices: Signal<Arc<[Arc<str>]>>,
     record_params: Arc<RecordParams>,
 }
 
@@ -57,6 +68,8 @@ pub enum RecorderModelEvent {
     SetInputLevel(f32),
     SetInputGain(f32),
     SetLivePeaks(Arc<[f32]>),
+    /// `None` reverts to "whatever the OS calls default".
+    SetInputDevice(Option<Arc<str>>),
 }
 
 impl RecorderModel {
@@ -66,6 +79,10 @@ impl RecorderModel {
             input_level: Signal::new(0.0),
             input_gain_pos: Signal::new(0.5),
             live_peaks: Signal::new(Arc::from([])),
+            selected_input_device: Signal::new(crate::settings::load_input_device().map(Into::into)),
+            available_input_devices: Signal::new(
+                engine::input::available_input_devices().into_iter().map(Arc::<str>::from).collect(),
+            ),
             record_params,
         }
     }
@@ -81,6 +98,10 @@ impl Model for RecorderModel {
                 self.record_params.set_input_gain_db(input_gain_pos_to_db(*pos));
             }
             RecorderModelEvent::SetLivePeaks(peaks) => self.live_peaks.set(peaks.clone()),
+            RecorderModelEvent::SetInputDevice(device) => {
+                crate::settings::save_input_device(device.as_deref());
+                self.selected_input_device.set(device.clone());
+            }
         });
     }
 }

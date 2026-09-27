@@ -15,6 +15,7 @@ mod piano_roll;
 mod pill;
 mod project;
 mod recorder;
+mod settings;
 mod sidebar;
 mod status;
 mod synth;
@@ -41,6 +42,7 @@ fn main() -> Result<(), ApplicationError> {
     let playback_bridge = shared::playback::playback_bridge();
     let recorder_bridge = shared::recorder::recorder_bridge();
     let record_params = std::sync::Arc::new(shared::recorder::RecordParams::new());
+    let preferred_input_device = settings::load_input_device();
     let engine_handle = engine::start(
         params.clone(),
         telemetry_tx,
@@ -52,6 +54,7 @@ fn main() -> Result<(), ApplicationError> {
         recorder_bridge.command_rx,
         recorder_bridge.telemetry_tx,
         record_params.clone(),
+        preferred_input_device.as_deref(),
     )
     .expect("failed to start audio engine");
     let engine_sample_rate = engine_handle.sample_rate;
@@ -148,6 +151,8 @@ fn main() -> Result<(), ApplicationError> {
         let input_level = recorder_model.input_level;
         let input_gain_pos = recorder_model.input_gain_pos;
         let live_peaks = recorder_model.live_peaks;
+        let selected_input_device = recorder_model.selected_input_device;
+        let available_input_devices = recorder_model.available_input_devices;
         recorder_model.build(cx);
 
         let synth_model = SynthModel::new(
@@ -339,6 +344,8 @@ fn main() -> Result<(), ApplicationError> {
                     scale_mask: interval_scale_mask,
                     input_level,
                     input_gain_pos,
+                    selected_input_device,
+                    available_input_devices,
                     cpu_load,
                     output_db,
                     arrangement: tl_arrangement,

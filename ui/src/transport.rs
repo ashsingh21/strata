@@ -41,6 +41,10 @@ pub struct HeaderProps {
     pub scale_mask: Signal<u16>,
     pub input_level: Signal<f32>,
     pub input_gain_pos: Signal<f32>,
+    /// The saved input device (`None` = OS default) and every device the
+    /// host can currently see - see `recorder::RecorderModel`.
+    pub selected_input_device: Signal<Option<std::sync::Arc<str>>>,
+    pub available_input_devices: Signal<std::sync::Arc<[std::sync::Arc<str>]>>,
     pub cpu_load: Signal<f32>,
     pub output_db: Signal<f32>,
     pub arrangement: Signal<Arrangement>,
@@ -80,6 +84,36 @@ fn file_menu_item(
     .height(Pixels(28.0));
 }
 
+/// One row of the input-device menu - same shape as `file_menu_item`,
+/// but the label is a runtime device name (not `&'static str`) and each
+/// row lights up when it's the current selection. `device` is `None`
+/// for the "Default" row, `Some(name)` for a specific device - both
+/// just replace `RecorderModel::selected_input_device` wholesale.
+fn input_device_menu_item(
+    cx: &mut Context,
+    label: &str,
+    device: Option<std::sync::Arc<str>>,
+    selected: Signal<Option<std::sync::Arc<str>>>,
+    menu_open: Signal<bool>,
+) {
+    let label = label.to_string();
+    let device_for_check = device.clone();
+    let is_selected = Memo::new(move |_| selected.get() == device_for_check);
+    HStack::new(cx, move |cx| {
+        Label::new(cx, label.clone()).class("body");
+    })
+    .class("menu-item")
+    .toggle_class("is-on", is_selected)
+    .on_press(move |cx| {
+        cx.emit(RecorderModelEvent::SetInputDevice(device.clone()));
+        menu_open.set(false);
+    })
+    .cursor(CursorIcon::Hand)
+    .alignment(Alignment::Left)
+    .width(Stretch(1.0))
+    .height(Pixels(28.0));
+}
+
 fn file_menu_sep(cx: &mut Context) {
     Element::new(cx).class("menu-sep").width(Stretch(1.0)).height(Pixels(1.0));
 }
@@ -108,6 +142,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
     let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, interval_open, project_name, .. } =
         props;
     let file_menu_open: Signal<bool> = Signal::new(false);
+    let input_device_menu_open: Signal<bool> = Signal::new(false);
     let renaming: Signal<bool> = Signal::new(false);
     let rename_draft: Signal<String> = Signal::new(project_name.get());
 
@@ -267,10 +302,54 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                 .height(Pixels(24.0));
             Knob::plain(cx, props.input_gain_pos, 0.5, theme, |cx, p| cx.emit(RecorderModelEvent::SetInputGain(p)))
                 .size(Pixels(22.0));
+
+            // Which physical input actually gets opened - the OS's own
+            // "default" is otherwise the only option, which silently
+            // records from the wrong interface if that's not the one
+            // really wired up (e.g. a laptop's webcam mic outranking a
+            // real audio interface). Takes effect on the next launch, not
+            // immediately - the engine's input stream is already open by
+            // the time this exists (see `RecorderModel::selected_input_device`).
+            let device_label = Memo::new(move |_| {
+                props.selected_input_device.get().map(|d| d.to_string()).unwrap_or_else(|| "Default".to_string())
+            });
+            Button::new(cx, move |cx| Label::new(cx, device_label))
+                .class("btn")
+                .class("quiet")
+                .on_press(move |_cx| input_device_menu_open.update(|o| *o = !*o));
         })
         .gap(Pixels(SPACE_2))
         .alignment(Alignment::Center)
         .size(Auto);
+
+        // Same no-backdrop, toggle-to-close convention as the File menu -
+        // right-anchored rather than left-anchored, since its trigger
+        // sits well into the header's right side, not its left edge.
+        VStack::new(cx, move |cx| {
+            input_device_menu_item(cx, "Default", None, props.selected_input_device, input_device_menu_open);
+            for device in props.available_input_devices.get().iter() {
+                input_device_menu_item(
+                    cx,
+                    device,
+                    Some(device.clone()),
+                    props.selected_input_device,
+                    input_device_menu_open,
+                );
+            }
+        })
+        .class("panel")
+        .class("context-menu")
+        .toggle_class("hidden", input_device_menu_open.map(|o| !*o))
+        .position_type(PositionType::Absolute)
+        .top(Pixels(HEADER_HEIGHT))
+        .right(Pixels(SPACE_3))
+        .gap(Pixels(2.0))
+        .padding_top(Pixels(SPACE_2))
+        .padding_bottom(Pixels(SPACE_2))
+        .padding_left(Pixels(SPACE_1))
+        .padding_right(Pixels(SPACE_1))
+        .width(Pixels(220.0))
+        .height(Auto);
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 

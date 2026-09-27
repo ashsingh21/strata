@@ -1,6 +1,7 @@
 /target
 ui/styles/*.css
 /project.json
+/settings.json
 
 # Downloaded sample packs - kept locally for testing, not tracked (large
 # binaries, and not all of them are ours to redistribute from this repo).
@@ -15,3 +16,7 @@ assets/drums/snare_classic.wav
 # by prefix rather than one line each.
 assets/drums/piano_*.wav
 assets/drums/micro_*.wav
+# Recorded takes from testing the recording path itself, not real
+# project content - see RecordingCoordinator's `rec_{track}_{take}.wav`
+# naming in ui/src/recorder.rs.
+assets/rec_*.wav
