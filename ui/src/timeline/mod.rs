@@ -80,8 +80,7 @@ pub fn timeline_view(
                     |cx, i| Label::new(cx, if i == 0 { "Select" } else { "Draw" }),
                     move |i| tool.map(move |t| *t == tools[i]),
                     move |cx, i| cx.emit(TimelineEvent::SetTool(tools[i])),
-                )
-                .lesson_target(crate::lessons::Target::DrawTool);
+                );
             })
             .class("tl-corner")
             .alignment(Alignment::Left)
@@ -125,10 +124,13 @@ pub fn timeline_view(
                         .on_press(|cx| {
                             cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi))
                         });
+                    // A MIDI track playing the Drum Kit (one-shot samples
+                    // are in the sidebar's Drum samples).
                     Button::new(cx, |cx| Label::new(cx, "+ Drums"))
                         .class("btn")
                         .class("quiet")
-                        .on_press(|cx| cx.emit(TimelineEvent::ToggleDrumsMenu));
+                        .lesson_target(crate::lessons::Target::AddDrumTrack)
+                        .on_press(|cx| cx.emit(TimelineEvent::AddDrumTrack));
                 })
                 .gap(Pixels(tokens::SPACE_1))
                 .padding_left(Pixels(tokens::SPACE_1))
@@ -326,46 +328,3 @@ pub fn sample_display_name(category: &SampleCategory, filename: &str) -> String 
     state::display_name_from_stem(stem)
 }
 
-pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
-    let categories = drum_sample_categories();
-    let empty = categories.is_empty();
-
-    // A floating quick-add menu, not the sidebar's full browser - still
-    // grouped the same way (so a huge dropped-in pack doesn't turn this
-    // into an undifferentiated wall either), but capped and scrollable
-    // rather than `Auto`-height, now that the folder can hold far more
-    // than a handful of one-shots.
-    ScrollView::new(cx, move |cx| {
-        VStack::new(cx, move |cx| {
-            if empty {
-                Label::new(cx, "none in assets/drums/").class("meta");
-            }
-            for category in &categories {
-                Label::new(cx, category.label).class("label");
-                for filename in &category.files {
-                    let source: std::sync::Arc<str> = format!("drums/{filename}").into();
-                    let display = sample_display_name(category, filename);
-                    Button::new(cx, move |cx| Label::new(cx, display.clone()))
-                        .class("btn")
-                        .class("sm")
-                        .width(Stretch(1.0))
-                        .on_press(move |cx| cx.emit(TimelineEvent::AddDrumSample(source.clone())));
-                }
-            }
-        })
-        .gap(Pixels(tokens::SPACE_1))
-        .width(Stretch(1.0))
-        .height(Auto);
-    })
-    .class("panel")
-    .class("drums-menu")
-    .toggle_class("hidden", open.map(|o| !*o))
-    .padding(Pixels(tokens::SPACE_2))
-    .position_type(PositionType::Absolute)
-    // Just right of the sidebar, under the header and ruler.
-    .top(Pixels(tokens::SIZE_TOOLBAR + tokens::SIZE_RULER + 8.0))
-    .left(Pixels(216.0))
-    .width(Pixels(160.0))
-    .height(Auto)
-    .max_height(Pixels(320.0));
-}

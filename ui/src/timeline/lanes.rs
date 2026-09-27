@@ -372,6 +372,20 @@ impl LaneArea {
                     });
                 } else {
                     let is_midi = arr.track(track_id).map(|t| t.kind) == Some(TrackKind::Midi);
+                    // Double-click empty space on a MIDI track: a one-bar
+                    // clip starting at that bar, opened for notes - no need
+                    // to switch to the Draw tool (as in Ableton/Logic).
+                    let is_double = self
+                        .last_click
+                        .map(|(t, px, py)| t.elapsed() < DOUBLE_CLICK && (px - lx).abs() < 8.0 && (py - ly).abs() < 8.0)
+                        .unwrap_or(false);
+                    self.last_click = Some((Instant::now(), lx, ly));
+                    if is_double && is_midi {
+                        let bar = arr.tempo_map.time_signature_at(tick.max(0)).ticks_per_bar();
+                        let start = tick.max(0).div_euclid(bar) * bar;
+                        cx.emit(TimelineEvent::InsertMidiClip { track: track_id, start, length: bar });
+                        return;
+                    }
                     if self.tool.get() == TimelineTool::Draw && is_midi {
                         let anchor = tick.max(0);
                         self.drag = Some(Drag::DrawClip {

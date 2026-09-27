@@ -7,7 +7,6 @@ use shared::drums::{CLAP, KICK, OPEN_HAT};
 use shared::lessons::{BAR, BASSLINE, BASS_NOTE, CHORDS, FIRST_BEAT};
 
 use super::{selected, tracks_with, Snapshot, Target};
-use crate::timeline::state::TimelineTool;
 
 pub enum Kind {
     /// Done when `check` passes; `target` says what glows meanwhile.
@@ -44,22 +43,16 @@ pub const LESSONS: &[Lesson] = &[
         title: "Your first beat",
         steps: &[
             act(
-                "Add a MIDI track: click \u{201c}+ MIDI track\u{201d} under the tracks.",
+                "Add a drum track: click \u{201c}+ Drums\u{201d} under the tracks.",
                 "It's below the track list, on the left of the timeline.",
-                |s| s.arrangement.tracks.iter().any(|t| t.kind == shared::arrangement::TrackKind::Midi),
-                |_| Some(Target::AddMidiTrack),
-            ),
-            act(
-                "Give it drums: in the sidebar, under Instruments, click Drum Kit.",
-                "The sidebar is on the far left. Ctrl+B shows it if it's hidden.",
                 |s| tracks_with(s, Instrument::Drums).next().is_some(),
-                |_| Some(Target::SidebarInstrument(Instrument::Drums)),
+                |_| Some(Target::AddDrumTrack),
             ),
             act(
-                "Draw a clip: pick Draw above the tracks, then click bar 1 of your drum track.",
-                "A single click with Draw makes a one-bar clip and opens it below.",
+                "Make a clip: double-click bar 1 of the Drums track.",
+                "Two quick clicks on the empty lane, right of the track's name. A one-bar clip appears and opens below.",
                 |s| clips_on(s, Instrument::Drums).next().is_some(),
-                |s| if s.tool == TimelineTool::Draw { s.selected_track.map(Target::Lane) } else { Some(Target::DrawTool) },
+                |s| tracks_with(s, Instrument::Drums).next().map(|t| Target::Lane(t.id)),
             ),
             act(
                 "Kick on every beat: in the grid below, click the Kick row at 1, 2, 3 and 4.",
@@ -102,13 +95,13 @@ pub const LESSONS: &[Lesson] = &[
         title: "A bassline",
         steps: &[
             act(
-                "Your beat is ready. Add a MIDI track for the bass: \u{201c}+ MIDI track\u{201d}.",
+                "Your beat is ready. For a bass, click \u{201c}+ MIDI track\u{201d}.",
                 "It's below the track list, on the left of the timeline.",
                 |s| tracks_with(s, Instrument::Carve).next().is_some(),
                 |_| Some(Target::AddMidiTrack),
             ),
             act(
-                "New MIDI tracks play Carve, a synth. Pick a sound: Presets \u{2192} Deep Rave Bass.",
+                "A MIDI track holds notes; its instrument turns them into sound. New ones play Carve, a synth. Pick a bass sound: Presets \u{2192} Deep Rave Bass.",
                 "Presets are in the sidebar, under Instruments.",
                 |s| selected(s).is_some_and(|t| t.instrument == Some(Instrument::Carve)) && s.synth.name == "Deep Rave Bass",
                 |_| Some(Target::SidebarPreset("Deep Rave Bass")),
@@ -120,10 +113,10 @@ pub const LESSONS: &[Lesson] = &[
                 |_| None,
             ),
             act(
-                "Draw a clip: pick Draw, then click bar 1 of the bass track.",
-                "One click with Draw makes a one-bar clip and opens it below.",
+                "Make a clip: double-click bar 1 of the bass track.",
+                "Two quick clicks on the empty lane. A one-bar clip appears and opens below.",
                 |s| clips_on(s, Instrument::Carve).next().is_some(),
-                |s| if s.tool == TimelineTool::Draw { s.selected_track.map(Target::Lane) } else { Some(Target::DrawTool) },
+                |s| s.selected_track.map(Target::Lane),
             ),
             act(
                 "Bass between the kicks: on the bottom row (A), click halfway between each beat.",
@@ -161,10 +154,10 @@ pub const LESSONS: &[Lesson] = &[
                 |_| Some(Target::SidebarPreset("Soft Pad")),
             ),
             act(
-                "Draw a clip: pick Draw, then click bar 1 of the new track.",
-                "One click with Draw makes a one-bar clip and opens it below.",
+                "Make a clip: double-click bar 1 of the new track.",
+                "Two quick clicks on the empty lane. A one-bar clip appears and opens below.",
                 |s| chord_clips(s).next().is_some(),
-                |s| if s.tool == TimelineTool::Draw { s.selected_track.map(Target::Lane) } else { Some(Target::DrawTool) },
+                |s| s.selected_track.map(Target::Lane),
             ),
             act(
                 "Two chords need two bars: click + next to Pattern, above the grid.",
@@ -248,7 +241,6 @@ mod tests {
             selected_track: None,
             playing: false,
             synth: shared::synth::seed_synth(),
-            tool: TimelineTool::Select,
         }
     }
 
@@ -273,6 +265,10 @@ mod tests {
     }
 
     fn add_midi_track(s: &mut Snapshot, name: &str) {
+        add_track(s, name, Instrument::default_for(TrackKind::Midi));
+    }
+
+    fn add_track(s: &mut Snapshot, name: &str, instrument: Option<Instrument>) {
         let id = s.arrangement.alloc_id();
         let track = Track {
             id,
@@ -284,7 +280,7 @@ mod tests {
             arm: false,
             gain_db: 0.0,
             height: DEFAULT_TRACK_HEIGHT,
-            instrument: Instrument::default_for(TrackKind::Midi),
+            instrument,
             effects: vec![],
             effect_slots: vec![],
             fx: Default::default(),
@@ -294,9 +290,9 @@ mod tests {
         s.selected_track = Some(id);
     }
 
-    /// What a Draw click does: a one-bar empty clip on the selected track.
+    /// What a double-click on an empty lane does: a one-bar empty clip on
+    /// the selected track.
     fn draw_clip(s: &mut Snapshot) {
-        s.tool = TimelineTool::Draw;
         let id = s.arrangement.alloc_id();
         let clip = Clip {
             id,
@@ -337,11 +333,7 @@ mod tests {
         walk(
             FIRST_BEAT,
             &[
-                &|s| add_midi_track(s, "MIDI 1"),
-                &|s| {
-                    let t = s.selected_track.unwrap();
-                    Command::SetInstrument { track: t, instrument: Some(Instrument::Drums) }.apply(&mut s.arrangement);
-                },
+                &|s| add_track(s, "Drums", Some(Instrument::Drums)),
                 &draw_clip,
                 &|s| add_notes(s, KICK, &[0, PPQ, 2 * PPQ, 3 * PPQ]),
                 &|s| s.playing = true,

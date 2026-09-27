@@ -134,7 +134,6 @@ fn main() -> Result<(), ApplicationError> {
         let tl_selection = timeline_state.selection;
         let tl_playhead = timeline_state.playhead_ticks;
         let tl_tool = timeline_state.tool;
-        let tl_drums_menu_open = timeline_state.drums_menu_open;
         let tl_context_menu = timeline_state.context_menu;
         let tl_clipboard_nonempty = timeline_state.clipboard_nonempty;
         let tl_missing_sources = timeline_state.missing_sources;
@@ -242,7 +241,6 @@ fn main() -> Result<(), ApplicationError> {
             selected_track,
             playing,
             synth_state,
-            tl_tool,
             sidebar_open,
         );
         let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model);
@@ -540,7 +538,6 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
             sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status);
 
-            timeline::drums_menu_view(cx, tl_drums_menu_open);
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);
             transport::header_menu_backdrop(cx, header_menus);
             // Selecting clips drops the Effects Board's node selection, so

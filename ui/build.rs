@@ -421,11 +421,6 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   background-color: rgba(0, 0, 0, 0.6);
   z-index: 300;
 }}
-.drums-menu {{
-  border-radius: {radius_md}px;
-  border-width: 1px;
-  z-index: 150;
-}}
 .context-menu-backdrop {{
   z-index: 170;
 }}
@@ -546,7 +541,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".hairline", vec![("background-color", c("line"))]);
 
     // shadow-pop: "Popovers and menus only. Panels are flat."
-    for popover in [".synth-help-panel", ".interval-overlay", ".piano-roll-panel", ".drums-menu", ".context-menu"] {
+    for popover in [".synth-help-panel", ".interval-overlay", ".piano-roll-panel", ".context-menu"] {
         rule(popover, vec![("shadow", shadow_pop.to_string())]);
     }
 

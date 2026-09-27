@@ -76,7 +76,6 @@ pub struct TimelineState {
     pub follow: Signal<bool>,
     pub tool: Signal<TimelineTool>,
     pub playhead_ticks: Signal<Ticks>,
-    pub drums_menu_open: Signal<bool>,
     /// The open right-click menu, if any.
     pub context_menu: Signal<Option<ContextMenu>>,
     /// The marker currently showing an inline rename textbox, if any.
@@ -221,7 +220,6 @@ impl TimelineState {
             follow: Signal::new(true),
             tool: Signal::new(TimelineTool::default()),
             playhead_ticks: Signal::new(0),
-            drums_menu_open: Signal::new(false),
             context_menu: Signal::new(None),
             renaming_marker: Signal::new(None),
             renaming_track: Signal::new(None),
@@ -532,6 +530,8 @@ pub enum TimelineEvent {
     CommitRenameTrack(TrackId, String),
     CancelRenameTrack,
     AddTrack(TrackKind),
+    /// "+ Drums": a MIDI track with a Drum Kit, named "Drums".
+    AddDrumTrack,
     /// Imports a drum sample (a `.wav` under `assets/drums/`, named
     /// relative to the assets dir, e.g. `"drums/kick.wav"`) as a new
     /// track - one clip, sized to the sample's own length, at tick 0.
@@ -540,7 +540,6 @@ pub enum TimelineEvent {
     /// `beat_templates::TEMPLATES`) - one or more new tracks, each with
     /// every bar's worth of hits already placed, one undo step.
     AddDrumPattern(usize),
-    ToggleDrumsMenu,
     RemoveTrack(TrackId),
 
     /// A whole different project just got loaded (Open) or a fresh one
@@ -549,6 +548,45 @@ pub enum TimelineEvent {
     /// belongs to a now-gone arrangement, and reapplying it against this
     /// one would corrupt it.
     LoadArrangement(Arrangement),
+}
+
+impl TimelineState {
+    /// A new track at the bottom, named for what it plays, and selected
+    /// (it's where the user is about to work).
+    fn add_track(&mut self, cx: &mut EventContext, kind: TrackKind, instrument: Option<Instrument>) {
+        const COLORS: [ClipColor; 6] =
+            [ClipColor::Coral, ClipColor::Amber, ClipColor::Teal, ClipColor::Blue, ClipColor::Violet, ClipColor::Pink];
+        let mut new_track = None;
+        self.with_arrangement(|arr, stack| {
+            let id = arr.alloc_id();
+            new_track = Some(id);
+            let index = arr.tracks.len();
+            let color = COLORS[index % COLORS.len()];
+            let name = match kind {
+                TrackKind::Midi => arr.name_for_instrument(instrument),
+                TrackKind::Audio => arr.next_track_name(kind),
+            };
+            let track = Track {
+                id,
+                name,
+                color,
+                kind,
+                mute: false,
+                solo: false,
+                arm: false,
+                gain_db: 0.0,
+                height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
+                instrument,
+                effects: vec![],
+                effect_slots: vec![],
+                fx: shared::arrangement::EffectGraph::new(),
+            };
+            stack.do_command(Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] }, arr);
+        });
+        if let Some(id) = new_track {
+            cx.emit(crate::synth::state::SynthEvent::SelectTrack(id));
+        }
+    }
 }
 
 impl Model for TimelineState {
@@ -937,7 +975,24 @@ impl Model for TimelineState {
                 self.do_command(Command::AddMidiNote { clip: *clip, note: *note });
             }
             TimelineEvent::SetInstrument { track, instrument } => {
-                self.do_command(Command::SetInstrument { track: *track, instrument: *instrument });
+                let arr = self.arrangement.get();
+                let Some(t) = arr.track(*track) else { return };
+                if t.instrument == *instrument {
+                    return;
+                }
+                // A track still called what Strata named it follows its
+                // instrument ("MIDI 1" with a Drum Kit becomes "Drums");
+                // a name the user typed is left alone.
+                let mut commands = vec![Command::SetInstrument { track: *track, instrument: *instrument }];
+                if t.kind == TrackKind::Midi && Arrangement::is_automatic_midi_name(&t.name) {
+                    let mut others = arr.clone();
+                    others.tracks.retain(|o| o.id != *track);
+                    let name = others.name_for_instrument(*instrument);
+                    if name != t.name {
+                        commands.push(Command::RenameTrack { track: *track, name });
+                    }
+                }
+                self.do_command(Command::Batch(commands));
             }
             TimelineEvent::AddCompressorEffect(track) => {
                 let arr = self.arrangement.get();
@@ -1110,48 +1165,8 @@ impl Model for TimelineState {
                 // drum sample gets via `AddDrumSample`.
                 crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &crate::timeline::assets_dir(), source.clone());
             }
-            TimelineEvent::AddTrack(kind) => {
-                const COLORS: [ClipColor; 6] = [
-                    ClipColor::Coral,
-                    ClipColor::Amber,
-                    ClipColor::Teal,
-                    ClipColor::Blue,
-                    ClipColor::Violet,
-                    ClipColor::Pink,
-                ];
-                let mut new_track = None;
-                self.with_arrangement(|arr, stack| {
-                    let id = arr.alloc_id();
-                    new_track = Some(id);
-                    let index = arr.tracks.len();
-                    let color = COLORS[index % COLORS.len()];
-                    let name = arr.next_track_name(*kind);
-                    let track = Track {
-                        id,
-                        name,
-                        color,
-                        kind: *kind,
-                        mute: false,
-                        solo: false,
-                        arm: false,
-                        gain_db: 0.0,
-                        height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
-                        instrument: Instrument::default_for(*kind),
-                        effects: vec![],
-                        effect_slots: vec![],
-                        fx: shared::arrangement::EffectGraph::new(),
-                    };
-                    stack.do_command(
-                        Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] },
-                        arr,
-                    );
-                });
-                // A new track is where you're about to work: select it, so
-                // a new MIDI track's Carve is right there in the panel.
-                if let Some(id) = new_track {
-                    cx.emit(crate::synth::state::SynthEvent::SelectTrack(id));
-                }
-            }
+            TimelineEvent::AddTrack(kind) => self.add_track(cx, *kind, Instrument::default_for(*kind)),
+            TimelineEvent::AddDrumTrack => self.add_track(cx, TrackKind::Midi, Some(Instrument::Drums)),
             TimelineEvent::AddDrumSample(source) => {
                 let assets_dir = crate::timeline::assets_dir();
                 let path = assets_dir.join(&**source);
@@ -1213,7 +1228,6 @@ impl Model for TimelineState {
                 if let Some(tx) = &self.decode_request_tx {
                     let _ = tx.send(source.clone());
                 }
-                self.drums_menu_open.set(false);
             }
             TimelineEvent::AddDrumPattern(template_index) => {
                 let Some(template) = crate::timeline::beat_templates::TEMPLATES.get(*template_index) else { return };
@@ -1306,10 +1320,6 @@ impl Model for TimelineState {
                         let _ = tx.send(source);
                     }
                 }
-                self.drums_menu_open.set(false);
-            }
-            TimelineEvent::ToggleDrumsMenu => {
-                self.drums_menu_open.update(|v| *v = !*v);
             }
             TimelineEvent::RemoveTrack(track) => {
                 self.do_command(Command::DeleteTrack { track: *track });

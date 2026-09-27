@@ -758,6 +758,34 @@ impl Arrangement {
         format!("{prefix} {n}")
     }
 
+    /// `base` if no track is called that yet, else "`base` 2", "`base` 3"...
+    pub fn next_named(&self, base: &str) -> String {
+        let taken = |name: &str| self.tracks.iter().any(|t| t.name == name);
+        if !taken(base) {
+            return base.to_string();
+        }
+        (2..).map(|n| format!("{base} {n}")).find(|n| !taken(n)).unwrap_or_else(|| base.to_string())
+    }
+
+    /// The automatic name for a MIDI track playing `instrument`: "Drums"
+    /// for a Drum Kit, "MIDI N" otherwise.
+    pub fn name_for_instrument(&self, instrument: Option<Instrument>) -> String {
+        match instrument {
+            Some(Instrument::Drums) => self.next_named("Drums"),
+            _ => self.next_track_name(TrackKind::Midi),
+        }
+    }
+
+    /// Whether `name` is one Strata gave a MIDI track itself ("MIDI 3",
+    /// "Drums", "Drums 2") rather than one the user typed - only those
+    /// follow the track's instrument when it changes.
+    pub fn is_automatic_midi_name(name: &str) -> bool {
+        let numbered = |prefix: &str| {
+            name.strip_prefix(prefix).is_some_and(|rest| rest.is_empty() || rest.strip_prefix(' ').is_some_and(|n| n.parse::<u32>().is_ok()))
+        };
+        (numbered("MIDI") && name != "MIDI") || numbered("Drums")
+    }
+
     pub fn track(&self, id: TrackId) -> Option<&Track> {
         self.tracks.iter().find(|t| t.id == id)
     }
@@ -1186,5 +1214,23 @@ mod track_name_tests {
     fn fills_the_lowest_gap_and_ignores_lookalikes() {
         let arr = arrangement_with(&["Audio 1", "Audio 3", "Audio 2b", "Audiophile 2"]);
         assert_eq!(arr.next_track_name(TrackKind::Audio), "Audio 2");
+    }
+
+    #[test]
+    fn drum_tracks_are_named_drums_then_numbered() {
+        let arr = arrangement_with(&["Drums", "Drums 3"]);
+        assert_eq!(arr.name_for_instrument(Some(Instrument::Drums)), "Drums 2");
+        assert_eq!(arrangement_with(&[]).name_for_instrument(Some(Instrument::Drums)), "Drums");
+        assert_eq!(arr.name_for_instrument(Some(Instrument::Carve)), "MIDI 1");
+    }
+
+    #[test]
+    fn only_names_strata_gave_follow_the_instrument() {
+        for auto in ["MIDI 1", "MIDI 12", "Drums", "Drums 2"] {
+            assert!(Arrangement::is_automatic_midi_name(auto), "{auto}");
+        }
+        for typed in ["MIDI", "Bass", "Drums loop", "MIDI one", "Drumsy"] {
+            assert!(!Arrangement::is_automatic_midi_name(typed), "{typed}");
+        }
     }
 }

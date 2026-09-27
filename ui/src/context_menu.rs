@@ -2,7 +2,7 @@
 //! actions for whatever was clicked (a clip, a track header, or empty
 //! track space), positioned at the click. A transparent backdrop behind
 //! it closes it on any click elsewhere, the same convention as every
-//! other overlay in the app (`drums_menu_view`, Interval Input, the piano
+//! other overlay in the app (Interval Input, the piano
 //! roll's own backdrop).
 //!
 //! Every clip action reuses the timeline's existing Cut/Copy/Duplicate/

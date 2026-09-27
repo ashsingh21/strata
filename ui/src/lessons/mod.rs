@@ -34,14 +34,13 @@ pub struct Snapshot {
     pub playing: bool,
     /// The on-screen Carve patch (its name, and the keys held right now).
     pub synth: SynthState,
-    pub tool: TimelineTool,
 }
 
 /// A control a step can make glow.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     AddMidiTrack,
-    DrawTool,
+    AddDrumTrack,
     SidebarInstrument(Instrument),
     SidebarPreset(&'static str),
     Play,
@@ -106,7 +105,6 @@ pub struct LessonModel {
     selected_track: Signal<Option<TrackId>>,
     playing: Signal<bool>,
     synth: Signal<SynthState>,
-    tool: Signal<TimelineTool>,
     sidebar_open: Signal<bool>,
 }
 
@@ -117,7 +115,6 @@ impl LessonModel {
         selected_track: Signal<Option<TrackId>>,
         playing: Signal<bool>,
         synth: Signal<SynthState>,
-        tool: Signal<TimelineTool>,
         sidebar_open: Signal<bool>,
     ) -> Self {
         let highlight = Signal::new(None);
@@ -132,7 +129,6 @@ impl LessonModel {
             selected_track,
             playing,
             synth,
-            tool,
             sidebar_open,
         }
     }
@@ -143,7 +139,6 @@ impl LessonModel {
             selected_track: self.selected_track.get(),
             playing: self.playing.get(),
             synth: self.synth.get(),
-            tool: self.tool.get(),
         }
     }
 
