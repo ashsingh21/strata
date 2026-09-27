@@ -147,7 +147,7 @@ pub fn track_header<'a>(
     selected_track: Signal<Option<TrackId>>,
     renaming_track: Signal<Option<TrackId>>,
     track_id: TrackId,
-    viewing_effect: Signal<bool>,
+    viewing_effect: Signal<Option<shared::arrangement::EffectNodeId>>,
 ) -> Handle<'a, impl View> {
     let name = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.name.clone()).unwrap_or_default()
@@ -172,7 +172,7 @@ pub fn track_header<'a>(
     // Phase 1 of the effects-board plan: there's no real board to open
     // yet, so "open" degrades to the existing device-panel toggle - this
     // becomes a real board-open flag once `fx_board` exists.
-    let board_open = Memo::new(move |_| viewing_effect.get() && selected_track.get() == Some(track_id));
+    let board_open = Memo::new(move |_| viewing_effect.get().is_some() && selected_track.get() == Some(track_id));
     // The fader's own drag position is committed to the arrangement only
     // on release (see the `Fader::on_release` wiring below - committing on
     // every intermediate move would rebuild this whole header list mid-
@@ -270,9 +270,11 @@ pub fn track_header<'a>(
                 .on_press(move |cx| {
                     if cx.modifiers().alt() {
                         cx.emit(TimelineEvent::SetChainBypassed(track_id, !all_bypassed.get()));
+                    } else if board_open.get() {
+                        viewing_effect.set(None);
                     } else {
                         cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
-                        viewing_effect.set(true);
+                        viewing_effect.set(effect_nodes.get().first().map(|n| n.id));
                     }
                 });
 

@@ -5,7 +5,7 @@
 //! matters here, not just the latest), and level metering flows back
 //! engine -> UI the same way the transport's peak meter does.
 
-use crate::arrangement::CompressorState;
+use crate::arrangement::{CompressorState, EqState};
 
 use super::{seed_synth, Envelope, Filter, Fx, LfoTarget, Mix, Oscillator, SynthState, Unison, VoiceMode};
 
@@ -17,11 +17,11 @@ use super::{seed_synth, Envelope, Filter, Fx, LfoTarget, Mix, Oscillator, SynthS
 pub const MAX_EFFECTS_PER_CHAIN: usize = 8;
 
 /// One effect unit's config, in the shape the engine actually runs -
-/// single-variant today (only `Compressor` exists), same convention as
-/// `Effect`/`Instrument`, so a second effect type is additive here too.
+/// same convention as `Effect`/`Instrument`.
 #[derive(Clone, Copy, Debug)]
 pub enum EffectUnitState {
     Compressor(CompressorState),
+    Eq(EqState),
 }
 
 /// A DSP-relevant snapshot of `SynthState`: everything the audio thread

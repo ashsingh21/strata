@@ -283,18 +283,18 @@ impl Instrument {
     }
 }
 
-/// A track's insert effect. Only Compressor so far - a single-variant
-/// enum, same convention as `Instrument`, so a second effect type is a
-/// clean addition later rather than a reshape.
+/// A track's insert effect.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Effect {
     Compressor(CompressorState),
+    Eq(EqState),
 }
 
 impl Effect {
     pub fn name(self) -> &'static str {
         match self {
             Effect::Compressor(_) => "Compressor",
+            Effect::Eq(_) => "EQ",
         }
     }
 }
@@ -327,6 +327,31 @@ impl CompressorState {
     /// the same DSP unit rather than branching on `Option`.
     pub fn bypass() -> Self {
         Self { ratio: 1.0, ..Self::default() }
+    }
+}
+
+/// A single-band peaking EQ's knobs. Same config/DSP split as
+/// `CompressorState` - the running biquad state lives in `engine`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EqState {
+    pub freq_hz: f32,
+    /// Boost (positive) or cut (negative) at `freq_hz`.
+    pub gain_db: f32,
+    /// Bandwidth - higher is narrower, same convention as most EQs.
+    pub q: f32,
+}
+
+impl Default for EqState {
+    fn default() -> Self {
+        Self { freq_hz: 1000.0, gain_db: 0.0, q: 1.0 }
+    }
+}
+
+impl EqState {
+    /// 0 dB gain is mathematically a no-op regardless of freq/Q - what a
+    /// bypassed EQ is treated as, same reasoning as `CompressorState::bypass`.
+    pub fn bypass() -> Self {
+        Self { gain_db: 0.0, ..Self::default() }
     }
 }
 

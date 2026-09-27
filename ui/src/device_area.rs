@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use vizia::prelude::*;
 
-use shared::arrangement::{Arrangement, ClipId, Effect, Instrument, SnapGrid, Ticks, TrackId, TrackKind};
+use shared::arrangement::{Arrangement, ClipId, Effect, EffectNodeId, Instrument, SnapGrid, Ticks, TrackId, TrackKind};
 use shared::synth::SynthState;
 
 use crate::compressor_panel;
@@ -24,7 +24,7 @@ use crate::tokens::{self, ThemeId};
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Panel {
     Carve,
-    Compressor(TrackId),
+    Effect(TrackId, EffectNodeId),
     NoInstrument(TrackId),
     Audio,
     Nothing,
@@ -35,9 +35,10 @@ pub struct DeviceAreaProps {
     pub theme: Signal<ThemeId>,
     pub arrangement: Signal<Arrangement>,
     pub selected_track: Signal<Option<TrackId>>,
-    /// Whether the panel shows the Compressor instead of the instrument/
-    /// empty state - toggled by the Compressor chip.
-    pub viewing_effect: Signal<bool>,
+    /// Which effect node the panel shows instead of the instrument/empty
+    /// state, if any - toggled by an effect's own chip (or, generically,
+    /// the `TrackHeaderFx` control, which just picks the first one).
+    pub viewing_effect: Signal<Option<EffectNodeId>>,
     // Carve.
     pub synth_state: Signal<SynthState>,
     pub lfo_phases: (Signal<f32>, Signal<f32>),
@@ -64,8 +65,8 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
     let panel = Memo::new(move |_| {
         let arr = p.arrangement.get();
         match p.selected_track.get().and_then(|id| arr.track(id).cloned()) {
-            Some(t) if p.viewing_effect.get() && t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Compressor(_))) => {
-                Panel::Compressor(t.id)
+            Some(t) if p.viewing_effect.get().is_some_and(|id| t.fx.node(id).is_some()) => {
+                Panel::Effect(t.id, p.viewing_effect.get().unwrap())
             }
             Some(t) if t.kind == TrackKind::Audio => Panel::Audio,
             Some(t) if t.instrument.is_some() => Panel::Carve,
@@ -115,10 +116,15 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                     color,
                 );
             }),
-            Panel::Compressor(track) => {
-                let color =
-                    p.arrangement.get().track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Violet);
-                compressor_panel::compressor_panel(cx, p.theme, p.arrangement, track, color);
+            Panel::Effect(track, node) => {
+                let arr = p.arrangement.get();
+                let color = arr.track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Violet);
+                let kind = arr.track(track).and_then(|t| t.fx.node(node)).map(|n| n.effect);
+                match kind {
+                    Some(Effect::Compressor(_)) => compressor_panel::compressor_panel(cx, p.theme, p.arrangement, track, color),
+                    Some(Effect::Eq(_)) => crate::eq_panel::eq_panel(cx, p.theme, p.arrangement, track, color),
+                    None => {}
+                }
             }
             Panel::NoInstrument(track) => empty_state(cx, "No instrument on this track", move |cx| {
                 Button::new(cx, |cx| Label::new(cx, "Add Carve"))
@@ -179,7 +185,7 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             .toggle_class("is-on", Memo::new(move |_| panel.get() == Panel::Carve && !editing.get()))
             .toggle_class("hidden", has_instrument.map(|c| !*c))
             .on_press(move |cx| {
-                p.viewing_effect.set(false);
+                p.viewing_effect.set(None);
                 cx.emit(PianoRollEvent::Close);
             });
         Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
@@ -213,10 +219,20 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
         });
         Button::new(cx, |cx| Label::new(cx, "Compressor"))
             .class("btn")
-            .toggle_class("is-on", Memo::new(move |_| matches!(panel.get(), Panel::Compressor(_))))
+            .toggle_class(
+                "is-on",
+                Memo::new(move |_| {
+                    matches!(panel.get(), Panel::Effect(t, n) if p.arrangement.get().track(t).and_then(|t| t.fx.node(n)).is_some_and(|node| matches!(node.effect, Effect::Compressor(_))))
+                }),
+            )
             .toggle_class("hidden", has_compressor.map(|c| !*c))
             .on_press(move |cx| {
-                p.viewing_effect.set(true);
+                let node = p.selected_track.get().and_then(|id| {
+                    p.arrangement.get().track(id).and_then(|t| {
+                        t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))).map(|n| n.id)
+                    })
+                });
+                p.viewing_effect.set(node);
                 cx.emit(PianoRollEvent::Close);
             });
         Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
@@ -238,7 +254,50 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             .on_press(move |cx| {
                 if let Some(track) = p.selected_track.get() {
                     cx.emit(TimelineEvent::AddCompressorEffect(track));
-                    p.viewing_effect.set(true);
+                }
+            });
+
+        let has_eq = Memo::new(move |_| {
+            p.selected_track
+                .get()
+                .and_then(|id| p.arrangement.get().track(id).map(|t| t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Eq(_)))))
+                .unwrap_or(false)
+        });
+        Button::new(cx, |cx| Label::new(cx, "EQ"))
+            .class("btn")
+            .toggle_class(
+                "is-on",
+                Memo::new(move |_| {
+                    matches!(panel.get(), Panel::Effect(t, n) if p.arrangement.get().track(t).and_then(|t| t.fx.node(n)).is_some_and(|node| matches!(node.effect, Effect::Eq(_))))
+                }),
+            )
+            .toggle_class("hidden", has_eq.map(|c| !*c))
+            .on_press(move |cx| {
+                let node = p.selected_track.get().and_then(|id| {
+                    p.arrangement.get().track(id).and_then(|t| t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Eq(_))).map(|n| n.id))
+                });
+                p.viewing_effect.set(node);
+                cx.emit(PianoRollEvent::Close);
+            });
+        Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
+            .class("btn")
+            .class("quiet")
+            .toggle_class("hidden", has_eq.map(|c| !*c))
+            .on_press(move |cx| {
+                if let Some(track) = p.selected_track.get() {
+                    cx.emit(TimelineEvent::RemoveEqEffect(track));
+                }
+            });
+        let can_add_eq = Memo::new(move |_| {
+            p.selected_track.get().is_some_and(|id| !has_eq.get() && p.arrangement.get().track(id).is_some())
+        });
+        Button::new(cx, |cx| Label::new(cx, "+ EQ"))
+            .class("btn")
+            .class("quiet")
+            .toggle_class("hidden", can_add_eq.map(|n| !*n))
+            .on_press(move |cx| {
+                if let Some(track) = p.selected_track.get() {
+                    cx.emit(TimelineEvent::AddEqEffect(track));
                 }
             });
 

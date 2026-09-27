@@ -4,6 +4,8 @@ mod canvas_text;
 mod compressor_panel;
 mod context_menu;
 mod device_area;
+mod eq_curve;
+mod eq_panel;
 mod fader;
 mod glyph;
 mod interval_input;
@@ -102,7 +104,7 @@ fn main() -> Result<(), ApplicationError> {
         // chip. Not reset when the selection changes: if the newly
         // selected track has no Compressor, `device_area`'s own Panel
         // computation falls back to its instrument/empty state anyway.
-        let viewing_effect: Signal<bool> = Signal::new(false);
+        let viewing_effect: Signal<Option<shared::arrangement::EffectNodeId>> = Signal::new(None);
         let mut timeline_state =
             TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected, selected_track);
         let tl_arrangement = timeline_state.arrangement;

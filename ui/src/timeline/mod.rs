@@ -54,7 +54,7 @@ pub fn timeline_view(
     loop_on: Signal<bool>,
     renaming_marker: Signal<Option<shared::arrangement::MarkerId>>,
     renaming_track: Signal<Option<shared::arrangement::TrackId>>,
-    viewing_effect: Signal<bool>,
+    viewing_effect: Signal<Option<shared::arrangement::EffectNodeId>>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {

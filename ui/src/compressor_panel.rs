@@ -55,6 +55,7 @@ pub fn compressor_panel(
             .and_then(|t| {
                 t.fx.ordered().iter().find_map(|n| match n.effect {
                     Effect::Compressor(c) => Some(c),
+                    _ => None,
                 })
             })
             .unwrap_or_default()

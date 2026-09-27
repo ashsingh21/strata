@@ -12,6 +12,7 @@ pub mod input;
 mod compressor;
 mod dsp;
 mod effects;
+mod eq;
 mod fx;
 mod synth;
 

@@ -85,6 +85,7 @@ pub fn build_effect_units(track: &crate::arrangement::Track) -> (u8, [EffectUnit
             Effect::Compressor(c) => {
                 EffectUnitState::Compressor(if node.enabled { c } else { CompressorState::bypass() })
             }
+            Effect::Eq(e) => EffectUnitState::Eq(if node.enabled { e } else { crate::arrangement::EqState::bypass() }),
         };
         count += 1;
     }

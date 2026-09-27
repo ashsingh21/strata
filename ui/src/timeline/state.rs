@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    CompressorState, Effect, EffectNodeId, Instrument,
+    CompressorState, Effect, EffectNodeId, EqState, Instrument,
     empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, Marker, MarkerId, MidiNote,
     PeakPyramid, SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
@@ -442,6 +442,10 @@ pub enum TimelineEvent {
     /// (like `SetTrackHeight`/gain, a knob-drag preference, not an edit
     /// worth a history entry), and a no-op if the track has none.
     SetCompressorState(TrackId, CompressorState),
+    /// Same shape as the Compressor trio above, for the EQ.
+    AddEqEffect(TrackId),
+    RemoveEqEffect(TrackId),
+    SetEqState(TrackId, EqState),
     /// Flips one effect slot's own enabled bit (the `TrackHeaderFx` pip).
     ToggleEffectEnabled(TrackId, EffectNodeId),
     /// Bypasses (`true`) or restores (`false`) every effect on the
@@ -836,6 +840,31 @@ impl Model for TimelineState {
                     if let Some(t) = arr.track_mut(*track) {
                         if let Some(node) = t.fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Compressor(_))) {
                             node.effect = Effect::Compressor(*state);
+                        }
+                    }
+                });
+            }
+            TimelineEvent::AddEqEffect(track) => {
+                let arr = self.arrangement.get();
+                if let Some(t) = arr.track(*track) {
+                    if !t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Eq(_))) {
+                        self.do_command(Command::AddEffectNode { track: *track, effect: Effect::Eq(EqState::default()) });
+                    }
+                }
+            }
+            TimelineEvent::RemoveEqEffect(track) => {
+                let arr = self.arrangement.get();
+                if let Some(t) = arr.track(*track) {
+                    if let Some(node) = t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Eq(_))) {
+                        self.do_command(Command::RemoveEffectNode { track: *track, node: node.id });
+                    }
+                }
+            }
+            TimelineEvent::SetEqState(track, state) => {
+                self.with_arrangement(|arr, _| {
+                    if let Some(t) = arr.track_mut(*track) {
+                        if let Some(node) = t.fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Eq(_))) {
+                            node.effect = Effect::Eq(*state);
                         }
                     }
                 });

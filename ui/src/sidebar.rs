@@ -136,7 +136,13 @@ pub fn sidebar(
                         })
                         .unwrap_or(false)
                 });
-                section_head(cx, "Audio effects", 1);
+                let selected_has_eq = Memo::new(move |_| {
+                    selected_track
+                        .get()
+                        .and_then(|id| arrangement.get().track(id).map(|t| t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Eq(_)))))
+                        .unwrap_or(false)
+                });
+                section_head(cx, "Audio effects", 2);
                 row(cx, "Compressor".to_string(), query, true)
                     .toggle_class("is-on", selected_has_compressor)
                     .on_press(move |cx| {
@@ -144,6 +150,11 @@ pub fn sidebar(
                             cx.emit(TimelineEvent::AddCompressorEffect(track));
                         }
                     });
+                row(cx, "EQ".to_string(), query, true).toggle_class("is-on", selected_has_eq).on_press(move |cx| {
+                    if let Some(track) = selected_track.get() {
+                        cx.emit(TimelineEvent::AddEqEffect(track));
+                    }
+                });
             })
             .width(Stretch(1.0))
             .height(Auto);
