@@ -925,7 +925,12 @@ impl LaneArea {
             }
         }
 
-        // Automation lines + breakpoints.
+        // Automation lines + breakpoints. Clipped to this view: breakpoints
+        // scrolled off to the left sit at negative x, and the line to them
+        // would otherwise paint across the track headers and sidebar (Skia
+        // doesn't clip to layout bounds).
+        canvas.save();
+        canvas.clip_rect(vg::Rect::new(bounds.x, bounds.y, bounds.x + bounds.w, bounds.y + bounds.h), None, true);
         for row in &rows {
             let RowKind::Automation(lane_id) = row.kind else { continue };
             let top = row.top - scroll_y;
@@ -998,6 +1003,7 @@ impl LaneArea {
                 canvas.draw_path(&vg::Path::rect(rect, None), &bp_paint);
             }
         }
+        canvas.restore();
 
         // The playhead itself is drawn by `PlayheadOverlay`, a separate
         // view stacked on top - see its doc comment for why.
