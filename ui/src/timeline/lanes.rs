@@ -750,8 +750,14 @@ impl LaneArea {
                 }
                 // Same gridded ground as a track row: a lane is part of its
                 // track's timeline, not a separate black strip.
-                RowKind::Automation(_) => {
+                RowKind::Automation(lane) => {
                     self.draw_grid(canvas, &palette, row_rect, &transform, ticks_per_bar, ticks_per_beat);
+                    let track = arr.automation_lane(lane).map(|l| l.track);
+                    if track.is_some_and(|t| crate::lessons::highlighted() == Some(crate::lessons::Target::Automation(t))) {
+                        let mut wash = vg::Paint::default();
+                        wash.set_color(palette.signal_soft);
+                        canvas.draw_path(&vg::Path::rect(row_rect, None), &wash);
+                    }
                 }
             }
 

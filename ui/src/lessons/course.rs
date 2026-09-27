@@ -3,10 +3,11 @@
 //! is a change to this table.
 
 use shared::arrangement::{Clip, ClipContent, Instrument, Ticks, PPQ};
-use shared::drums::{CLAP, KICK, OPEN_HAT};
+use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
     RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
+    PROJECT_ARRANGE, PROJECT_BASS, PROJECT_BASS_ROOTS, PROJECT_CHORDS, PROJECT_CHORDS_NOTES, PROJECT_FINISH, PROJECT_GROOVE,
 };
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
@@ -42,6 +43,7 @@ pub const BASICS: &str = "Basics";
 pub const CARVE: &str = "Carve synth";
 pub const RECIPES: &str = "Recipes";
 pub const ARRANGEMENT: &str = "Arrangement";
+pub const PROJECTS: &str = "Projects";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -1165,7 +1167,361 @@ pub const LESSONS: &[Lesson] = &[
             ),
         ],
     },
+    Lesson {
+        id: PROJECT_GROOVE,
+        group: PROJECTS,
+        title: "House track 1: the groove",
+        steps: &[
+            info(
+                "Over five parts you'll build a whole house track yourself - beat, bass, chords, arrangement and mix. \
+                 Each part starts where the last one ended. Part 1: the groove every house track stands on.",
+            ),
+            act(
+                "Add a drum track: \u{201c}+ Drums\u{201d} under the tracks.",
+                "Below the track list, on the left of the timeline.",
+                |s| tracks_with(s, Instrument::Drums).next().is_some(),
+                |_| Some(Target::AddDrumTrack),
+            ),
+            act(
+                "Double-click bar 1 of the Drums track to make a clip.",
+                "Two quick clicks on the empty lane. The clip opens below.",
+                |s| clips_on(s, Instrument::Drums).next().is_some(),
+                |s| tracks_with(s, Instrument::Drums).next().map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Kick on every beat: the Kick row under 1, 2, 3 and 4.",
+                "Grid not showing? Double-click the clip.",
+                |s| drum_pattern_has(s, KICK, &[0, PPQ, 2 * PPQ, 3 * PPQ]),
+                |s| row_or_clip(s, Instrument::Drums, KICK),
+            ),
+            act(
+                "Clap on beats 2 and 4.",
+                "The Clap row, under 2 and 4.",
+                |s| drum_pattern_has(s, CLAP, &[PPQ, 3 * PPQ]),
+                |s| row_or_clip(s, Instrument::Drums, CLAP),
+            ),
+            act(
+                "Closed hat on the 2nd and 4th square of every beat - the \u{201c}e\u{201d} and the \u{201c}a\u{201d} (8 hits).",
+                "Each beat has four squares: 1 e and a. Click the Closed Hat row on squares 2 and 4 of each.",
+                |s| drum_pattern_has(s, CLOSED_HAT, &SIXTEENTHS_E_AND_A),
+                |s| row_or_clip(s, Instrument::Drums, CLOSED_HAT),
+            ),
+            act(
+                "Open hat on the \u{201c}and\u{201d} of every beat - the 3rd square.",
+                "The Open Hat row, halfway between the beats.",
+                |s| drum_pattern_has(s, OPEN_HAT, &OFFBEATS),
+                |s| row_or_clip(s, Instrument::Drums, OPEN_HAT),
+            ),
+            act("Press Space: that's a house groove.", "Or the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "Stretch the clip out to bar 17: drag its right edge. Sixteen bars of groove to build on.",
+                "Grab the very end of the clip in the timeline.",
+                |s| clips_on(s, Instrument::Drums).any(|c| loops(c, 16)),
+                |s| tracks_with(s, Instrument::Drums).next().map(|t| Target::Lane(t.id)),
+            ),
+            info(
+                "Kick for the pulse, clap for the backbeat, closed hats for the drive and the open hat for the bounce. \
+                 Next: a bassline that locks to it.",
+            ),
+        ],
+    },
+    Lesson {
+        id: PROJECT_BASS,
+        group: PROJECTS,
+        title: "House track 2: the bassline",
+        steps: &[
+            act(
+                "Add a MIDI track for the bass: \u{201c}+ MIDI track\u{201d}.",
+                "Below the track list.",
+                |s| tracks_with(s, Instrument::Carve).next().is_some(),
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Pick its sound: click the preset name at the top of Carve and choose Deep Bass - the one you built in the recipe.",
+                "Or step through with the \u{2039} \u{203a} arrows.",
+                |s| selected(s).is_some_and(|t| t.instrument == Some(Instrument::Carve)) && s.synth.name == "Deep Bass",
+                |_| Some(Target::Preset("Deep Bass")),
+            ),
+            act(
+                "The bass comes in after the drums: double-click bar 5 of the bass track.",
+                "Bar 5, not bar 1 - four bars of drums alone first.",
+                |s| project_bass(s).is_some_and(|b| clips_of(s, b.id).any(|c| c.start == bars(4))),
+                |s| s.selected_track.map(Target::Lane),
+            ),
+            act(
+                "The line is four bars long, one bar per chord: click + next to Pattern until it says 4 bars.",
+                "Above the grid.",
+                |s| project_bass(s).is_some_and(|b| clips_of(s, b.id).any(|c| c.content_len() == bars(4))),
+                |_| Some(Target::PatternPlus),
+            ),
+            act(
+                "Bar 1: A (the bottom row) on the four off-beats.",
+                "Off-beats: two squares after each beat number, where the open hat plays.",
+                |s| bass_bar(s, 0),
+                |s| row_or_clip(s, Instrument::Carve, PROJECT_BASS_ROOTS[0]),
+            ),
+            act(
+                "Bar 2: the same off-beats, on C.",
+                "Bar 2 starts at the 2 mark along the top.",
+                |s| bass_bar(s, 1),
+                |s| row_or_clip(s, Instrument::Carve, PROJECT_BASS_ROOTS[1]),
+            ),
+            act("Bar 3: on D.", "Bar 3 starts at the 3 mark.", |s| bass_bar(s, 2), |s| row_or_clip(s, Instrument::Carve, PROJECT_BASS_ROOTS[2])),
+            act("Bar 4: back to C.", "Bar 4 starts at the 4 mark.", |s| bass_bar(s, 3), |s| row_or_clip(s, Instrument::Carve, PROJECT_BASS_ROOTS[3])),
+            act(
+                "Stretch the bass clip to bar 17, level with the drums.",
+                "Drag its right edge.",
+                |s| project_bass(s).is_some_and(|b| clips_of(s, b.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| project_bass(s).map(|b| Target::Lane(b.id)),
+            ),
+            act("Press Space.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            info(
+                "The bass plays the root of each chord you'll add next - A, C, D, C - in the gaps between the kicks. \
+                 Next: the chords themselves.",
+            ),
+        ],
+    },
+    Lesson {
+        id: PROJECT_CHORDS,
+        group: PROJECTS,
+        title: "House track 3: chords",
+        steps: &[
+            act(
+                "One more MIDI track, for chords.",
+                "\u{201c}+ MIDI track\u{201d}.",
+                |s| tracks_with(s, Instrument::Carve).count() >= 2,
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Preset: Soft Pad - its slow swell and long tail turn short hits into lush chords.",
+                "The preset name at the top of Carve.",
+                |s| project_chord_track(s).is_some_and(|t| Some(t.id) == s.selected_track) && s.synth.name == "Soft Pad",
+                |_| Some(Target::Preset("Soft Pad")),
+            ),
+            act(
+                "The chords arrive at bar 9: double-click bar 9 of the new track.",
+                "Eight bars of drums and bass first.",
+                |s| project_chord_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == bars(8))),
+                |s| s.selected_track.map(Target::Lane),
+            ),
+            act(
+                "Four chords, four bars: Pattern + until it says 4 bars.",
+                "Above the grid.",
+                |s| project_chord_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.content_len() == bars(4))),
+                |_| Some(Target::PatternPlus),
+            ),
+            act(
+                "Bar 1, A minor: A, C and E stacked on the very first square.",
+                "Three clicks in the same column: A (bottom row), C, E.",
+                |s| chord_bar(s, 0),
+                |s| chord_target(s, 0),
+            ),
+            act(
+                "Bar 2, C major: C, E and G on its first square.",
+                "Bar 2 starts at the 2 mark.",
+                |s| chord_bar(s, 1),
+                |s| chord_target(s, 1),
+            ),
+            act(
+                "Bar 3, D suspended: D, G and A.",
+                "Bar 3 starts at the 3 mark. \u{201c}Suspended\u{201d}: no third, so it floats.",
+                |s| chord_bar(s, 2),
+                |s| chord_target(s, 2),
+            ),
+            act("Bar 4, C major again: C, E, G.", "Bar 4 starts at the 4 mark.", |s| chord_bar(s, 3), |s| chord_target(s, 3)),
+            act(
+                "Stretch the chords to bar 17.",
+                "Drag the clip's right edge.",
+                |s| project_chord_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| project_chord_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act("Press Space: drums, bass and chords.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            info(
+                "Am, C, Dsus, C - and the bass under them plays each chord's root. Notice the chords share notes \
+                 (C and E in the first two, G in the next), so they flow. Next: turning 16 bars into a song.",
+            ),
+        ],
+    },
+    Lesson {
+        id: PROJECT_ARRANGE,
+        group: PROJECTS,
+        title: "House track 4: arrangement",
+        steps: &[
+            info(
+                "Right now the track only builds. A song needs tension and release: you'll extend it to 32 bars and \
+                 cut a breakdown in the middle, where the drums and bass drop out.",
+            ),
+            act(
+                "Plan it with markers: right-click the ruler at bars 1, 9, 17 and 25 and Add marker at each (Intro, Groove, Breakdown, Drop).",
+                "Right-click the glowing bar, then \u{201c}Add marker here\u{201d}. Double-click a marker to rename it.",
+                |s| MARKER_BARS.iter().all(|&b| has_marker_at(s, b)),
+                |s| MARKER_BARS.iter().find(|&&b| !has_marker_at(s, b)).map(|&b| Target::RulerBar(b)),
+            ),
+            act(
+                "Extend everything to bar 33: stretch the drums, bass and chords clips.",
+                "Drag each clip's right edge to bar 33.",
+                |s| ["Drums", "Bass", "Chords"].iter().all(|n| reaches(s, n, 32)),
+                |s| ["Drums", "Bass", "Chords"].iter().find(|n| !reaches(s, n, 32)).and_then(|n| track_named(s, n)).map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Cut at the breakdown: click the ruler at bar 17, then press Ctrl+E (\u{2318}E on a Mac). Every clip there splits in two.",
+                "Click the glowing bar first - the split happens at the playhead.",
+                |s| starts_at(s, "Drums", 16),
+                |_| Some(Target::RulerBar(16)),
+            ),
+            act(
+                "And where the drop comes back: click the ruler at bar 25 and Ctrl+E again.",
+                "The glowing bar.",
+                |s| starts_at(s, "Drums", 24),
+                |_| Some(Target::RulerBar(24)),
+            ),
+            act(
+                "Empty the breakdown: click the Drums piece between bars 17 and 25 and press Delete.",
+                "Just that middle piece.",
+                |s| silent_in(s, "Drums", 16, 24) && !silent_in(s, "Drums", 24, 32),
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Same for the Bass piece in bars 17 to 25 - only the chords remain there.",
+                "Click it, then Delete.",
+                |s| silent_in(s, "Bass", 16, 24) && !silent_in(s, "Bass", 24, 32),
+                |s| track_named(s, "Bass").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Hear it: click the ruler at bar 13 and press Space. The groove falls away into the breakdown, then everything slams back at bar 25.",
+                "Click the glowing bar, then Space.",
+                |s| s.playing && s.playhead >= bars(12),
+                |_| Some(Target::RulerBar(12)),
+            ),
+            info(
+                "That drop only hits because the breakdown took the kick and bass away first. Taking things out is \
+                 as important as putting them in. Last part: movement and the final mix.",
+            ),
+        ],
+    },
+    Lesson {
+        id: PROJECT_FINISH,
+        group: PROJECTS,
+        title: "House track 5: movement and mix",
+        steps: &[
+            act(
+                "The Chords track is selected, so its Carve is below. Automate its filter: right-click the Cutoff knob and choose Automate.",
+                "A lane appears under the Chords track. (If Carve isn't showing, click the Chords track's name first.)",
+                |s| chords_cutoff_lane(s).is_some(),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            act(
+                "Build the breakdown: in the new lane, click a point low at bar 17 and another high at bar 25 - the filter opens as the drop approaches.",
+                "Click in the lane to add a point; drag a point to move it.",
+                |s| chords_cutoff_lane(s).is_some_and(|l| rises(l, 16, 24)),
+                |s| track_named(s, "Chords").map(|t| Target::Automation(t.id)),
+            ),
+            act(
+                "Balance: pads sit behind the beat. Drag the Chords track's fader down to about -10 dB.",
+                "The fader is on the right of the track header; its level shows beside it.",
+                |s| track_named(s, "Chords").is_some_and(|t| (-13.0..=-7.0).contains(&t.gain_db)),
+                |_| None,
+            ),
+            act(
+                "Listen from the top: press Home, then Space - the whole track.",
+                "Home jumps to the start.",
+                |s| s.playing && s.playhead < bars(4),
+                |_| Some(Target::Play),
+            ),
+            info(
+                "You built a house track: groove, bass, chords, an arrangement with a breakdown and drop, and \
+                 automation for movement. Save it (Ctrl+S, \u{2318}S on a Mac) and export it (File \u{2192} Export \
+                 Audio) to play it anywhere.",
+            ),
+        ],
+    },
 ];
+
+/// The "e" and "a" of every beat, in ticks.
+const SIXTEENTHS_E_AND_A: [Ticks; 8] = [
+    PPQ / 4, 3 * PPQ / 4, PPQ + PPQ / 4, PPQ + 3 * PPQ / 4, 2 * PPQ + PPQ / 4, 2 * PPQ + 3 * PPQ / 4, 3 * PPQ + PPQ / 4, 3 * PPQ + 3 * PPQ / 4,
+];
+/// The "and" of every beat.
+const OFFBEATS: [Ticks; 4] = [PPQ / 2, PPQ + PPQ / 2, 2 * PPQ + PPQ / 2, 3 * PPQ + PPQ / 2];
+/// Where the arrangement's markers go (0-based bars).
+const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
+
+fn clips_of(s: &Snapshot, track: shared::arrangement::TrackId) -> impl Iterator<Item = &Clip> {
+    s.arrangement.clips.iter().filter(move |c| c.track == track)
+}
+
+fn looping(c: &Clip) -> bool {
+    matches!(c.content, ClipContent::Midi { loop_len: Some(_), .. })
+}
+
+/// The project's bass track: "Bass" once it exists, else the (only) Carve track.
+fn project_bass(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    track_named(s, "Bass").or_else(|| tracks_with(s, Instrument::Carve).next())
+}
+
+/// The project's chords track: a Carve track that isn't the bass.
+fn project_chord_track(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    track_named(s, "Chords").or_else(|| tracks_with(s, Instrument::Carve).find(|t| t.name != "Bass"))
+}
+
+/// Bar `bar` of the bass pattern has its root on all four off-beats.
+fn bass_bar(s: &Snapshot, bar: usize) -> bool {
+    let starts: Vec<Ticks> = OFFBEATS.iter().map(|o| bar as i64 * BAR + o).collect();
+    project_bass(s).is_some_and(|b| clips_of(s, b.id).any(|c| has_notes(c, PROJECT_BASS_ROOTS[bar], &starts)))
+}
+
+/// Bar `bar` of the chords pattern has its chord on the downbeat.
+fn chord_bar(s: &Snapshot, bar: usize) -> bool {
+    let at = [bar as i64 * BAR];
+    project_chord_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| PROJECT_CHORDS_NOTES[bar].iter().all(|&p| has_notes(c, p, &at))))
+}
+
+/// The row of the first chord note still missing (or the clip's lane).
+fn chord_target(s: &Snapshot, bar: usize) -> Option<Target> {
+    let t = project_chord_track(s)?;
+    if s.open_clip.is_none() {
+        return Some(Target::Lane(t.id));
+    }
+    let at = [bar as i64 * BAR];
+    let clip = clips_of(s, t.id).next()?;
+    PROJECT_CHORDS_NOTES[bar].iter().copied().find(|&p| !has_notes(clip, p, &at)).map(Target::PianoRollRow)
+}
+
+fn has_marker_at(s: &Snapshot, bar: i64) -> bool {
+    s.arrangement.markers.iter().any(|m| m.position >= bars(bar) && m.position < bars(bar + 1))
+}
+
+/// The named track has a clip reaching bar `bar` (0-based end).
+fn reaches(s: &Snapshot, name: &str, bar: i64) -> bool {
+    track_named(s, name).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(bar)))
+}
+
+/// The named track has a clip starting exactly at bar `bar`.
+fn starts_at(s: &Snapshot, name: &str, bar: i64) -> bool {
+    track_named(s, name).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == bars(bar)))
+}
+
+/// No note of the named track sounds anywhere in bars `from..to`.
+fn silent_in(s: &Snapshot, name: &str, from: i64, to: i64) -> bool {
+    let Some(t) = track_named(s, name) else { return false };
+    !clips_of(s, t.id).any(|c| c.played_notes().iter().any(|n| (bars(from)..bars(to)).contains(&(c.start + n.start))))
+}
+
+fn chords_cutoff_lane(s: &Snapshot) -> Option<&shared::arrangement::AutomationLane> {
+    let t = track_named(s, "Chords")?;
+    s.arrangement
+        .automation
+        .iter()
+        .find(|l| l.track == t.id && l.target == Some(shared::arrangement::AutomationTarget::Synth(SynthParam::Cutoff)))
+}
+
+/// The lane is clearly higher at bar `to` than at bar `from`.
+fn rises(lane: &shared::arrangement::AutomationLane, from: i64, to: i64) -> bool {
+    match (lane.value_at(bars(from)), lane.value_at(bars(to))) {
+        (Some(a), Some(b)) => b - a > 0.25,
+        _ => false,
+    }
+}
 
 /// The on-screen Carve patch - only while a Carve track is selected (the
 /// panel shows the selected track's patch).
@@ -1807,6 +2163,187 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A clip at `bar` on the selected track (what a double-click there does).
+    fn draw_clip_at(s: &mut Snapshot, bar: i64) {
+        let id = s.arrangement.alloc_id();
+        let clip = Clip {
+            id,
+            track: s.selected_track.unwrap(),
+            start: bar * BAR,
+            length: BAR,
+            name: "Clip".into(),
+            content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
+            recording: false,
+            gain_db: 0.0,
+        };
+        Command::InsertClip { clip: Box::new(clip) }.apply(&mut s.arrangement);
+        s.open_clip = Some(id);
+    }
+
+    /// Pattern + to `n` bars (the SetPatternBars handler).
+    fn pattern_bars(s: &mut Snapshot, n: i64) {
+        let mut clip = s.arrangement.clip(last_clip(s)).unwrap().clone();
+        clip.length = clip.length.max(n * BAR);
+        let ClipContent::Midi { notes, link, .. } = clip.content.clone() else { panic!() };
+        clip.content = ClipContent::Midi { notes, loop_len: Some(n * BAR), link };
+        Command::ReplaceClip { clip: Box::new(clip) }.apply(&mut s.arrangement);
+    }
+
+    /// Dragging the newest clip's right edge to 0-based bar `end`.
+    fn stretch_to(s: &mut Snapshot, end: i64) {
+        let old = s.arrangement.clip(last_clip(s)).unwrap().clone();
+        let clip = old.extended_as_loop(end * BAR - old.start).unwrap_or(old);
+        Command::ReplaceClip { clip: Box::new(clip) }.apply(&mut s.arrangement);
+    }
+
+    /// Ctrl+E at bar `bar`: every clip there splits.
+    fn split_all_at(s: &mut Snapshot, bar: i64) {
+        let at = bar * BAR;
+        let crossing: Vec<_> = s.arrangement.clips.iter().filter(|c| c.start < at && c.end() > at).map(|c| c.id).collect();
+        for clip in crossing {
+            let new_id = s.arrangement.alloc_id();
+            Command::SplitClip { clip, at, new_id }.apply(&mut s.arrangement);
+        }
+    }
+
+    fn delete_piece(s: &mut Snapshot, track: &str, bar: i64) {
+        let t = s.arrangement.tracks.iter().find(|t| t.name == track).unwrap().id;
+        let clip = s.arrangement.clips.iter().find(|c| c.track == t && c.start == bar * BAR).unwrap().id;
+        Command::DeleteClip { clip }.apply(&mut s.arrangement);
+    }
+
+    #[test]
+    fn project_groove_can_be_done_step_by_step() {
+        walk_actions(
+            PROJECT_GROOVE,
+            &[
+                &|s| add_track(s, "Drums", Some(Instrument::Drums)),
+                &|s| draw_clip_at(s, 0),
+                &|s| add_notes(s, KICK, &[0, PPQ, 2 * PPQ, 3 * PPQ]),
+                &|s| add_notes(s, CLAP, &[PPQ, 3 * PPQ]),
+                &|s| add_notes(s, CLOSED_HAT, &SIXTEENTHS_E_AND_A),
+                &|s| add_notes(s, OPEN_HAT, &super::OFFBEATS),
+                &play,
+                &|s| stretch_to(s, 16),
+            ],
+        );
+    }
+
+    #[test]
+    fn project_bass_can_be_done_step_by_step() {
+        let roots = PROJECT_BASS_ROOTS;
+        let offbeats = |bar: i64| super::OFFBEATS.map(|o| bar * BAR + o);
+        walk_actions(
+            PROJECT_BASS,
+            &[
+                &|s| add_midi_track(s, "MIDI 1"),
+                &|s| s.synth = shared::synth::recipes::deep_bass(),
+                &|s| draw_clip_at(s, 4),
+                &|s| pattern_bars(s, 4),
+                &|s| add_notes(s, roots[0], &offbeats(0)),
+                &|s| add_notes(s, roots[1], &offbeats(1)),
+                &|s| add_notes(s, roots[2], &offbeats(2)),
+                &|s| add_notes(s, roots[3], &offbeats(3)),
+                &|s| stretch_to(s, 16),
+                &play,
+            ],
+        );
+    }
+
+    #[test]
+    fn project_chords_can_be_done_step_by_step() {
+        let chord = |s: &mut Snapshot, bar: usize| {
+            for p in PROJECT_CHORDS_NOTES[bar] {
+                add_notes(s, p, &[bar as i64 * BAR]);
+            }
+        };
+        walk_actions(
+            PROJECT_CHORDS,
+            &[
+                &|s| add_midi_track(s, "MIDI 1"),
+                &|s| s.synth = shared::synth::soft_pad(),
+                &|s| draw_clip_at(s, 8),
+                &|s| pattern_bars(s, 4),
+                &|s| chord(s, 0),
+                &|s| chord(s, 1),
+                &|s| chord(s, 2),
+                &|s| chord(s, 3),
+                &|s| stretch_to(s, 16),
+                &play,
+            ],
+        );
+    }
+
+    #[test]
+    fn project_arrange_can_be_done_step_by_step() {
+        walk_actions(
+            PROJECT_ARRANGE,
+            &[
+                &|s| {
+                    for bar in MARKER_BARS {
+                        let id = s.arrangement.alloc_id();
+                        s.arrangement.markers.push(shared::arrangement::Marker { id, position: bar * BAR, name: "M".into() });
+                    }
+                },
+                &|s| {
+                    for name in ["Drums", "Bass", "Chords"] {
+                        let t = s.arrangement.tracks.iter().find(|t| t.name == name).unwrap().id;
+                        let clip = s.arrangement.clips.iter().find(|c| c.track == t).unwrap().clone();
+                        let longer = clip.extended_as_loop(32 * BAR - clip.start).unwrap();
+                        Command::ReplaceClip { clip: Box::new(longer) }.apply(&mut s.arrangement);
+                    }
+                },
+                &|s| split_all_at(s, 16),
+                &|s| split_all_at(s, 24),
+                &|s| delete_piece(s, "Drums", 16),
+                &|s| delete_piece(s, "Bass", 16),
+                &|s| {
+                    s.playhead = bars(12);
+                    s.playing = true;
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn project_finish_can_be_done_step_by_step() {
+        walk_actions(
+            PROJECT_FINISH,
+            &[
+                &|s| {
+                    let track = s.selected_track.unwrap();
+                    let id = s.arrangement.alloc_id();
+                    let lane = shared::arrangement::AutomationLane {
+                        id,
+                        track,
+                        parameter_name: "Carve \u{b7} Cutoff".into(),
+                        display_value: String::new(),
+                        breakpoints: vec![shared::arrangement::Breakpoint { tick: 0, value: 0.5 }],
+                        target: Some(shared::arrangement::AutomationTarget::Synth(SynthParam::Cutoff)),
+                    };
+                    s.arrangement.automation.push(lane);
+                },
+                &|s| {
+                    let lane = s.arrangement.automation.last_mut().unwrap();
+                    lane.breakpoints = vec![
+                        shared::arrangement::Breakpoint { tick: 16 * BAR, value: 0.2 },
+                        shared::arrangement::Breakpoint { tick: 24 * BAR, value: 0.8 },
+                    ];
+                },
+                &|s| select_gain(s, "Chords", -10.0),
+                &|s| {
+                    s.playhead = 0;
+                    s.playing = true;
+                },
+            ],
+        );
+    }
+
+    fn select_gain(s: &mut Snapshot, name: &str, db: f32) {
+        let id = s.arrangement.tracks.iter().find(|t| t.name == name).unwrap().id;
+        s.arrangement.track_mut(id).unwrap().gain_db = db;
     }
 
     #[test]

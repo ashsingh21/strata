@@ -42,6 +42,19 @@ pub const RECIPE_REED: &str = "recipe-reed";
 /// The arrangement lessons open a finished demo song.
 pub const ARRANGE_HOUSE: &str = "arrange-house";
 pub const ARRANGE_BHAIRAV: &str = "arrange-bhairav";
+/// "Your first house track", in five parts; each starts from the
+/// previous part's finished result.
+pub const PROJECT_GROOVE: &str = "project-groove";
+pub const PROJECT_BASS: &str = "project-bass";
+pub const PROJECT_CHORDS: &str = "project-chords";
+pub const PROJECT_ARRANGE: &str = "project-arrange";
+pub const PROJECT_FINISH: &str = "project-finish";
+
+/// The project's bassline: off-beat roots, one bar each of A, C, D, C.
+pub const PROJECT_BASS_ROOTS: [u8; 4] = [57, 60, 62, 60];
+/// The project's chords, one stab per bar: Am, C, Dsus4, C - all in A
+/// minor pentatonic, so every note is on a row the piano roll shows.
+pub const PROJECT_CHORDS_NOTES: [[u8; 3]; 4] = [[57, 60, 64], [60, 64, 67], [62, 67, 69], [60, 64, 67]];
 
 /// Carve lessons loop their riff this long, so there's time to turn knobs.
 const CARVE_BARS: i64 = 64;
@@ -153,6 +166,11 @@ pub fn starting_project(lesson: &str) -> Project {
     match lesson {
         ARRANGE_HOUSE => return crate::demo::house_demo(),
         ARRANGE_BHAIRAV => return crate::demo::bhairav_demo(),
+        PROJECT_GROOVE => return project_after(0),
+        PROJECT_BASS => return project_after(1),
+        PROJECT_CHORDS => return project_after(2),
+        PROJECT_ARRANGE => return project_after(3),
+        PROJECT_FINISH => return project_after(4),
         _ => {}
     }
     if lesson.starts_with("carve-") || lesson.starts_with("recipe-") {
@@ -170,6 +188,105 @@ pub fn starting_project(lesson: &str) -> Project {
         instruments.push((bass, deep_rave_bass()));
     }
     Project { arrangement: arr, instruments, synth: None }
+}
+
+/// The house-track project as it stands after `parts` parts - what the
+/// next part starts from, so any part can be taken on its own.
+pub fn project_after(parts: usize) -> Project {
+    let mut arr = empty_arrangement();
+    let mut instruments = Vec::new();
+    if parts >= 1 {
+        let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, -6.0);
+        if parts >= 4 {
+            add_clip(&mut arr, drums, "Beat", 0, 16, 1, project_groove());
+            add_clip(&mut arr, drums, "Beat", 24, 32, 1, project_groove());
+        } else {
+            add_clip(&mut arr, drums, "Beat", 0, 16, 1, project_groove());
+        }
+    }
+    if parts >= 2 {
+        let bass = add_track(&mut arr, "Bass", ClipColor::Blue, Instrument::Carve, -7.0);
+        if parts >= 4 {
+            add_clip(&mut arr, bass, "Bassline", 4, 16, 4, project_bassline());
+            add_clip(&mut arr, bass, "Bassline", 24, 32, 4, project_bassline());
+        } else {
+            add_clip(&mut arr, bass, "Bassline", 4, 16, 4, project_bassline());
+        }
+        instruments.push((bass, crate::synth::recipes::deep_bass()));
+    }
+    if parts >= 3 {
+        let chords = add_track(&mut arr, "Chords", ClipColor::Violet, Instrument::Carve, if parts >= 5 { -10.0 } else { 0.0 });
+        let end = if parts >= 4 { 32 } else { 16 };
+        add_clip(&mut arr, chords, "Chords", 8, end, 4, project_chords());
+        instruments.push((chords, crate::synth::soft_pad()));
+    }
+    if parts >= 4 {
+        for (name, bar) in [("Intro", 0), ("Groove", 8), ("Breakdown", 16), ("Drop", 24)] {
+            let id = arr.alloc_id();
+            arr.markers.push(crate::arrangement::Marker { id, position: bar * BAR, name: name.into() });
+        }
+    }
+    Project { arrangement: arr, instruments, synth: None }
+}
+
+/// The project's beat: kick on every beat, clap on 2 and 4, closed hats
+/// on the "e" and "a", open hat on the "and".
+pub fn project_groove() -> Vec<MidiNote> {
+    let hit = |start, pitch, velocity| MidiNote { start, length: SIXTEENTH, pitch, velocity };
+    let mut notes = Vec::new();
+    for beat in 0..4 {
+        let at = beat * PPQ;
+        notes.push(hit(at, KICK, 127));
+        notes.push(hit(at + SIXTEENTH, crate::drums::CLOSED_HAT, 70));
+        notes.push(hit(at + PPQ / 2, OPEN_HAT, 70));
+        notes.push(hit(at + 3 * SIXTEENTH, crate::drums::CLOSED_HAT, 55));
+        if beat % 2 == 1 {
+            notes.push(hit(at, CLAP, 100));
+        }
+    }
+    notes
+}
+
+/// Off-beat roots following the chords, four bars.
+pub fn project_bassline() -> Vec<MidiNote> {
+    PROJECT_BASS_ROOTS
+        .iter()
+        .enumerate()
+        .flat_map(|(bar, &pitch)| {
+            (0..4).map(move |beat| MidiNote {
+                start: bar as i64 * BAR + beat * PPQ + PPQ / 2,
+                length: SIXTEENTH,
+                pitch,
+                velocity: 100,
+            })
+        })
+        .collect()
+}
+
+/// One chord stab per bar, on the downbeat.
+pub fn project_chords() -> Vec<MidiNote> {
+    PROJECT_CHORDS_NOTES
+        .iter()
+        .enumerate()
+        .flat_map(|(bar, chord)| {
+            chord.iter().map(move |&pitch| MidiNote { start: bar as i64 * BAR, length: SIXTEENTH, pitch, velocity: 100 })
+        })
+        .collect()
+}
+
+/// A clip from `start_bar` to `end_bar` looping a `pattern_bars` pattern.
+fn add_clip(arr: &mut Arrangement, track: TrackId, name: &str, start_bar: i64, end_bar: i64, pattern_bars: i64, notes: Vec<MidiNote>) {
+    let id = arr.alloc_id();
+    arr.clips.push(Clip {
+        id,
+        track,
+        start: start_bar * BAR,
+        length: (end_bar - start_bar) * BAR,
+        name: name.into(),
+        content: ClipContent::Midi { notes, loop_len: Some(pattern_bars * BAR), link: None },
+        recording: false,
+        gain_db: 0.0,
+    });
 }
 
 /// Lesson 1's beat: kick on every beat, clap on 2 and 4, open hat on
@@ -271,6 +388,23 @@ mod tests {
             let p = starting_project(id);
             let back: Project = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
             assert_eq!(back.arrangement.clips.len(), p.arrangement.clips.len(), "{id}");
+        }
+    }
+
+    #[test]
+    fn each_project_part_starts_where_the_last_ended() {
+        let tracks = |n| project_after(n).arrangement.tracks.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+        assert!(tracks(0).is_empty());
+        assert_eq!(tracks(1), ["Drums"]);
+        assert_eq!(tracks(3), ["Drums", "Bass", "Chords"]);
+        let after_arrange = project_after(4);
+        assert_eq!(after_arrange.arrangement.markers.len(), 4);
+        // The breakdown (bars 17-24) has no drums or bass.
+        for clip in &after_arrange.arrangement.clips {
+            let name = &after_arrange.arrangement.track(clip.track).unwrap().name;
+            if name == "Drums" || name == "Bass" {
+                assert!(clip.end() <= 16 * BAR || clip.start >= 24 * BAR, "{name} plays in the breakdown");
+            }
         }
     }
 }

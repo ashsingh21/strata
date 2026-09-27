@@ -70,6 +70,8 @@ pub enum Target {
     Solo(TrackId),
     /// A bar on the ruler (0-based) - where to click.
     RulerBar(i64),
+    /// A track's automation lanes (a canvas wash).
+    Automation(TrackId),
 }
 
 thread_local! {
