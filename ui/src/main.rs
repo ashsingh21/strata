@@ -4,6 +4,7 @@ mod canvas_text;
 mod compressor_curve;
 mod context_menu;
 mod device_area;
+mod dialogs;
 mod drum_kit_panel;
 mod eq_curve;
 mod effect_panel;
@@ -66,11 +67,7 @@ fn main() -> Result<(), ApplicationError> {
         Err(e) => {
             let message = format!("Strata couldn't start audio: {}.\n\nCheck that an output device is connected and not held exclusively by another program.", e.to_string().trim_end_matches('.'));
             eprintln!("{message}");
-            let _ = std::process::Command::new("zenity")
-                .arg("--error")
-                .arg("--title=Strata")
-                .arg(format!("--text={message}"))
-                .status();
+            dialogs::error(&message);
             std::process::exit(1);
         }
     };
@@ -347,6 +344,10 @@ fn main() -> Result<(), ApplicationError> {
                 KeymapEntry::new(26u8, |cx| cx.emit(TimelineEvent::DuplicateLinked)),
             ),
             (
+                KeyChord::new(Modifiers::SUPER | Modifiers::SHIFT, Code::KeyD),
+                KeymapEntry::new(27u8, |cx| cx.emit(TimelineEvent::DuplicateLinked)),
+            ),
+            (
                 KeyChord::new(Modifiers::CTRL, Code::KeyE),
                 KeymapEntry::new(6u8, |cx| cx.emit(TimelineEvent::SplitAtPlayhead)),
             ),
@@ -570,6 +571,28 @@ fn main() -> Result<(), ApplicationError> {
 /// Delete, Backspace, F, Home, Escape) must not fire while the user is
 /// typing a track name or a search. Every Textbox in the app is
 /// `Textbox<Signal<String>, String>`, so one downcast covers them all.
+/// A menu's shortcut hint in the platform's own style: "Ctrl+Shift+Z"
+/// everywhere but macOS, "shift-cmd-Z" as symbols there (every binding
+/// exists with both Ctrl and Cmd; see the keymap).
+pub fn shortcut(label: &'static str) -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        return match label {
+            "Ctrl+S" => "\u{2318}S",
+            "Ctrl+Z" => "\u{2318}Z",
+            "Ctrl+Shift+Z" => "\u{21e7}\u{2318}Z",
+            "Ctrl+X" => "\u{2318}X",
+            "Ctrl+C" => "\u{2318}C",
+            "Ctrl+V" => "\u{2318}V",
+            "Ctrl+D" => "\u{2318}D",
+            "Ctrl+Shift+D" => "\u{21e7}\u{2318}D",
+            other => other,
+        };
+    }
+    #[cfg(not(target_os = "macos"))]
+    label
+}
+
 pub(crate) fn text_input_focused(cx: &EventContext) -> bool {
     cx.get_view_with::<Textbox<Signal<String>, String>>(cx.focused()).is_some()
 }

@@ -28,113 +28,12 @@ pub fn default_projects_dir() -> PathBuf {
     dir
 }
 
-/// Runs `zenity --file-selection` as a plain child process for an Open
-/// dialog. Deliberately not a Rust-native dialog crate (`rfd` was tried
-/// first): every backend it offers either deadlocks Vizia's own event
-/// loop when called inline, or - moved to a background thread to avoid
-/// that - silently fails, because the underlying toolkit (GTK, or the
-/// portal's own GTK-based implementation) expects to own its one true
-/// thread and doesn't tolerate being reached from an ad-hoc spawned one.
-/// A separate process sidesteps all of that: it's `zenity`'s main thread,
-/// not this app's.
-fn zenity_pick_file(dir: &Path) -> Option<PathBuf> {
-    let output = std::process::Command::new("zenity")
-        .arg("--file-selection")
-        .arg("--title=Open Project")
-        .arg(format!("--filename={}/", dir.display()))
-        .arg("--file-filter=*.json")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!path.is_empty()).then(|| PathBuf::from(path))
-}
-
 /// What to do with unsaved changes before a destructive action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscardChoice {
     Save,
     DontSave,
     Cancel,
-}
-
-/// "Save changes to X?" - Save / Don't Save / Cancel. Dismissing the
-/// dialog (Esc, the window's X) counts as Cancel, the only safe default:
-/// "Don't Save" is deliberately the extra button, not zenity's cancel
-/// action, so nothing but an explicit click on it discards work. If
-/// zenity can't run at all this falls back to DontSave - i.e. the old
-/// behaviour - rather than making the window impossible to close.
-fn zenity_ask_save(name: &str, action: &str) -> DiscardChoice {
-    let output = std::process::Command::new("zenity")
-        .arg("--question")
-        .arg("--title=Unsaved changes")
-        .arg(format!("--text=Save changes to \u{201c}{name}\u{201d} before {action}?"))
-        .arg("--ok-label=Save")
-        .arg("--cancel-label=Cancel")
-        .arg("--extra-button=Don't Save")
-        .output();
-    match output {
-        Ok(out) if out.status.success() => DiscardChoice::Save,
-        Ok(out) if String::from_utf8_lossy(&out.stdout).trim() == "Don't Save" => DiscardChoice::DontSave,
-        Ok(_) => DiscardChoice::Cancel,
-        Err(e) => {
-            eprintln!("project: couldn't show the unsaved-changes dialog ({e}); continuing without saving");
-            DiscardChoice::DontSave
-        }
-    }
-}
-
-/// The Save As counterpart - see `zenity_pick_file`.
-fn zenity_save_file(dir: &Path, suggested_name: &str) -> Option<PathBuf> {
-    let output = std::process::Command::new("zenity")
-        .arg("--file-selection")
-        .arg("--save")
-        .arg("--confirm-overwrite")
-        .arg("--title=Save Project As")
-        .arg(format!("--filename={}/{suggested_name}.json", dir.display()))
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        return None;
-    }
-    let path = if path.ends_with(".json") { path } else { format!("{path}.json") };
-    Some(PathBuf::from(path))
-}
-
-/// The Export Audio dialog: a .wav path, `.wav` added if left off.
-fn zenity_export_file(dir: &Path, suggested_name: &str) -> Option<PathBuf> {
-    let output = std::process::Command::new("zenity")
-        .arg("--file-selection")
-        .arg("--save")
-        .arg("--confirm-overwrite")
-        .arg("--title=Export Audio")
-        // Only .wav files listed: otherwise the dialog pre-selects the
-        // first file in the folder (a project .json) over the suggested name.
-        .arg("--file-filter=WAV audio | *.wav")
-        .arg(format!("--filename={}/{suggested_name}.wav", dir.display()))
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        return None;
-    }
-    // OK with the name left empty hands back the folder: use the project's name.
-    let path = PathBuf::from(path);
-    if path.is_dir() {
-        return Some(path.join(format!("{suggested_name}.wav")));
-    }
-    let path = path.to_string_lossy().into_owned();
-    let path = if path.to_lowercase().ends_with(".wav") { path } else { format!("{path}.wav") };
-    Some(PathBuf::from(path))
 }
 
 /// The file this app has always saved to before project management
@@ -221,7 +120,7 @@ pub enum ProjectEvent {
     DiscardDecided(GuardedAction, DiscardChoice),
 }
 
-/// Runs a (`zenity`) dialog on a background thread and reports whatever
+/// Runs a dialog (see `crate::dialogs`) on a background thread and reports whatever
 /// it returns back as `event`, rather than calling it inline and blocking
 /// Vizia's own event loop on a child process for however long the person
 /// takes to pick a file.
@@ -424,7 +323,7 @@ impl ProjectModel {
             GuardedAction::Lesson(_) => "starting a lesson",
         };
         cx.spawn(move |proxy| {
-            let choice = zenity_ask_save(&name, verb);
+            let choice = crate::dialogs::ask_save(&name, verb);
             let _ = proxy.emit(ProjectEvent::DiscardDecided(action, choice));
         });
     }
@@ -443,7 +342,7 @@ impl ProjectModel {
                 self.saved.set(snapshot(&empty_arrangement(), &BTreeMap::new()));
             }
             GuardedAction::Open => {
-                spawn_dialog(cx, || zenity_pick_file(&default_projects_dir()), ProjectEvent::OpenPicked)
+                spawn_dialog(cx, || crate::dialogs::pick_project(&default_projects_dir()), ProjectEvent::OpenPicked)
             }
             GuardedAction::Lesson(n) => {
                 let Some(lesson) = crate::lessons::course::LESSONS.get(n) else { return };
@@ -500,7 +399,7 @@ impl Model for ProjectModel {
             ProjectEvent::ExportDialog => {
                 if !self.exporting {
                     let name = self.display_name.get();
-                    spawn_dialog(cx, move || zenity_export_file(&default_projects_dir(), &name), ProjectEvent::ExportPicked);
+                    spawn_dialog(cx, move || crate::dialogs::export_wav(&default_projects_dir(), &name), ProjectEvent::ExportPicked);
                 }
             }
             ProjectEvent::ExportPicked(Some(path)) => self.start_export(cx, path.clone()),
@@ -570,7 +469,7 @@ impl Model for ProjectModel {
 
 /// Shared by `Save` (when there's no current path yet) and `SaveAsDialog`.
 fn spawn_save_as_dialog(cx: &mut EventContext, suggested: String) {
-    spawn_dialog(cx, move || zenity_save_file(&default_projects_dir(), &suggested), ProjectEvent::SaveAsPicked);
+    spawn_dialog(cx, move || crate::dialogs::save_project(&default_projects_dir(), &suggested), ProjectEvent::SaveAsPicked);
 }
 
 /// The project this app should open at startup: the last-saved project's

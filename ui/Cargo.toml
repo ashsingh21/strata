@@ -15,3 +15,7 @@ serde_json = "1"
 
 [build-dependencies]
 serde_json = "1"
+
+# Native dialogs on macOS/Windows (Linux uses zenity - see ui/src/dialogs.rs).
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = "0.17.2"

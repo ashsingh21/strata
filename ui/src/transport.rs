@@ -147,6 +147,7 @@ fn file_menu_item_with_shortcut(
         // itself, so a hoverable label made clicks on the text do nothing.
         Label::new(cx, label).class("body").hoverable(false);
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0)).hoverable(false);
+        let shortcut = crate::shortcut(shortcut);
         if !shortcut.is_empty() {
             Label::new(cx, shortcut).class("value").hoverable(false);
         }
