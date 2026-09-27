@@ -35,7 +35,6 @@ use interval_input::state::IntervalInputModel;
 use piano_roll::state::{PianoRollEvent, PianoRollModel};
 use project::{ProjectEvent, ProjectModel};
 use recorder::{RecorderModel, RecordingCoordinator};
-use shared::arrangement::position_to_ticks;
 use synth::state::{SynthEvent, SynthModel};
 use timeline::state::{TimelineEvent, TimelineState};
 
@@ -82,6 +81,7 @@ fn main() -> Result<(), ApplicationError> {
         let record_armed = app_data.record_armed;
         let click_on = app_data.click_on;
         let position = app_data.position;
+        let sample_counter = app_data.sample_counter;
         let sidebar_open = app_data.sidebar_open;
         let cpu_load = app_data.cpu_load;
         let output_db = app_data.output_db;
@@ -216,7 +216,12 @@ fn main() -> Result<(), ApplicationError> {
                 last_tick.set(now);
 
                 cx.emit(AppEvent::Tick);
-                let ticks = position_to_ticks(position.get());
+                // Sample-accurate, not `position_to_ticks(position.get())`
+                // (that value only carries 16th-note resolution - fine
+                // for the transport's text readout, but it made the
+                // playhead visibly step once per 16th note instead of
+                // gliding).
+                let ticks = tl_arrangement.get().tempo_map.samples_to_ticks(sample_counter.get() as i64, engine_sample_rate);
                 let is_playing = playing.get();
                 cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: is_playing });
                 midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing);

@@ -452,7 +452,14 @@ fn write_block<T>(
     let cpu_load = if budget > 0.0 { started.elapsed().as_secs_f32() / budget } else { 0.0 };
     // Best-effort: if the UI hasn't drained recently the ring buffer may be
     // full. Dropping a telemetry frame is harmless; never block.
-    let _ = telemetry.push(Telemetry { peak_l, peak_r, position, cpu_load, block_frames: frames as u32 });
+    let _ = telemetry.push(Telemetry {
+        peak_l,
+        peak_r,
+        position,
+        sample_counter: *sample_counter,
+        cpu_load,
+        block_frames: frames as u32,
+    });
     let mut lfo_phases = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
     for (engine, phases) in synth_engines.iter().zip(lfo_phases.iter_mut()) {
         *phases = engine.lfo_phases();

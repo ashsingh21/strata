@@ -156,7 +156,15 @@ pub struct Position {
 pub struct Telemetry {
     pub peak_l: f32,
     pub peak_r: f32,
+    /// Quantized to the nearest 16th note - fine for the transport's
+    /// bar.beat.sixteenth text readout, but too coarse to drive a smooth
+    /// playhead: use `sample_counter` (exact) for anything pixel-accurate.
     pub position: Position,
+    /// The exact running sample count this block ended at - sample-
+    /// accurate, unlike `position`. Convert with
+    /// `TempoMap::samples_to_ticks` for a playhead that doesn't visibly
+    /// step once per 16th note.
+    pub sample_counter: u64,
     /// Time spent rendering this block as a fraction of its duration.
     pub cpu_load: f32,
     /// Frames in this block (the device's buffer size).

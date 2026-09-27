@@ -32,6 +32,12 @@ pub struct AppData {
     pub record_armed: Signal<bool>,
     pub click_on: Signal<bool>,
     pub position: Signal<Position>,
+    /// The engine's exact running sample count as of the latest telemetry
+    /// frame - sample-accurate, unlike `position` (quantized to the
+    /// nearest 16th note). `main.rs`'s render timer converts this through
+    /// `TempoMap::samples_to_ticks` to drive the playhead smoothly instead
+    /// of visibly stepping once per 16th note.
+    pub sample_counter: Signal<u64>,
     pub sidebar_open: Signal<bool>,
 
     // Engine status for the header and status bar.
@@ -100,6 +106,7 @@ impl AppData {
             record_armed: Signal::new(false),
             click_on: Signal::new(false),
             position: Signal::new(Position::default()),
+            sample_counter: Signal::new(0),
             sidebar_open: Signal::new(true),
             cpu_load: Signal::new(0.0),
             block_frames: Signal::new(0),
@@ -146,10 +153,12 @@ impl Model for AppData {
                 self.playing.set(false);
                 self.params.request_stop();
                 self.position.set(Position::default());
+                self.sample_counter.set(0);
             }
             AppEvent::Rewind => {
                 self.params.request_stop();
                 self.position.set(Position::default());
+                self.sample_counter.set(0);
             }
             AppEvent::Tap => {
                 // Average the last few intervals; a pause over two seconds
@@ -202,11 +211,13 @@ impl AppData {
         let mut peak_l = 0.0f32;
         let mut peak_r = 0.0f32;
         let mut latest_position = None;
+        let mut latest_sample_counter = None;
         let mut cpu = 0.0f32;
-        while let Ok(Telemetry { peak_l: l, peak_r: r, position, cpu_load, block_frames }) = self.telemetry.pop() {
+        while let Ok(Telemetry { peak_l: l, peak_r: r, position, sample_counter, cpu_load, block_frames }) = self.telemetry.pop() {
             peak_l = peak_l.max(l);
             peak_r = peak_r.max(r);
             latest_position = Some(position);
+            latest_sample_counter = Some(sample_counter);
             cpu = cpu.max(cpu_load);
             if block_frames != self.block_frames.get() {
                 self.block_frames.set(block_frames);
@@ -220,6 +231,9 @@ impl AppData {
         }
         if let Some(position) = latest_position {
             self.position.set(position);
+        }
+        if let Some(sample_counter) = latest_sample_counter {
+            self.sample_counter.set(sample_counter);
         }
 
         let decay = METER_DECAY_DB_PER_SEC * dt;
