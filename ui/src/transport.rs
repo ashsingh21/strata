@@ -58,6 +58,59 @@ pub struct HeaderProps {
     /// The current project's display name (its file stem, or "Untitled"
     /// before its first save) - see `crate::project`.
     pub project_name: Signal<String>,
+    pub menus: HeaderMenus,
+}
+
+/// Open/closed state of the header's drop-down menus (File, time
+/// signature, input device). Created in `main.rs` rather than inside
+/// `header()` so the click-outside backdrop can be mounted at the window
+/// root - see `header_menu_backdrop`.
+#[derive(Clone, Copy)]
+pub struct HeaderMenus {
+    pub file: Signal<bool>,
+    pub time_sig: Signal<bool>,
+    pub input_device: Signal<bool>,
+}
+
+impl HeaderMenus {
+    pub fn new() -> Self {
+        Self { file: Signal::new(false), time_sig: Signal::new(false), input_device: Signal::new(false) }
+    }
+
+    fn any_open(self) -> bool {
+        self.file.get() || self.time_sig.get() || self.input_device.get()
+    }
+
+    fn close_all(self) {
+        self.file.set(false);
+        self.time_sig.set(false);
+        self.input_device.set(false);
+    }
+
+    /// Opens/closes `which`, closing any other open menu - only one drop-
+    /// down at a time.
+    fn toggle(self, which: Signal<bool>) {
+        let was_open = which.get();
+        self.close_all();
+        which.set(!was_open);
+    }
+}
+
+/// Transparent full-window layer under the header's menus (z-index 170 vs
+/// the menus' 180, same as the timeline's context menu): any click
+/// outside an open menu closes it. Mounted at the window root, since the
+/// header itself only spans the top strip.
+pub fn header_menu_backdrop(cx: &mut Context, menus: HeaderMenus) {
+    let any_open = Memo::new(move |_| menus.any_open());
+    Element::new(cx)
+        .class("context-menu-backdrop")
+        .toggle_class("hidden", any_open.map(|o| !*o))
+        .on_mouse_down(move |_cx, _| menus.close_all())
+        .position_type(PositionType::Absolute)
+        .top(Pixels(0.0))
+        .left(Pixels(0.0))
+        .width(Stretch(1.0))
+        .height(Stretch(1.0));
 }
 
 fn vsep(cx: &mut Context) {
@@ -155,8 +208,9 @@ fn elapsed_text(position: Position, bpm: f64) -> String {
 pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + Copy + 'static) {
     let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, interval_open, project_name, .. } =
         props;
-    let file_menu_open: Signal<bool> = Signal::new(false);
-    let input_device_menu_open: Signal<bool> = Signal::new(false);
+    let menus = props.menus;
+    let file_menu_open = menus.file;
+    let input_device_menu_open = menus.input_device;
     let renaming: Signal<bool> = Signal::new(false);
     let rename_draft: Signal<String> = Signal::new(project_name.get());
 
@@ -189,7 +243,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                     Button::new(cx, move |cx| Label::new(cx, project_name).class("title").font_size(14.0))
                         .class("btn")
                         .class("quiet")
-                        .on_press(move |_cx| file_menu_open.update(|o| *o = !*o));
+                        .on_press(move |_cx| menus.toggle(file_menu_open));
                 }
             });
             Label::new(cx, status).class("value").font_size(12.0);
@@ -197,10 +251,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .width(Pixels(126.0))
         .height(Auto);
 
-        // The File menu: no backdrop, unlike the timeline's right-click
-        // menu - it only ever spans this one corner, so toggling the
-        // title button again (or picking an item) is enough to close it.
-        // Built once and toggled with `.hidden` (`display: none`, same as
+        // The File menu. Built once and toggled with `.hidden` (`display: none`, same as
         // every other overlay in the app) rather than conditionally
         // constructed via `Binding` - a freshly built entity is a plausible
         // reason a click landing right as it appears wouldn't resolve to
@@ -324,17 +375,16 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             .class("quiet")
             .on_press(|cx| cx.emit(AppEvent::Tap));
 
-        let time_sig_menu_open: Signal<bool> = Signal::new(false);
+        let time_sig_menu_open = menus.time_sig;
         let time_sig_text = Memo::new(move |_| {
             let sig = props.arrangement.get().tempo_map.time_signature_at(0);
             format!("{}/{}", sig.numerator, sig.denominator)
         });
         Button::new(cx, move |cx| Label::new(cx, time_sig_text).font_size(13.0))
             .class("readout")
-            .on_press(move |_cx| time_sig_menu_open.update(|o| *o = !*o));
+            .on_press(move |_cx| menus.toggle(time_sig_menu_open));
 
-        // Same no-backdrop, toggle-to-close convention as the File menu
-        // and the input-device menu - just a common preset list rather
+        // A common preset list rather
         // than free-form numerator/denominator fields, since those are
         // the overwhelming majority of what anyone actually picks.
         VStack::new(cx, move |cx| {
@@ -443,14 +493,13 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             Button::new(cx, move |cx| Label::new(cx, device_label))
                 .class("btn")
                 .class("quiet")
-                .on_press(move |_cx| input_device_menu_open.update(|o| *o = !*o));
+                .on_press(move |_cx| menus.toggle(input_device_menu_open));
         })
         .gap(Pixels(SPACE_2))
         .alignment(Alignment::Center)
         .size(Auto);
 
-        // Same no-backdrop, toggle-to-close convention as the File menu -
-        // right-anchored rather than left-anchored, since its trigger
+        // Right-anchored rather than left-anchored, since its trigger
         // sits well into the header's right side, not its left edge.
         VStack::new(cx, move |cx| {
             input_device_menu_item(cx, "Default", None, props.selected_input_device, input_device_menu_open);

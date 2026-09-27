@@ -355,6 +355,7 @@ fn main() -> Result<(), ApplicationError> {
         ])
         .build(cx);
 
+        let header_menus = transport::HeaderMenus::new();
         VStack::new(cx, move |cx| {
             transport::header(
                 cx,
@@ -377,6 +378,7 @@ fn main() -> Result<(), ApplicationError> {
                     arrangement: tl_arrangement,
                     save_status,
                     project_name,
+                    menus: header_menus,
                 },
                 tl_bpm,
             );
@@ -466,6 +468,7 @@ fn main() -> Result<(), ApplicationError> {
 
             timeline::drums_menu_view(cx, tl_drums_menu_open);
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);
+            transport::header_menu_backdrop(cx, header_menus);
 
         })
         .class("app")
