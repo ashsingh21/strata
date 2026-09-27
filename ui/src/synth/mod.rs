@@ -173,6 +173,69 @@ fn knob(
     }
 }
 
+/// Carve's presets, where they belong - on the instrument: arrows to
+/// step through them, the name to open the full list.
+fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
+    use shared::synth::PRESETS;
+    let open = Signal::new(false);
+    // Where the current patch sits in the list (a patch not from the list
+    // steps from the start).
+    let index = move || PRESETS.iter().position(|(n, _)| *n == state.get().name);
+    let step = move |cx: &mut EventContext, delta: isize| {
+        let len = PRESETS.len() as isize;
+        let next = match index() {
+            Some(i) => (i as isize + delta).rem_euclid(len),
+            None => if delta > 0 { 0 } else { len - 1 },
+        };
+        cx.emit(SynthEvent::LoadPreset(PRESETS[next as usize].1));
+    };
+    HStack::new(cx, move |cx| {
+        Button::new(cx, |cx| Label::new(cx, "\u{2039}"))
+            .class("btn")
+            .class("quiet")
+            .class("sm")
+            .on_press(move |cx| step(cx, -1));
+        let name = state.map(|s| if s.name.is_empty() { "Untitled".to_string() } else { s.name.to_string() });
+        Button::new(cx, move |cx| Label::new(cx, name).hoverable(false))
+            .class("btn")
+            .class("sm")
+            .min_width(Pixels(120.0))
+            .lesson_target_if(|t| matches!(t, Some(crate::lessons::Target::Preset(_))))
+            .on_press(move |_| open.update(|o| *o = !*o));
+        Button::new(cx, |cx| Label::new(cx, "\u{203a}"))
+            .class("btn")
+            .class("quiet")
+            .class("sm")
+            .on_press(move |cx| step(cx, 1));
+
+        // The list, dropping down under the name.
+        VStack::new(cx, move |cx| {
+            for (preset, build) in PRESETS {
+                Button::new(cx, move |cx| Label::new(cx, preset).class("body").hoverable(false))
+                    .class("menu-item")
+                    .toggle_class("is-on", state.map(move |s| s.name == preset))
+                    .lesson_target(crate::lessons::Target::Preset(preset))
+                    .width(Stretch(1.0))
+                    .on_press(move |cx| {
+                        cx.emit(SynthEvent::LoadPreset(build));
+                        open.set(false);
+                    });
+            }
+        })
+        .class("panel")
+        .class("context-menu")
+        .toggle_class("hidden", open.map(|o| !*o))
+        .position_type(PositionType::Absolute)
+        .top(Pixels(tokens::SIZE_CONTROL + 4.0))
+        .left(Pixels(0.0))
+        .width(Pixels(200.0))
+        .height(Auto);
+    })
+    .gap(Pixels(2.0))
+    .alignment(Alignment::Left)
+    .size(Auto);
+}
+
 /// The `line` hairline that separates device sections (vertical) and rows
 /// (horizontal) - grouping by lines, never by boxes. Explicit elements
 /// rather than one-sided CSS borders, which Vizia doesn't draw.
@@ -565,8 +628,7 @@ pub fn synth_view(
         HStack::new(cx, move |cx| {
             Element::new(cx).class("swatch").background_color(crate::timeline::header::clip_color_to_rgb(track_color));
             Label::new(cx, "Carve").class("heading");
-            let preset = state.map(|s| if s.name.is_empty() { "Untitled".to_string() } else { s.name.to_string() });
-            Label::new(cx, preset).class("readout").size(Auto);
+            preset_selector(cx, state);
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
             Button::new(cx, |cx| Label::new(cx, "Guide"))
                 .class("btn")

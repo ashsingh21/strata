@@ -446,7 +446,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
             HStack::new(cx, move |cx| {
-                sidebar::sidebar(cx, synth_state, tl_arrangement, selected_track, sidebar_open, lessons_active, lessons_done);
+                sidebar::sidebar(cx, tl_arrangement, selected_track, sidebar_open, lessons_active, lessons_done);
                 Element::new(cx)
                     .class("hairline")
                     .toggle_class("hidden", sidebar_open.map(|o| !*o))

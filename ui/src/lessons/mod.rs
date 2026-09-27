@@ -44,7 +44,9 @@ pub enum Target {
     AddMidiTrack,
     AddDrumTrack,
     SidebarInstrument(Instrument),
-    SidebarPreset(&'static str),
+    /// A Carve preset (its entry in Carve's preset list; the list's
+    /// button glows too).
+    Preset(&'static str),
     Play,
     PatternPlus,
     /// A track's lane in the timeline (a canvas wash).
@@ -83,12 +85,22 @@ pub fn highlight_signal() -> Option<Signal<Option<Target>>> {
 pub trait LessonTargetExt {
     /// Glows (`is-lesson-target`) while a lesson step points at `target`.
     fn lesson_target(self, target: Target) -> Self;
+    /// Glows while the current target matches `pred` (for a control that
+    /// leads to several targets, like a menu's button).
+    fn lesson_target_if(self, pred: fn(&Option<Target>) -> bool) -> Self;
 }
 
 impl<V: View> LessonTargetExt for Handle<'_, V> {
     fn lesson_target(self, target: Target) -> Self {
         match HIGHLIGHT.get() {
             Some(h) => self.toggle_class("is-lesson-target", h.map(move |t| *t == Some(target))),
+            None => self,
+        }
+    }
+
+    fn lesson_target_if(self, pred: fn(&Option<Target>) -> bool) -> Self {
+        match HIGHLIGHT.get() {
+            Some(h) => self.toggle_class("is-lesson-target", h.map(move |t| pred(t))),
             None => self,
         }
     }

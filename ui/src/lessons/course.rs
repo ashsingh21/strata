@@ -105,10 +105,10 @@ pub const LESSONS: &[Lesson] = &[
                 |_| Some(Target::AddMidiTrack),
             ),
             act(
-                "A MIDI track holds notes; its instrument turns them into sound. New ones play Carve, a synth. Pick a bass sound: Presets \u{2192} Deep Rave Bass.",
-                "Presets are in the sidebar, under Instruments.",
+                "A MIDI track holds notes; its instrument turns them into sound. New ones play Carve, a synth. Pick a bass sound: click the preset name at the top of Carve (it says Warm Bass) and choose Deep Rave Bass.",
+                "Or step through the presets with the \u{2039} \u{203a} arrows beside the name.",
                 |s| selected(s).is_some_and(|t| t.instrument == Some(Instrument::Carve)) && s.synth.name == "Deep Rave Bass",
-                |_| Some(Target::SidebarPreset("Deep Rave Bass")),
+                |_| Some(Target::Preset("Deep Rave Bass")),
             ),
             act(
                 "Try it: press Z, X or C on your computer keyboard.",
@@ -152,10 +152,10 @@ pub const LESSONS: &[Lesson] = &[
                 |_| Some(Target::AddMidiTrack),
             ),
             act(
-                "Pick a soft sound for chords: Presets \u{2192} Soft Pad.",
-                "Presets are in the sidebar, under Instruments.",
+                "Pick a soft sound for chords: click the preset name at the top of Carve and choose Soft Pad.",
+                "Or step through the presets with the \u{2039} \u{203a} arrows beside the name.",
                 |s| selected(s).is_some_and(|t| t.instrument == Some(Instrument::Carve) && t.name != "Bass") && s.synth.name == "Soft Pad",
-                |_| Some(Target::SidebarPreset("Soft Pad")),
+                |_| Some(Target::Preset("Soft Pad")),
             ),
             act(
                 "Make a clip: double-click bar 1 of the new track.",
@@ -462,7 +462,7 @@ pub const LESSONS: &[Lesson] = &[
             ),
             info(
                 "Deep bass: a low octave, a sub underneath, a closed filter that punches open, and mono. \
-                 Compare with Presets \u{2192} Deep Rave Bass, which adds a detuned second saw.",
+                 Compare with Carve's Deep Rave Bass preset, which adds a detuned second saw.",
             ),
         ],
     },

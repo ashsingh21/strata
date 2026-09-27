@@ -1,13 +1,12 @@
-//! The browser sidebar: search, then the library (Carve - click to add it
-//! to the selected MIDI track - and its presets, which load into the
-//! selected track's Carve) and files (the drum samples in `assets/drums/`). Every row does
-//! something - a preset loads, a sample becomes a drum clip - and search
-//! narrows the rows as you type. Ctrl/Cmd+B collapses it to zero width.
+//! The browser sidebar: search, then the lessons, the instruments (click
+//! to put one on the selected MIDI track - Carve's presets live in Carve
+//! itself), files (the drum samples in `assets/drums/`), templates and
+//! effects. Every row does something, and search narrows the rows as you
+//! type. Ctrl/Cmd+B collapses it to zero width.
 
 use vizia::prelude::*;
 
 use shared::arrangement::{Arrangement, Effect, Instrument, TrackId};
-use shared::synth::{SynthState, PRESETS};
 
 use crate::lessons::{LessonTargetExt, Target};
 use crate::synth::state::SynthEvent;
@@ -52,7 +51,6 @@ fn row<'a>(cx: &'a mut Context, name: String, query: Signal<String>, nested: boo
 
 pub fn sidebar(
     cx: &mut Context,
-    synth: Signal<SynthState>,
     arrangement: Signal<Arrangement>,
     selected_track: Signal<Option<TrackId>>,
     open: Signal<bool>,
@@ -99,15 +97,6 @@ pub fn sidebar(
                         .lesson_target(Target::SidebarInstrument(instrument))
                         .toggle_class("is-on", selected_has)
                         .on_press(move |cx| cx.emit(SynthEvent::AddInstrumentToSelected(instrument)));
-                }
-
-                section_head(cx, "Presets", PRESETS.len());
-                for (name, build) in PRESETS {
-                    let loaded = synth.map(move |s| s.name == name);
-                    row(cx, name.to_string(), query, true)
-                        .lesson_target(Target::SidebarPreset(name))
-                        .toggle_class("is-on", loaded)
-                        .on_press(move |cx| cx.emit(SynthEvent::LoadPreset(build)));
                 }
 
                 for category in &sample_categories {
