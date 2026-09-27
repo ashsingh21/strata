@@ -111,6 +111,17 @@ fn nearest_input_port(graph: &EffectGraph, x: f32, y: f32) -> Option<EffectNodeI
         .map(|(id, _)| id)
 }
 
+/// An effect's processing latency in milliseconds, at the engine's fixed
+/// 48kHz sample rate (matching `eq_curve.rs`'s own display-side constant).
+/// Both effect types today are zero-latency feedforward DSP - update this
+/// alongside `engine::EffectUnit` when a lookahead- or FIR-based effect
+/// type is added.
+fn effect_latency_ms(effect: &Effect) -> f32 {
+    match effect {
+        Effect::Compressor(_) | Effect::Eq(_) => 0.0,
+    }
+}
+
 fn node_size(id: EffectNodeId) -> (f32, f32) {
     if id == EffectGraph::SOURCE || id == EffectGraph::OUTPUT {
         (IO_W, IO_H)
@@ -341,6 +352,20 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
             })
             .unwrap_or(false)
     });
+    // Real, summed from each enabled node's own latency - not a placeholder.
+    // Both effect types today (Compressor, EQ) are zero-latency (no
+    // lookahead, no FIR delay), so this is currently always 0.0ms; it'll
+    // start reporting something real the day a delay-based effect type
+    // adds `EffectUnit::latency_samples()` (see the backlog's "Parallel
+    // branches, engine side" note) without this readout needing to change.
+    let latency_ms = p.arrangement.map(move |arr| {
+        // `.max(0.0)` isn't just defensive - an empty `Iterator::sum`
+        // over f32 can produce -0.0 (confirmed on this toolchain), which
+        // `{:.1}` then prints as the nonsensical "-0.0 ms".
+        arr.fx(p.track)
+            .map(|fx| fx.ordered().iter().filter(|n| n.enabled).map(|n| effect_latency_ms(&n.effect)).sum::<f32>().max(0.0))
+            .unwrap_or(0.0)
+    });
 
     VStack::new(cx, move |cx| {
         // Header.
@@ -355,10 +380,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                 cx.emit(TimelineEvent::SetChainBypassed(p.track, !all_bypassed.get()));
             });
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-            Label::new(cx, "Latency 0.0 ms").class("meta");
-            Label::new(cx, "CPU 0%").class("meta");
-            Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
-            Label::new(cx, "100%").class("readout").class("sm");
+            Label::new(cx, latency_ms.map(|ms| format!("Latency {ms:.1} ms"))).class("meta");
             Button::new(cx, |cx| Label::new(cx, "\u{2715}")).class("btn").class("sm").class("quiet").on_press(move |_cx| {
                 p.board_open_track.set(None);
             });

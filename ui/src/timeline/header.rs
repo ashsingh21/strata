@@ -140,6 +140,64 @@ pub fn clip_color_to_rgb(color: ClipColor) -> Color {
     }
 }
 
+/// TrackHeaderFx: "FX" plus one pip per effect (filled = on, hollow =
+/// bypassed), an at-a-glance "what's on this chain" without opening the
+/// board. Click opens/closes the FxBoard for `track` (`None` = the master
+/// bus, same convention `Arrangement::fx` uses everywhere else); Alt-click
+/// toggles the whole chain's bypass without opening anything. Shared by a
+/// track's own header and the pinned Master row so both read identically
+/// instead of Master getting a plain, uninformative toggle.
+pub fn fx_pip_button<'a>(
+    cx: &'a mut Context,
+    arrangement: Signal<Arrangement>,
+    theme: Signal<ThemeId>,
+    track: Option<TrackId>,
+    board_open_track: Signal<Option<Option<TrackId>>>,
+) -> Handle<'a, impl View> {
+    let effect_nodes: Memo<Vec<EffectNode>> = arrangement.map(move |arr| {
+        arr.fx(track).map(|fx| fx.ordered().into_iter().copied().collect()).unwrap_or_default()
+    });
+    let has_effects = effect_nodes.map(|nodes| !nodes.is_empty());
+    let all_bypassed = effect_nodes.map(|nodes| !nodes.is_empty() && nodes.iter().all(|n| !n.enabled));
+    let board_open = Memo::new(move |_| board_open_track.get() == Some(track));
+
+    Button::new(cx, move |cx| {
+        HStack::new(cx, move |cx| {
+            Label::new(cx, "FX")
+                .class("meta")
+                .color(all_bypassed.map(move |b| if *b { theme.get().palette().ink_muted } else { theme.get().palette().ink }));
+            Binding::new(cx, effect_nodes, move |cx| {
+                let nodes = effect_nodes.get();
+                for node in nodes.iter().take(8) {
+                    Element::new(cx).class("fx-pip").toggle_class("is-on", node.enabled);
+                }
+                if nodes.len() > 8 {
+                    Label::new(cx, format!("+{}", nodes.len() - 8)).class("meta");
+                }
+            });
+        })
+        .gap(Pixels(2.0))
+        .alignment(Alignment::Center)
+        .size(Auto)
+    })
+    .class("btn")
+    .class("sm")
+    .toggle_class("quiet", has_effects.map(|h| !*h))
+    .toggle_class("is-on", board_open)
+    .on_press(move |cx| {
+        if cx.modifiers().alt() {
+            cx.emit(TimelineEvent::SetChainBypassed(track, !all_bypassed.get()));
+        } else if board_open.get() {
+            board_open_track.set(None);
+        } else {
+            if let Some(id) = track {
+                cx.emit(crate::synth::state::SynthEvent::SelectTrack(id));
+            }
+            board_open_track.set(Some(track));
+        }
+    })
+}
+
 pub fn track_header<'a>(
     cx: &'a mut Context,
     arrangement: Signal<Arrangement>,
@@ -164,12 +222,6 @@ pub fn track_header<'a>(
     let mute = arrangement.map(move |arr| arr.track(track_id).map(|t| t.mute).unwrap_or(false));
     let solo = arrangement.map(move |arr| arr.track(track_id).map(|t| t.solo).unwrap_or(false));
     let arm = arrangement.map(move |arr| arr.track(track_id).map(|t| t.arm).unwrap_or(false));
-    let effect_nodes: Memo<Vec<EffectNode>> = arrangement.map(move |arr| {
-        arr.track(track_id).map(|t| t.fx.ordered().into_iter().copied().collect()).unwrap_or_default()
-    });
-    let has_effects = effect_nodes.map(|nodes| !nodes.is_empty());
-    let all_bypassed = effect_nodes.map(|nodes| !nodes.is_empty() && nodes.iter().all(|n| !n.enabled));
-    let board_open = Memo::new(move |_| board_open_track.get() == Some(Some(track_id)));
     // The fader's own drag position is committed to the arrangement only
     // on release (see the `Fader::on_release` wiring below - committing on
     // every intermediate move would rebuild this whole header list mid-
@@ -232,48 +284,10 @@ pub fn track_header<'a>(
                     }
                 });
 
-                // TrackHeaderFx: "FX" plus one pip per effect (filled =
-                // on, hollow = bypassed), an at-a-glance "what's on this
-                // track" without opening the panel. Click opens the
-                // device panel and selects the track (stands in for a
-                // real board, which a later phase adds); Alt-click
-                // toggles the whole chain's bypass without opening
-                // anything. Lives in the title row, not down with
-                // M/S/Rec, so it reads as part of "what's on this track"
-                // alongside its name.
-                Button::new(cx, move |cx| {
-                    HStack::new(cx, move |cx| {
-                        Label::new(cx, "FX")
-                            .class("meta")
-                            .color(all_bypassed.map(move |b| if *b { theme.get().palette().ink_muted } else { theme.get().palette().ink }));
-                        Binding::new(cx, effect_nodes, move |cx| {
-                            let nodes = effect_nodes.get();
-                            for node in nodes.iter().take(8) {
-                                Element::new(cx).class("fx-pip").toggle_class("is-on", node.enabled);
-                            }
-                            if nodes.len() > 8 {
-                                Label::new(cx, format!("+{}", nodes.len() - 8)).class("meta");
-                            }
-                        });
-                    })
-                    .gap(Pixels(2.0))
-                    .alignment(Alignment::Center)
-                    .size(Auto)
-                })
-                .class("btn")
-                .class("sm")
-                .toggle_class("quiet", has_effects.map(|h| !*h))
-                .toggle_class("is-on", board_open)
-                .on_press(move |cx| {
-                    if cx.modifiers().alt() {
-                        cx.emit(TimelineEvent::SetChainBypassed(Some(track_id), !all_bypassed.get()));
-                    } else if board_open.get() {
-                        board_open_track.set(None);
-                    } else {
-                        cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
-                        board_open_track.set(Some(Some(track_id)));
-                    }
-                });
+                // Lives in the title row, not down with M/S/Rec, so it
+                // reads as part of "what's on this track" alongside its
+                // name.
+                fx_pip_button(cx, arrangement, theme, Some(track_id), board_open_track);
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, kind_label).class("meta");

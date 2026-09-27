@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use vizia::prelude::*;
 
-use header::{automation_header, track_header};
+use header::{automation_header, fx_pip_button, track_header};
 use lanes::{LaneArea, PlayheadOverlay};
 use ruler::Ruler;
 use shared::arrangement::{Arrangement, SnapGrid, Ticks};
@@ -152,19 +152,11 @@ pub fn timeline_view(
                 Label::new(cx, "Master").class("title");
                 Label::new(cx, "Main out").class("meta");
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-                let master_open = Memo::new(move |_| board_open_track.get() == Some(None));
-                Button::new(cx, |cx| Label::new(cx, "FX"))
-                    .class("btn")
-                    .class("sm")
-                    .toggle_class("is-on", master_open)
-                    .on_press(move |cx| {
-                        if master_open.get() {
-                            board_open_track.set(None);
-                        } else {
-                            board_open_track.set(Some(None));
-                        }
-                        let _ = cx;
-                    });
+                // Same TrackHeaderFx control a track's own header gets
+                // (pips per effect, Alt-click bypass-all) - was a plain
+                // toggle with no at-a-glance sense of what's on the
+                // master chain.
+                fx_pip_button(cx, arrangement, theme, None, board_open_track);
             })
             .class("transport")
             .gap(Pixels(tokens::SPACE_2))
