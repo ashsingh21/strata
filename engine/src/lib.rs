@@ -174,6 +174,7 @@ pub fn start(
     input_telemetry: rtrb::Producer<shared::recorder::InputTelemetry>,
     record_params: Arc<shared::recorder::RecordParams>,
     preferred_input_device: Option<&str>,
+    preview: shared::playback::PreviewEnds,
 ) -> Result<EngineHandle, EngineError> {
     let host = cpal::default_host();
     let device = host.default_output_device().ok_or(EngineError::NoOutputDevice)?;
@@ -193,6 +194,7 @@ pub fn start(
             synth_telemetry,
             playback_plan,
             decoded_sources,
+            preview,
         )?,
         SampleFormat::I16 => build_stream::<i16>(
             &device,
@@ -204,6 +206,7 @@ pub fn start(
             synth_telemetry,
             playback_plan,
             decoded_sources,
+            preview,
         )?,
         SampleFormat::U16 => build_stream::<u16>(
             &device,
@@ -215,6 +218,7 @@ pub fn start(
             synth_telemetry,
             playback_plan,
             decoded_sources,
+            preview,
         )?,
         other => return Err(EngineError::UnsupportedSampleFormat(other)),
     };
@@ -300,6 +304,7 @@ fn build_stream<T>(
     mut synth_telemetry: rtrb::Producer<SynthTelemetry>,
     mut playback_plan: rtrb::Consumer<PlaybackPlan>,
     mut decoded_sources: rtrb::Consumer<DecodedSource>,
+    mut preview: shared::playback::PreviewEnds,
 ) -> Result<cpal::Stream, EngineError>
 where
     T: SizedSample + FromSample<f32>,
@@ -341,6 +346,8 @@ where
     let mut click_hz = CLICK_HZ_BEAT;
     let click_decay_coeff = (-1.0 / (CLICK_DECAY_MS * 0.001 * sample_rate)).exp();
 
+    // The lesson preview playing, if any, and how far into it we are.
+    let mut preview_now: Option<(shared::playback::PreviewBuffer, usize)> = None;
     let mut current_plan = PlaybackPlan::default();
     let mut current_sources: Vec<DecodedSource> = Vec::with_capacity(DECODED_SOURCE_CAPACITY);
 
@@ -394,6 +401,19 @@ where
                     }
                     master_effects.set_state(current_plan.master_effect_count, &current_plan.master_effects);
                 }
+                // Latest-wins: a new preview replaces the one playing (an
+                // empty one just stops it). Finished buffers go back to be
+                // freed off the audio thread.
+                while let Ok(next) = preview.play_rx.pop() {
+                    if let Some((old, _)) = preview_now.take() {
+                        let _ = preview.retired_tx.push(old);
+                    }
+                    if next.is_empty() {
+                        let _ = preview.retired_tx.push(next);
+                    } else {
+                        preview_now = Some((next, 0));
+                    }
+                }
                 // Ordered: each newly decoded source matters.
                 while let Ok(decoded) = decoded_sources.pop() {
                     if let Some(existing) = current_sources.iter_mut().find(|d| d.source == decoded.source) {
@@ -426,7 +446,13 @@ where
                     click_decay_coeff,
                     &current_plan,
                     &current_sources,
+                    &mut preview_now,
                 );
+                if preview_now.as_ref().is_some_and(|(buf, pos)| *pos >= buf.len()) {
+                    if let Some((done, _)) = preview_now.take() {
+                        let _ = preview.retired_tx.push(done);
+                    }
+                }
             },
             err_fn,
             None,
@@ -459,6 +485,7 @@ fn write_block<T>(
     click_decay_coeff: f32,
     plan: &PlaybackPlan,
     sources: &[DecodedSource],
+    preview: &mut Option<(shared::playback::PreviewBuffer, usize)>,
 ) where
     T: Sample + FromSample<f32>,
 {
@@ -521,7 +548,15 @@ fn write_block<T>(
         } else {
             (0.0, 0.0)
         };
-        let (out_l, out_r) = master_effects.process(synth_l + click + clip_l, synth_r + click + clip_r);
+        let (mut out_l, mut out_r) = master_effects.process(synth_l + click + clip_l, synth_r + click + clip_r);
+        // A lesson preview: already mixed and mastered, added last.
+        if let Some((buf, pos)) = preview.as_mut() {
+            if *pos + 1 < buf.len() {
+                out_l += buf[*pos];
+                out_r += buf[*pos + 1];
+            }
+            *pos += 2;
+        }
 
         peak_l = peak_l.max(out_l.abs());
         peak_r = peak_r.max(out_r.abs());

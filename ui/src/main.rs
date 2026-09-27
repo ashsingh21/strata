@@ -46,6 +46,7 @@ fn main() -> Result<(), ApplicationError> {
     let synth_bridge = shared::synth::synth_bridge();
     let playback_bridge = shared::playback::playback_bridge();
     let recorder_bridge = shared::recorder::recorder_bridge();
+    let preview_bridge = shared::playback::preview_bridge();
     let record_params = std::sync::Arc::new(shared::recorder::RecordParams::new());
     let preferred_input_device = settings::load_input_device();
     let engine_handle = engine::start(
@@ -60,6 +61,7 @@ fn main() -> Result<(), ApplicationError> {
         recorder_bridge.telemetry_tx,
         record_params.clone(),
         preferred_input_device.as_deref(),
+        shared::playback::PreviewEnds { play_rx: preview_bridge.play_rx, retired_tx: preview_bridge.retired_tx },
     );
     // Without audio there's nothing to run - but a panic is invisible when
     // launched from the desktop (the window just never appears), so say
@@ -74,6 +76,10 @@ fn main() -> Result<(), ApplicationError> {
         }
     };
     let engine_sample_rate = engine_handle.sample_rate;
+    let lesson_preview = std::cell::Cell::new(Some(shared::playback::PreviewSender {
+        play_tx: preview_bridge.play_tx,
+        retired_rx: preview_bridge.retired_rx,
+    }));
     let playback_plan_tx = std::cell::RefCell::new(playback_bridge.plan_tx);
     let playback_decode_tx = playback_bridge.decode_tx;
     let record_command_tx = std::cell::RefCell::new(recorder_bridge.command_tx);
@@ -243,6 +249,9 @@ fn main() -> Result<(), ApplicationError> {
             sidebar_open,
             piano_roll_open_clip,
             tl_playhead,
+            synth_patches,
+            lesson_preview.take().expect("the app is built once"),
+            engine_sample_rate,
         );
         let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model);
         let lower_panel_height =

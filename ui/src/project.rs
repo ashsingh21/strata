@@ -245,27 +245,7 @@ impl ProjectModel {
                 if engine::render::song_end(&arrangement) == 0 {
                     return Err("nothing to export: the project has no clips".to_string());
                 }
-                // Every sample the song can play: its audio clips, and the
-                // drum kit if any track uses it.
-                let assets = crate::timeline::assets_dir();
-                let mut names: Vec<Arc<str>> = crate::timeline::peaks_loader::audio_sources(&arrangement).into_iter().collect();
-                if arrangement.tracks.iter().any(|t| t.instrument == Some(shared::arrangement::Instrument::Drums)) {
-                    names.extend(shared::drums::DRUM_KIT.iter().map(|p| Arc::from(p.sample)));
-                }
-                names.sort();
-                names.dedup();
-                let sources = names
-                    .into_iter()
-                    .filter_map(|name| {
-                        let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&assets.join(&*name))?;
-                        Some(shared::playback::DecodedSource {
-                            source: name,
-                            sample_rate: spec.sample_rate,
-                            channels: spec.channels,
-                            samples: Arc::from(samples),
-                        })
-                    })
-                    .collect();
+                let sources = decode_sources(&arrangement);
                 let job = engine::render::RenderJob { arrangement, patches, sources, sample_rate: SAMPLE_RATE };
                 let mut last = -1.0f32;
                 let audio = engine::render::render(&job, |p| {
@@ -486,4 +466,28 @@ fn spawn_save_as_dialog(cx: &mut EventContext, suggested: String) {
 pub fn startup_path() -> Option<PathBuf> {
     let legacy = legacy_project_path();
     legacy.exists().then_some(legacy)
+}
+
+/// Every sample `arrangement` can play, decoded for the offline renderer:
+/// its audio clips, and the drum kit if any track uses it.
+pub fn decode_sources(arrangement: &shared::arrangement::Arrangement) -> Vec<shared::playback::DecodedSource> {
+    let assets = crate::timeline::assets_dir();
+    let mut names: Vec<Arc<str>> = crate::timeline::peaks_loader::audio_sources(arrangement).into_iter().collect();
+    if arrangement.tracks.iter().any(|t| t.instrument == Some(shared::arrangement::Instrument::Drums)) {
+        names.extend(shared::drums::DRUM_KIT.iter().map(|p| Arc::from(p.sample)));
+    }
+    names.sort();
+    names.dedup();
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&assets.join(&*name))?;
+            Some(shared::playback::DecodedSource {
+                source: name,
+                sample_rate: spec.sample_rate,
+                channels: spec.channels,
+                samples: Arc::from(samples),
+            })
+        })
+        .collect()
 }

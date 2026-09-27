@@ -5,6 +5,7 @@
 use vizia::prelude::*;
 
 use super::course::{Kind, LESSONS};
+use super::preview::Which;
 use super::{LessonEvent, LessonModel};
 use crate::project::ProjectEvent;
 use crate::tokens;
@@ -13,11 +14,20 @@ use crate::tokens;
 pub struct LessonBarProps {
     pub active: Signal<Option<(usize, usize)>>,
     pub hint_visible: Signal<bool>,
+    pub previewing: Signal<Option<Which>>,
+    pub has_goal: Signal<bool>,
+    pub change_step: Signal<Option<usize>>,
 }
 
 impl LessonBarProps {
     pub fn of(model: &LessonModel) -> Self {
-        Self { active: model.active, hint_visible: model.hint_visible }
+        Self {
+            active: model.active,
+            hint_visible: model.hint_visible,
+            previewing: model.previewing,
+            has_goal: model.has_goal,
+            change_step: model.change_step,
+        }
     }
 }
 
@@ -50,12 +60,23 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
                 // for this step is due, which takes the line instead.
                 let why = step.checked_sub(1).map(|i| l.steps[i].why).unwrap_or("");
                 if !why.is_empty() {
-                    Label::new(cx, format!("Just now: {why}"))
-                        .class("value")
-                        .class("lesson-why")
-                        .width(Stretch(1.0))
-                        .text_wrap(true)
-                        .toggle_class("hidden", p.hint_visible.map(move |v| *v && !s.hint.is_empty()));
+                    HStack::new(cx, move |cx| {
+                        Label::new(cx, format!("Just now: {why}"))
+                            .class("value")
+                            .class("lesson-why")
+                            .width(Stretch(1.0))
+                            .text_wrap(true);
+                        // Hear the step just done: the sound before it and
+                        // after it, back to back, is the lesson.
+                        let unheard = p.change_step.map(move |c| step.checked_sub(1).is_none_or(|prev| *c != Some(prev)));
+                        for (which, label) in [(Which::Before, "Before"), (Which::After, "After")] {
+                            preview_button(cx, p, which, label).toggle_class("hidden", unheard);
+                        }
+                    })
+                    .gap(Pixels(tokens::SPACE_2))
+                    .alignment(Alignment::Left)
+                    .height(Auto)
+                    .toggle_class("hidden", p.hint_visible.map(move |v| *v && !s.hint.is_empty()));
                 }
                 if !s.hint.is_empty() {
                     Label::new(cx, s.hint)
@@ -68,6 +89,9 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
             .gap(Pixels(2.0))
             .width(Stretch(1.0))
             .height(Auto);
+
+            // Where this lesson is going, to have in your ears first.
+            preview_button(cx, p, Which::Goal, "Hear the goal").toggle_class("hidden", p.has_goal.map(|g| !*g));
 
             let last = step + 1 == l.steps.len();
             match s.kind {
@@ -109,4 +133,16 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
         .padding_top(Pixels(6.0))
         .padding_bottom(Pixels(6.0));
     });
+}
+
+/// "▸ {label}", or "■ Stop" while `which` plays.
+fn preview_button<'a>(cx: &'a mut Context, p: LessonBarProps, which: Which, label: &'static str) -> Handle<'a, Button> {
+    Button::new(cx, move |cx| {
+        Label::new(cx, p.previewing.map(move |now| {
+            if *now == Some(which) { "\u{25a0} Stop".to_string() } else { format!("\u{25b8} {label}") }
+        }))
+    })
+    .class("btn")
+    .class("quiet")
+    .on_press(move |cx| cx.emit(LessonEvent::Hear(which)))
 }

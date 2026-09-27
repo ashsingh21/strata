@@ -302,3 +302,38 @@ mod tests {
         assert_eq!(plan.clips[0].track, 2);
     }
 }
+
+/// A short, already-rendered stereo clip (interleaved, at the engine's
+/// rate) played straight to the output - the lessons' "Hear it" and
+/// before/after. An empty one stops whatever is previewing. Buffers the
+/// engine has finished with come back on `retired` so they're freed on
+/// the UI thread, never the audio thread.
+pub type PreviewBuffer = Arc<[f32]>;
+
+pub const PREVIEW_CAPACITY: usize = 8;
+
+pub struct PreviewBridge {
+    pub play_tx: rtrb::Producer<PreviewBuffer>,
+    pub play_rx: rtrb::Consumer<PreviewBuffer>,
+    pub retired_tx: rtrb::Producer<PreviewBuffer>,
+    pub retired_rx: rtrb::Consumer<PreviewBuffer>,
+}
+
+pub fn preview_bridge() -> PreviewBridge {
+    let (play_tx, play_rx) = rtrb::RingBuffer::new(PREVIEW_CAPACITY);
+    let (retired_tx, retired_rx) = rtrb::RingBuffer::new(PREVIEW_CAPACITY * 2);
+    PreviewBridge { play_tx, play_rx, retired_tx, retired_rx }
+}
+
+/// The UI's ends of a `PreviewBridge`: send buffers to play, and take
+/// played ones back to free.
+pub struct PreviewSender {
+    pub play_tx: rtrb::Producer<PreviewBuffer>,
+    pub retired_rx: rtrb::Consumer<PreviewBuffer>,
+}
+
+/// The engine's ends of a `PreviewBridge`.
+pub struct PreviewEnds {
+    pub play_rx: rtrb::Consumer<PreviewBuffer>,
+    pub retired_tx: rtrb::Producer<PreviewBuffer>,
+}

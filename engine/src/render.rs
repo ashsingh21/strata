@@ -43,12 +43,29 @@ pub fn song_end(arr: &Arrangement) -> Ticks {
 /// Renders `job` from the start to the song's end plus `TAIL_SECONDS`, as
 /// interleaved stereo. `progress` is called now and then with 0..1 and
 /// returns `false` to cancel (then `None` is returned).
-pub fn render(job: &RenderJob, mut progress: impl FnMut(f32) -> bool) -> Option<Vec<f32>> {
+pub fn render(job: &RenderJob, progress: impl FnMut(f32) -> bool) -> Option<Vec<f32>> {
+    let arr = &job.arrangement;
+    let end = arr.tempo_map.ticks_to_samples(song_end(arr), job.sample_rate) + (TAIL_SECONDS * job.sample_rate as f64) as i64;
+    render_samples(job, 0, end.max(0) as u64, progress)
+}
+
+/// Renders just ticks `from..to` (plus a short tail so the last notes
+/// ring out) - the lessons' "Hear it" previews. Notes that started
+/// before `from` aren't heard.
+pub fn render_between(job: &RenderJob, from: Ticks, to: Ticks, tail_seconds: f64) -> Vec<f32> {
+    let arr = &job.arrangement;
+    let sr = job.sample_rate;
+    let start = arr.tempo_map.ticks_to_samples(from, sr).max(0) as u64;
+    let end = arr.tempo_map.ticks_to_samples(to, sr).max(0) as u64 + (tail_seconds * sr as f64) as u64;
+    render_samples(job, start, end, |_| true).unwrap_or_default()
+}
+
+/// The render loop over samples `start..end`.
+fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMut(f32) -> bool) -> Option<Vec<f32>> {
     let arr = &job.arrangement;
     let sr = job.sample_rate;
     let srf = sr as f32;
-    let end_sample = arr.tempo_map.ticks_to_samples(song_end(arr), sr) + (TAIL_SECONDS * sr as f64) as i64;
-    let total = end_sample.max(0) as u64;
+    let total = end;
 
     // One engine slot per instrument track, in track order.
     let slots: Vec<TrackId> =
@@ -67,13 +84,13 @@ pub fn render(job: &RenderJob, mut progress: impl FnMut(f32) -> bool) -> Option<
 
     // (track, pitch) -> overlapping notes holding it, as live playback does.
     let mut held: HashMap<(TrackId, u8), u32> = HashMap::new();
-    let mut out = Vec::with_capacity(total as usize * 2);
-    let mut last_tick: Ticks = -1;
+    let mut out = Vec::with_capacity(end.saturating_sub(start) as usize * 2);
+    let mut last_tick: Ticks = arr.tempo_map.samples_to_ticks(start as i64, sr) - 1;
     // Events found but not yet reached: one exactly on a block boundary is
     // in this block's tick range but plays on the next block's first sample.
     let mut pending: Vec<shared::arrangement::TimedNote> = Vec::new();
     let mut block = 0u64;
-    let mut pos = 0u64;
+    let mut pos = start;
     while pos < total {
         let len = BLOCK.min(total - pos);
         let tick = arr.tempo_map.samples_to_ticks(pos as i64, sr);
@@ -171,7 +188,7 @@ pub fn render(job: &RenderJob, mut progress: impl FnMut(f32) -> bool) -> Option<
         pending.extend_from_slice(&events[next_event..]);
         pos += len;
         block += 1;
-        if block % 256 == 0 && !progress(pos as f32 / total as f32) {
+        if block % 256 == 0 && !progress((pos - start) as f32 / (total - start).max(1) as f32) {
             return None;
         }
     }
@@ -295,5 +312,25 @@ mod tests {
             sample_rate: 48_000,
         };
         assert!(render(&job, |_| false).is_none());
+    }
+
+    #[test]
+    fn a_range_renders_only_that_range() {
+        // A kick on beat 3 (1 s at 120 BPM); render beats 2 to 4.
+        let kick = MidiNote { start: PPQ * 2, length: PPQ / 4, pitch: shared::drums::KICK, velocity: 127 };
+        let arr = one_track_song(Instrument::Drums, vec![kick], PPQ * 4);
+        let source = DecodedSource {
+            source: Arc::from(shared::drums::pad_for_note(shared::drums::KICK).unwrap().sample),
+            sample_rate: 48_000,
+            channels: 1,
+            samples: Arc::from(vec![0.5f32; 2_400]),
+        };
+        let job = RenderJob { arrangement: arr, patches: BTreeMap::new(), sources: vec![source], sample_rate: 48_000 };
+        let out = render_between(&job, PPQ, PPQ * 3, 0.0);
+        // Two beats = 1 s, stereo.
+        assert_eq!(out.len(), 48_000 * 2);
+        // The kick lands half a second in.
+        assert_eq!(out[(24_000 - 1) * 2], 0.0);
+        assert!(out[24_000 * 2] > 0.01);
     }
 }

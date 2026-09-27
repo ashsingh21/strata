@@ -9,8 +9,11 @@
 
 pub mod bar;
 pub mod course;
+pub mod preview;
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vizia::prelude::*;
@@ -124,6 +127,11 @@ pub enum LessonEvent {
     /// Skip an action step without doing it.
     Skip,
     Exit,
+    /// Play the lesson's goal, or the last step's before / after (again:
+    /// stop it).
+    Hear(preview::Which),
+    /// A preview finished rendering; `generation` drops a stale one.
+    PreviewReady { generation: u64, which: preview::Which, audio: Arc<[f32]> },
 }
 
 pub struct LessonModel {
@@ -141,6 +149,24 @@ pub struct LessonModel {
     sidebar_open: Signal<bool>,
     open_clip: Signal<Option<shared::arrangement::ClipId>>,
     playhead: Signal<shared::arrangement::Ticks>,
+    patches: Signal<BTreeMap<TrackId, SynthState>>,
+    /// The preview playing (for the buttons' labels), and when it ends.
+    pub previewing: Signal<Option<preview::Which>>,
+    preview_ends: Option<Instant>,
+    /// Bumped per request, so a slow render can't start after a newer one.
+    preview_generation: u64,
+    preview_tx: rtrb::Producer<shared::playback::PreviewBuffer>,
+    /// Played buffers handed back by the audio thread, freed here.
+    preview_retired: rtrb::Consumer<shared::playback::PreviewBuffer>,
+    sample_rate: u32,
+    /// The app as it stood when the current step began.
+    step_before: Option<preview::Take>,
+    /// The step just done (index), before and after it.
+    last_change: Option<(usize, preview::Take, preview::Take)>,
+    /// Whether the current lesson has a goal to hear.
+    pub has_goal: Signal<bool>,
+    /// The step whose before / after can be heard (the one just done).
+    pub change_step: Signal<Option<usize>>,
 }
 
 impl LessonModel {
@@ -153,6 +179,9 @@ impl LessonModel {
         sidebar_open: Signal<bool>,
         open_clip: Signal<Option<shared::arrangement::ClipId>>,
         playhead: Signal<shared::arrangement::Ticks>,
+        patches: Signal<BTreeMap<TrackId, SynthState>>,
+        preview: shared::playback::PreviewSender,
+        sample_rate: u32,
     ) -> Self {
         let highlight = Signal::new(None);
         HIGHLIGHT.set(Some(highlight));
@@ -169,6 +198,17 @@ impl LessonModel {
             sidebar_open,
             open_clip,
             playhead,
+            patches,
+            previewing: Signal::new(None),
+            preview_ends: None,
+            preview_generation: 0,
+            preview_tx: preview.play_tx,
+            preview_retired: preview.retired_rx,
+            sample_rate,
+            step_before: None,
+            last_change: None,
+            has_goal: Signal::new(false),
+            change_step: Signal::new(None),
         }
     }
 
@@ -193,6 +233,11 @@ impl LessonModel {
         }
         self.active.set(Some((lesson, step)));
         self.step_started = Instant::now();
+        self.step_before = Some(preview::take_of(&self.snapshot(), &self.patches.get()));
+        if self.last_change.as_ref().is_some_and(|(i, ..)| i + 1 != step) {
+            self.last_change = None;
+        }
+        self.change_step.set(self.last_change.as_ref().map(|(i, ..)| *i));
         self.hint_visible.set(false);
         self.set_highlight(None);
         // Reaching the closing step is finishing the lesson.
@@ -207,8 +252,49 @@ impl LessonModel {
 
     fn exit(&mut self) {
         self.active.set(None);
+        self.stop_preview();
+        self.step_before = None;
+        self.last_change = None;
+        self.change_step.set(None);
         self.hint_visible.set(false);
         self.set_highlight(None);
+    }
+
+    /// Renders `which` on a worker thread; `PreviewReady` plays it.
+    fn hear(&mut self, cx: &mut EventContext, which: preview::Which) {
+        if self.previewing.get() == Some(which) {
+            self.stop_preview();
+            return;
+        }
+        let Some((lesson, _)) = self.active.get() else { return };
+        let take = match which {
+            preview::Which::Goal => preview::goal(course::LESSONS[lesson].id, &self.snapshot(), &self.patches.get()),
+            preview::Which::Before => self.last_change.as_ref().map(|(_, before, _)| before.clone()),
+            preview::Which::After => self.last_change.as_ref().map(|(_, _, after)| after.clone()),
+        };
+        let Some(take) = take else { return };
+        // One thing at a time: the song stops for a preview.
+        if self.playing.get() {
+            cx.emit(AppEvent::Stop);
+        }
+        self.stop_preview();
+        self.preview_generation += 1;
+        let generation = self.preview_generation;
+        let sample_rate = self.sample_rate;
+        cx.spawn(move |proxy| {
+            let sources = crate::project::decode_sources(&take.arrangement);
+            let job = engine::render::RenderJob { arrangement: take.arrangement, patches: take.patches, sources, sample_rate };
+            let audio = engine::render::render_between(&job, take.from, take.to, preview::TAIL_SECONDS);
+            let _ = proxy.emit(LessonEvent::PreviewReady { generation, which, audio: Arc::from(audio) });
+        });
+    }
+
+    fn stop_preview(&mut self) {
+        if self.previewing.get().is_some() {
+            let _ = self.preview_tx.push(Arc::from(Vec::new()));
+            self.previewing.set(None);
+        }
+        self.preview_ends = None;
     }
 
     fn set_highlight(&mut self, target: Option<Target>) {
@@ -238,13 +324,25 @@ impl Model for LessonModel {
                 if let Some(last) = self.arrangement.get().tracks.last() {
                     cx.emit(crate::synth::state::SynthEvent::SelectTrack(last.id));
                 }
+                self.last_change = None;
                 self.go_to(*lesson, 0);
+                let has_goal = preview::goal(course::LESSONS[*lesson].id, &self.snapshot(), &self.patches.get()).is_some();
+                self.has_goal.set(has_goal);
             }
             LessonEvent::Tick => {
+                while self.preview_retired.pop().is_ok() {}
+                if self.previewing.get().is_some()
+                    && (self.playing.get() || self.preview_ends.is_some_and(|t| Instant::now() >= t))
+                {
+                    self.stop_preview();
+                }
                 let Some((lesson, step)) = self.active.get() else { return };
                 let course::Kind::Action { check, target } = course::LESSONS[lesson].steps[step].kind else { return };
                 let snap = self.snapshot();
                 if check(&snap) {
+                    if let Some(before) = self.step_before.take() {
+                        self.last_change = Some((step, before, preview::take_of(&snap, &self.patches.get())));
+                    }
                     self.go_to(lesson, step + 1);
                 } else {
                     self.set_highlight(target(&snap));
@@ -259,6 +357,17 @@ impl Model for LessonModel {
                 }
             }
             LessonEvent::Exit => self.exit(),
+            LessonEvent::Hear(which) => self.hear(cx, *which),
+            LessonEvent::PreviewReady { generation, which, audio } => {
+                if *generation != self.preview_generation || self.active.get().is_none() {
+                    return;
+                }
+                let seconds = audio.len() as f64 / 2.0 / self.sample_rate as f64;
+                if self.preview_tx.push(audio.clone()).is_ok() {
+                    self.previewing.set(Some(*which));
+                    self.preview_ends = Some(Instant::now() + Duration::from_secs_f64(seconds));
+                }
+            }
         });
     }
 }
