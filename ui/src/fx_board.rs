@@ -63,11 +63,17 @@ fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId
         return (0.0, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
     if id == EffectGraph::OUTPUT {
-        let max_x = graph.nodes.iter().map(|n| n.position.0).fold(0.0f32, f32::max);
-        // Gap measured from whatever's last node's right edge - Source's
-        // own (at x=0) when the chain is empty, otherwise the rightmost
-        // real node's.
-        let x = if graph.nodes.is_empty() { IO_W + OUTPUT_GAP } else { max_x + CANVAS_MARGIN_X + NODE_W + OUTPUT_GAP };
+        // The gap is measured from the *actual last node in signal-chain
+        // order* (`ordered()`, walked from the real edge list), not just
+        // whichever node happens to have the largest x - position is
+        // cosmetic and dragging doesn't touch chain order (Phase 7), so
+        // those two can disagree once a node's been dragged out of its
+        // auto-layout position.
+        let last_x = graph.ordered().last().map(|n| n.position.0);
+        let x = match last_x {
+            Some(last_x) => last_x + CANVAS_MARGIN_X + NODE_W + OUTPUT_GAP,
+            None => IO_W + OUTPUT_GAP,
+        };
         return (x, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
     graph.node(id).map(|n| (n.position.0 + CANVAS_MARGIN_X, n.position.1)).unwrap_or((CANVAS_MARGIN_X, ROW_Y))
@@ -240,6 +246,11 @@ fn palette_row(cx: &mut Context, label: &'static str, effect: Effect, p: FxBoard
         .toggle_class("is-on", palette_drag.map(move |d| *d == Some(effect)))
         .toggle_class("hidden", query.map(move |q| !q.is_empty() && !needle.contains(&q.to_lowercase())))
         .cursor(CursorIcon::Hand)
+        // Without an explicit width the Label only hit-tests its own text
+        // glyphs - fine for "Compressor", nearly unclickable for "EQ".
+        // `sidebar.rs`'s equivalent row helper stretches for the same
+        // reason.
+        .width(Stretch(1.0))
         .on_mouse_down(move |cx, button| {
             if button == MouseButton::Left {
                 palette_drag.set(Some(effect));
