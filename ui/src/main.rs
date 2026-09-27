@@ -189,6 +189,16 @@ fn main() -> Result<(), ApplicationError> {
             let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
             if edited { "Edited".to_string() } else { "Saved".to_string() }
         });
+        // "Project - Strata", with a leading "*" while there are unsaved
+        // changes - the same edited-state the header shows, surfaced in the
+        // taskbar/alt-tab too. The builder's static `.title()` is set
+        // outside this closure, so the render timer pushes it as a window
+        // event whenever it changes (a Binding's first emit lands before
+        // the window exists, leaving the startup title stale).
+        let window_title = Memo::new(move |_| {
+            let dirty = if save_status.get() == "Edited" { "*" } else { "" };
+            format!("{dirty}{} \u{2014} Strata", project_name.get())
+        });
 
         let status_model = status::StatusModel::new();
         let status_touched = status_model.touched;
@@ -206,6 +216,7 @@ fn main() -> Result<(), ApplicationError> {
         // the timeline playhead from the transport's live position, and
         // schedules Carve to play whatever MIDI notes the playhead crossed.
         let last_tick = std::cell::Cell::new(Instant::now());
+        let last_title = std::cell::RefCell::new(String::new());
         let loop_params = params.clone();
         let midi_scheduler = timeline::scheduler::MidiScheduler::new();
         let recording_coordinator = RecordingCoordinator::new();
@@ -216,6 +227,11 @@ fn main() -> Result<(), ApplicationError> {
                 last_tick.set(now);
 
                 cx.emit(AppEvent::Tick);
+                let title = window_title.get();
+                if *last_title.borrow() != title {
+                    *last_title.borrow_mut() = title.clone();
+                    cx.emit(WindowEvent::SetTitle(title));
+                }
                 // Sample-accurate, not `position_to_ticks(position.get())`
                 // (that value only carries 16th-note resolution - fine
                 // for the transport's text readout, but it made the
