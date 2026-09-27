@@ -3,7 +3,7 @@
 //! is a change to this table.
 
 use shared::arrangement::{Clip, ClipContent, Instrument, Ticks, PPQ};
-use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT};
+use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT, SNARE};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
     RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
@@ -1201,9 +1201,10 @@ pub const LESSONS: &[Lesson] = &[
                 |s| row_or_clip(s, Instrument::Drums, CLAP),
             ),
             act(
-                "Closed hat on the 2nd and 4th square of every beat - the \u{201c}e\u{201d} and the \u{201c}a\u{201d} (8 hits).",
-                "Each beat has four squares: 1 e and a. Click the Closed Hat row on squares 2 and 4 of each.",
-                |s| drum_pattern_has(s, CLOSED_HAT, &SIXTEENTHS_E_AND_A),
+                "Closed hats drive it - your pick: the classic is the 2nd and 4th square of every beat (the \u{201c}e\u{201d} \
+                 and \u{201c}a\u{201d}), but every square, or a pattern of your own, works too. At least four hits.",
+                "Each beat has four squares: 1 e and a. The e-and-a pattern leaves the 3rd square free for the open hat.",
+                |s| clips_on(s, Instrument::Drums).any(|c| pitch_count(c, CLOSED_HAT) >= 4),
                 |s| row_or_clip(s, Instrument::Drums, CLOSED_HAT),
             ),
             act(
@@ -1213,6 +1214,14 @@ pub const LESSONS: &[Lesson] = &[
                 |s| row_or_clip(s, Instrument::Drums, OPEN_HAT),
             ),
             act("Press Space: that's a house groove.", "Or the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Your turn: make it yours. Add one hit the groove doesn't have yet - a Snare on the very last square, a \
+                 Kick just before the bar ends, a Clap somewhere new. Listen while it plays; keep what you like.",
+                "One hit away from the obvious places is what makes a groove sound played rather than programmed.",
+                "Anything outside the pattern counts. Don't like it? Click the note again to remove it and try another.",
+                groove_has_extra,
+                |s| row_or_clip(s, Instrument::Drums, SNARE),
+            ),
             act(
                 "Stretch the clip out to bar 17: drag its right edge. Sixteen bars of groove to build on.",
                 "Grab the very end of the clip in the timeline.",
@@ -1255,13 +1264,14 @@ pub const LESSONS: &[Lesson] = &[
                 |_| Some(Target::PatternPlus),
             ),
             act(
-                "Bar 1: A (the bottom row) on the four off-beats.",
+                "Bar 1: A, the bottom row. House bass usually sits on the four off-beats, between the kicks - but the \
+                 rhythm is yours: at least two A's in bar 1.",
                 "Off-beats: two squares after each beat number, where the open hat plays.",
                 |s| bass_bar(s, 0),
                 |s| row_or_clip(s, Instrument::Carve, PROJECT_BASS_ROOTS[0]),
             ),
             act(
-                "Bar 2: the same off-beats, on C.",
+                "Bar 2: C, in the same rhythm (or a new one).",
                 "Bar 2 starts at the 2 mark along the top.",
                 |s| bass_bar(s, 1),
                 |s| row_or_clip(s, Instrument::Carve, PROJECT_BASS_ROOTS[1]),
@@ -1275,6 +1285,14 @@ pub const LESSONS: &[Lesson] = &[
                 |s| project_bass(s).map(|b| Target::Lane(b.id)),
             ),
             act("Press Space.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Your turn: swap one bass note for another note of its chord. The chords you'll add are A minor (A C E), \
+                 C major (C E G), D sus (D G A) and C again - so in bar 1, try an E instead of one A.",
+                "Roots make the bass solid; other notes of the chord make it move. Both belong to the chord, so neither clashes.",
+                "Bar 1: E, a few rows above A. Bar 2: E or G. Bar 3: G or A. Click a note to remove it, click the new row to add one.",
+                bass_moves,
+                |s| row_or_clip(s, Instrument::Carve, PROJECT_CHORDS_NOTES[0][2]),
+            ),
             info(
                 "The bass plays the root of each chord you'll add next - A, C, D, C - in the gaps between the kicks. \
                  Next: the chords themselves.",
@@ -1311,7 +1329,8 @@ pub const LESSONS: &[Lesson] = &[
                 |_| Some(Target::PatternPlus),
             ),
             act(
-                "Bar 1, A minor: A, C and E stacked on the very first square.",
+                "Bar 1, A minor: A, C and E, stacked on the very first square. (A chord is its three notes: anywhere in \
+                 the bar, in any octave, still counts.)",
                 "Three clicks in the same column: A (bottom row), C, E.",
                 |s| chord_bar(s, 0),
                 |s| chord_target(s, 0),
@@ -1336,6 +1355,14 @@ pub const LESSONS: &[Lesson] = &[
                 |s| project_chord_track(s).map(|t| Target::Lane(t.id)),
             ),
             act("Press Space: drums, bass and chords.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Your turn: give the chords a rhythm. Add a second hit of a chord later in its bar - try A, C and E again \
+                 on the \u{201c}and\u{201d} of beat 2 in bar 1.",
+                "Chords that only land on the one sit still; a second hit answers the beat, and the gaps between hits become the groove.",
+                "The \u{201c}and\u{201d} of 2: two squares after the 2 mark. Or any square you like.",
+                chords_have_rhythm,
+                |s| chord_target(s, 0),
+            ),
             info(
                 "Am, C, Dsus, C - and the bass under them plays each chord's root. Notice the chords share notes \
                  (C and E in the first two, G in the next), so they flow. Next: turning 16 bars into a song.",
@@ -1437,10 +1464,6 @@ pub const LESSONS: &[Lesson] = &[
     },
 ];
 
-/// The "e" and "a" of every beat, in ticks.
-const SIXTEENTHS_E_AND_A: [Ticks; 8] = [
-    PPQ / 4, 3 * PPQ / 4, PPQ + PPQ / 4, PPQ + 3 * PPQ / 4, 2 * PPQ + PPQ / 4, 2 * PPQ + 3 * PPQ / 4, 3 * PPQ + PPQ / 4, 3 * PPQ + 3 * PPQ / 4,
-];
 /// The "and" of every beat.
 const OFFBEATS: [Ticks; 4] = [PPQ / 2, PPQ + PPQ / 2, 2 * PPQ + PPQ / 2, 3 * PPQ + PPQ / 2];
 /// Where the arrangement's markers go (0-based bars).
@@ -1464,16 +1487,65 @@ fn project_chord_track(s: &Snapshot) -> Option<&shared::arrangement::Track> {
     track_named(s, "Chords").or_else(|| tracks_with(s, Instrument::Carve).find(|t| t.name != "Bass"))
 }
 
-/// Bar `bar` of the bass pattern has its root on all four off-beats.
-fn bass_bar(s: &Snapshot, bar: usize) -> bool {
-    let starts: Vec<Ticks> = OFFBEATS.iter().map(|o| bar as i64 * BAR + o).collect();
-    project_bass(s).is_some_and(|b| clips_of(s, b.id).any(|c| has_notes(c, PROJECT_BASS_ROOTS[bar], &starts)))
+/// The pattern notes starting in bar `bar` (0-based) of `clip`.
+fn notes_in_bar(clip: &Clip, bar: usize) -> impl Iterator<Item = &shared::arrangement::MidiNote> {
+    let range = bars(bar as i64)..bars(bar as i64 + 1);
+    let notes = match &clip.content {
+        ClipContent::Midi { notes, .. } => notes.as_slice(),
+        _ => &[],
+    };
+    notes.iter().filter(move |n| range.contains(&n.start))
 }
 
-/// Bar `bar` of the chords pattern has its chord on the downbeat.
+/// Same note name, any octave.
+fn same_class(a: u8, b: u8) -> bool {
+    a % 12 == b % 12
+}
+
+/// Bar `bar` of the bass pattern has its root at least twice - any
+/// rhythm, any octave.
+fn bass_bar(s: &Snapshot, bar: usize) -> bool {
+    let root = PROJECT_BASS_ROOTS[bar];
+    project_bass(s).is_some_and(|b| clips_of(s, b.id).any(|c| notes_in_bar(c, bar).filter(|n| same_class(n.pitch, root)).count() >= 2))
+}
+
+/// Somewhere in the bass pattern, a note of its bar's chord other than
+/// the root.
+fn bass_moves(s: &Snapshot) -> bool {
+    project_bass(s).is_some_and(|b| {
+        clips_of(s, b.id).any(|c| {
+            (0..4).any(|bar| {
+                notes_in_bar(c, bar).any(|n| {
+                    !same_class(n.pitch, PROJECT_BASS_ROOTS[bar])
+                        && PROJECT_CHORDS_NOTES[bar].iter().any(|&p| same_class(n.pitch, p))
+                })
+            })
+        })
+    })
+}
+
+/// The chord's notes still missing from bar `bar`, in the order to click.
+fn chord_missing(clip: &Clip, bar: usize) -> impl Iterator<Item = u8> + '_ {
+    PROJECT_CHORDS_NOTES[bar].into_iter().filter(move |&p| !notes_in_bar(clip, bar).any(|n| same_class(n.pitch, p)))
+}
+
+/// Bar `bar` of the chords pattern has all three of its chord's notes -
+/// stacked or spread, in any octave.
 fn chord_bar(s: &Snapshot, bar: usize) -> bool {
-    let at = [bar as i64 * BAR];
-    project_chord_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| PROJECT_CHORDS_NOTES[bar].iter().all(|&p| has_notes(c, p, &at))))
+    project_chord_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| chord_missing(c, bar).next().is_none()))
+}
+
+/// Some bar of the chords plays its chord's notes at two different times.
+fn chords_have_rhythm(s: &Snapshot) -> bool {
+    project_chord_track(s).is_some_and(|t| {
+        clips_of(s, t.id).any(|c| {
+            (0..4).any(|bar| {
+                let mut starts =
+                    notes_in_bar(c, bar).filter(|n| PROJECT_CHORDS_NOTES[bar].iter().any(|&p| same_class(n.pitch, p))).map(|n| n.start);
+                starts.next().is_some_and(|first| starts.any(|t| t != first))
+            })
+        })
+    })
 }
 
 /// The row of the first chord note still missing (or the clip's lane).
@@ -1482,9 +1554,36 @@ fn chord_target(s: &Snapshot, bar: usize) -> Option<Target> {
     if s.open_clip.is_none() {
         return Some(Target::Lane(t.id));
     }
-    let at = [bar as i64 * BAR];
     let clip = clips_of(s, t.id).next()?;
-    PROJECT_CHORDS_NOTES[bar].iter().copied().find(|&p| !has_notes(clip, p, &at)).map(Target::PianoRollRow)
+    Some(Target::PianoRollRow(chord_missing(clip, bar).next().unwrap_or(PROJECT_CHORDS_NOTES[bar][0])))
+}
+
+/// How many times `pitch` plays in `clip`'s pattern.
+fn pitch_count(clip: &Clip, pitch: u8) -> usize {
+    match &clip.content {
+        ClipContent::Midi { notes, .. } => notes.iter().filter(|n| n.pitch == pitch).count(),
+        _ => 0,
+    }
+}
+
+/// A drum hit the groove lesson didn't ask for: a snare anywhere, or a
+/// kick, clap or open hat off its taught squares (closed hats were a free
+/// choice already).
+fn groove_has_extra(s: &Snapshot) -> bool {
+    let beats = [0, PPQ, 2 * PPQ, 3 * PPQ];
+    clips_on(s, Instrument::Drums).any(|c| {
+        let ClipContent::Midi { notes, .. } = &c.content else { return false };
+        notes.iter().any(|n| {
+            let at = n.start % BAR;
+            match n.pitch {
+                KICK => !beats.contains(&at),
+                CLAP => at != PPQ && at != 3 * PPQ,
+                OPEN_HAT => !OFFBEATS.contains(&at),
+                CLOSED_HAT => false,
+                _ => true,
+            }
+        })
+    })
 }
 
 fn has_marker_at(s: &Snapshot, bar: i64) -> bool {
@@ -2214,6 +2313,11 @@ mod tests {
         Command::DeleteClip { clip }.apply(&mut s.arrangement);
     }
 
+    /// The "e" and "a" of every beat, in ticks.
+    const SIXTEENTHS_E_AND_A: [Ticks; 8] = [
+        PPQ / 4, 3 * PPQ / 4, PPQ + PPQ / 4, PPQ + 3 * PPQ / 4, 2 * PPQ + PPQ / 4, 2 * PPQ + 3 * PPQ / 4, 3 * PPQ + PPQ / 4, 3 * PPQ + 3 * PPQ / 4,
+    ];
+
     #[test]
     fn project_groove_can_be_done_step_by_step() {
         walk_actions(
@@ -2226,6 +2330,7 @@ mod tests {
                 &|s| add_notes(s, CLOSED_HAT, &SIXTEENTHS_E_AND_A),
                 &|s| add_notes(s, OPEN_HAT, &super::OFFBEATS),
                 &play,
+                &|s| add_notes(s, SNARE, &[BAR - PPQ / 4]),
                 &|s| stretch_to(s, 16),
             ],
         );
@@ -2248,8 +2353,45 @@ mod tests {
                 &|s| add_notes(s, roots[3], &offbeats(3)),
                 &|s| stretch_to(s, 16),
                 &play,
+                // An E (the chord's fifth) in bar 1.
+                &|s| add_notes(s, 64, &[3 * PPQ / 2]),
             ],
         );
+    }
+
+    #[test]
+    fn project_parts_take_other_choices_too() {
+        // Bass: a rhythm of its own, an octave up.
+        let mut s = start(PROJECT_BASS);
+        add_midi_track(&mut s, "MIDI 1");
+        draw_clip_at(&mut s, 4);
+        pattern_bars(&mut s, 4);
+        add_notes(&mut s, PROJECT_BASS_ROOTS[0] + 12, &[0, 3 * PPQ]);
+        assert!(bass_bar(&s, 0));
+        assert!(!bass_bar(&s, 1));
+        // A note outside the chord isn't the "your turn" swap.
+        add_notes(&mut s, 62, &[PPQ]);
+        assert!(!bass_moves(&s));
+        // Chords: A minor spread across bar 1 as an arpeggio.
+        let mut s = start(PROJECT_CHORDS);
+        add_midi_track(&mut s, "MIDI 1");
+        draw_clip_at(&mut s, 8);
+        pattern_bars(&mut s, 4);
+        for (i, p) in [69u8, 60, 64].into_iter().enumerate() {
+            add_notes(&mut s, p, &[i as i64 * PPQ]);
+        }
+        assert!(chord_bar(&s, 0));
+        assert!(!chord_bar(&s, 1));
+        // Groove: hats on every square are a fine choice, and aren't an
+        // "extra" hit.
+        let mut s = start(PROJECT_GROOVE);
+        add_track(&mut s, "Drums", Some(Instrument::Drums));
+        draw_clip_at(&mut s, 0);
+        add_notes(&mut s, CLOSED_HAT, &(0..16).map(|i| i * PPQ / 4).collect::<Vec<_>>());
+        assert!(clips_on(&s, Instrument::Drums).any(|c| pitch_count(c, CLOSED_HAT) >= 4));
+        assert!(!groove_has_extra(&s));
+        add_notes(&mut s, KICK, &[3 * PPQ + 3 * PPQ / 4]);
+        assert!(groove_has_extra(&s));
     }
 
     #[test]
@@ -2272,6 +2414,11 @@ mod tests {
                 &|s| chord(s, 3),
                 &|s| stretch_to(s, 16),
                 &play,
+                &|s| {
+                    for p in PROJECT_CHORDS_NOTES[0] {
+                        add_notes(s, p, &[PPQ + PPQ / 2]);
+                    }
+                },
             ],
         );
     }
