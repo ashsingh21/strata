@@ -51,6 +51,13 @@ pub enum Command {
     /// linear). Inverse moves it back to just before its own
     /// pre-rewire successor, which restores the exact prior adjacency.
     RewireEffect { track: Option<TrackId>, node: EffectNodeId, before: EffectNodeId },
+    /// Adds a parallel connection without removing any existing one
+    /// (fan-out/fan-in) - a no-op (see `EffectGraph::connect`'s own doc
+    /// comment) if it would create a cycle or the edge already exists.
+    /// Not wired to any UI gesture yet - see the effects-board plan's
+    /// own Phase 11 notes on why engine execution has to land first.
+    ConnectEffect { track: Option<TrackId>, from: EffectNodeId, to: EffectNodeId },
+    DisconnectEffect { track: Option<TrackId>, from: EffectNodeId, to: EffectNodeId },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -312,6 +319,18 @@ impl Command {
                 let old_before = fx.successor_of(node).expect("RewireEffect: node has no successor");
                 fx.move_before(node, before);
                 Command::RewireEffect { track, node, before: old_before }
+            }
+
+            Command::ConnectEffect { track, from, to } => {
+                let fx = arr.fx_mut(track).expect("ConnectEffect: unknown track");
+                fx.connect(from, to);
+                Command::DisconnectEffect { track, from, to }
+            }
+
+            Command::DisconnectEffect { track, from, to } => {
+                let fx = arr.fx_mut(track).expect("DisconnectEffect: unknown track");
+                fx.disconnect(from, to);
+                Command::ConnectEffect { track, from, to }
             }
 
             Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity } => {

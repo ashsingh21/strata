@@ -293,6 +293,105 @@ impl EffectGraph {
             None => position,
         }
     }
+
+    // --- Parallel branches (Phase 11) -----------------------------------
+    //
+    // Everything above keeps the graph a strict line by construction.
+    // These add real fan-out/fan-in - one output feeding several inputs,
+    // one input summing several outputs - without touching any of the
+    // above, so every earlier phase's behavior on an still-linear graph
+    // (the overwhelmingly common case) is unchanged. Engine-side
+    // execution of a genuinely branching graph, and a wiring gesture
+    // that creates one (as opposed to reordering via `move_before`), are
+    // deliberately not part of this pass - see the effects-board plan's
+    // own Phase 11 notes.
+
+    /// Whether adding an edge `from -> to` would create a cycle - a DFS
+    /// from `to` looking for a path back to `from`. Every edge-adding
+    /// method here checks this first and refuses (returns `false`
+    /// instead of mutating) rather than ever leaving the graph cyclic.
+    pub fn would_cycle(&self, from: EffectNodeId, to: EffectNodeId) -> bool {
+        if from == to {
+            return true;
+        }
+        let mut stack = vec![to];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(current) = stack.pop() {
+            if current == from {
+                return true;
+            }
+            if !seen.insert(current) {
+                continue;
+            }
+            stack.extend(self.edges.iter().filter(|e| e.from == current).map(|e| e.to));
+        }
+        false
+    }
+
+    /// Adds a new edge without removing any existing one - the fan-out/
+    /// fan-in primitive. Returns `false` (no-op) if it would create a
+    /// cycle or the edge already exists.
+    pub fn connect(&mut self, from: EffectNodeId, to: EffectNodeId) -> bool {
+        if self.edges.contains(&EffectEdge { from, to }) || self.would_cycle(from, to) {
+            return false;
+        }
+        self.edges.push(EffectEdge { from, to });
+        true
+    }
+
+    /// Removes one specific edge (not the whole node) - the inverse of
+    /// `connect`. Returns `false` if that exact edge wasn't there.
+    pub fn disconnect(&mut self, from: EffectNodeId, to: EffectNodeId) -> bool {
+        let target = EffectEdge { from, to };
+        match self.edges.iter().position(|e| *e == target) {
+            Some(i) => {
+                self.edges.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// A topological order of the real nodes (Kahn's algorithm) - well-
+    /// defined for any acyclic graph, branching or not, unlike
+    /// `ordered()` (which assumes a strict line and silently follows
+    /// only the first outbound edge at each step). The engine's own
+    /// per-block DAG execution (summing at fan-in points) isn't wired to
+    /// this yet - it's the primitive that work would run on top of.
+    pub fn topo_order(&self) -> Vec<EffectNodeId> {
+        let mut in_degree: std::collections::HashMap<EffectNodeId, usize> =
+            self.nodes.iter().map(|n| (n.id, 0)).collect();
+        for edge in &self.edges {
+            // Only count an inbound edge from another *real* node -
+            // SOURCE isn't one, so a node fed straight from it (the
+            // overwhelmingly common case, "the first effect in the
+            // chain") still starts at in-degree 0, ready immediately.
+            if in_degree.contains_key(&edge.from) {
+                if let Some(d) = in_degree.get_mut(&edge.to) {
+                    *d += 1;
+                }
+            }
+        }
+        let mut ready: Vec<EffectNodeId> =
+            in_degree.iter().filter(|(_, d)| **d == 0).map(|(id, _)| *id).collect();
+        ready.sort();
+        let mut order = Vec::with_capacity(self.nodes.len());
+        while let Some(id) = ready.pop() {
+            order.push(id);
+            let mut newly_ready = Vec::new();
+            for edge in self.edges.iter().filter(|e| e.from == id) {
+                if let Some(d) = in_degree.get_mut(&edge.to) {
+                    *d -= 1;
+                    if *d == 0 {
+                        newly_ready.push(edge.to);
+                    }
+                }
+            }
+            newly_ready.sort();
+            ready.extend(newly_ready);
+        }
+        order
+    }
 }
 
 impl Default for EffectGraph {
@@ -713,6 +812,84 @@ mod effect_graph_tests {
         assert_eq!(ordered.len(), 2);
         assert!(ordered[0].enabled);
         assert!(!ordered[1].enabled);
+    }
+
+    #[test]
+    fn connect_adds_a_parallel_branch_without_removing_the_existing_one() {
+        // source -> a -> output, then connect source -> b too (fan-out)
+        // and b -> output (fan-in) - a now runs in parallel with b.
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        // `b` currently sits after `a` in the line; disconnect it from
+        // `a` and wire it in parallel instead: source -> b, b -> output.
+        assert!(graph.disconnect(a, b));
+        assert!(graph.connect(a, EffectGraph::OUTPUT));
+        assert!(graph.connect(EffectGraph::SOURCE, b));
+        // `b -> output` already exists from `push_at_end` and was never
+        // touched above - no need (and no room) to add it again.
+
+        // `a` still has its own source -> a -> output path.
+        assert!(graph.edges.contains(&EffectEdge { from: EffectGraph::SOURCE, to: a }));
+        assert!(graph.edges.contains(&EffectEdge { from: a, to: EffectGraph::OUTPUT }));
+        // `b` now has its own, independent path too.
+        assert!(graph.edges.contains(&EffectEdge { from: EffectGraph::SOURCE, to: b }));
+        assert!(graph.edges.contains(&EffectEdge { from: b, to: EffectGraph::OUTPUT }));
+
+        let order = graph.topo_order();
+        assert_eq!(order.len(), 2);
+        assert!(order.contains(&a));
+        assert!(order.contains(&b));
+    }
+
+    #[test]
+    fn connect_refuses_to_create_a_cycle() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        // a -> b already exists (the linear chain); wiring b -> a too
+        // would be a cycle.
+        assert!(graph.would_cycle(b, a));
+        assert!(!graph.connect(b, a));
+    }
+
+    #[test]
+    fn connect_refuses_a_duplicate_edge() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        assert!(!graph.connect(EffectGraph::SOURCE, a), "source -> a already exists from push_at_end");
+    }
+
+    #[test]
+    fn disconnect_then_connect_round_trips() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let before = graph.clone();
+        assert!(graph.disconnect(EffectGraph::SOURCE, a));
+        assert!(!same_wiring(&graph, &before));
+        assert!(graph.connect(EffectGraph::SOURCE, a));
+        assert!(same_wiring(&graph, &before));
+    }
+
+    #[test]
+    fn topo_order_respects_dependencies_even_when_branching() {
+        // Starts as source -> a -> c -> b -> output; rewire so both a
+        // and b feed into c instead (fan-in), and c feeds output
+        // directly: source -> a -> c -> output, source -> b -> c.
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let c = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        assert!(graph.disconnect(c, b));
+        assert!(graph.disconnect(b, EffectGraph::OUTPUT));
+        assert!(graph.connect(c, EffectGraph::OUTPUT));
+        assert!(graph.connect(EffectGraph::SOURCE, b));
+        assert!(graph.connect(b, c));
+
+        let order = graph.topo_order();
+        let pos = |id| order.iter().position(|n| *n == id).unwrap();
+        assert!(pos(a) < pos(c));
+        assert!(pos(b) < pos(c));
     }
 
     #[test]
