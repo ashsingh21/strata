@@ -239,15 +239,22 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                 Binding::new(cx, p.arrangement, move |cx| {
                     let arr = p.arrangement.get();
                     let Some(graph) = arr.fx(p.track) else { return };
+                    // Source names what feeds the chain: the track itself
+                    // (its name, then its instrument or "Audio clips"), or
+                    // for the master bus, the mix of all tracks.
+                    let track = p.track.and_then(|id| arr.track(id));
+                    let source_title = match (p.track, track) {
+                        (Some(_), Some(t)) => t.name.clone(),
+                        _ => "Mix".to_string(),
+                    };
                     let source_meta = match p.track {
-                        // An audio track has no instrument - its source is its clips.
-                        Some(id) => arr.track(id).and_then(|t| t.instrument).map(|i| i.name()).unwrap_or("Audio clips"),
-                        None => "Mix",
+                        Some(_) => track.and_then(|t| t.instrument).map(|i| i.name()).unwrap_or("Audio clips"),
+                        None => "All tracks",
                     };
 
                     for id in [EffectGraph::SOURCE, EffectGraph::OUTPUT] {
                         let (x, y) = io_position(graph, id, None);
-                        let label = if id == EffectGraph::SOURCE { "Source" } else { "Out" };
+                        let label = if id == EffectGraph::SOURCE { source_title.clone() } else { "Out".to_string() };
                         let meta = if id == EffectGraph::SOURCE {
                             source_meta
                         } else if p.track.is_some() {
@@ -256,7 +263,13 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             "Main out"
                         };
                         VStack::new(cx, move |cx| {
-                            Label::new(cx, label).class("meta");
+                            // Long track names end in "…" rather than
+                            // spilling out of the 88px pill.
+                            Label::new(cx, label)
+                                .class("meta")
+                                .text_wrap(false)
+                                .text_overflow(TextOverflow::Ellipsis)
+                                .max_width(Pixels(IO_W - 8.0));
                             Label::new(cx, meta).class("meta");
                         })
                         .class("fx-node")
