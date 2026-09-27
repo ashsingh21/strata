@@ -43,6 +43,9 @@ impl Project {
             if track.effect_slots.is_empty() && !track.effects.is_empty() {
                 track.effect_slots = track.effects.drain(..).map(crate::arrangement::EffectSlot::new).collect();
             }
+            if track.fx.ordered().is_empty() && !track.effect_slots.is_empty() {
+                track.fx = crate::arrangement::EffectGraph::from_flat(track.effect_slots.drain(..).collect());
+            }
         }
     }
 }
@@ -146,22 +149,25 @@ mod tests {
     }
 
     #[test]
-    fn migrates_old_shape_effects_to_effect_slots() {
+    fn migrates_old_shape_effects_all_the_way_to_the_graph() {
         use crate::arrangement::{CompressorState, Effect};
 
         let mut arrangement = seed_arrangement();
         let track = &mut arrangement.tracks[0];
         track.effects = vec![Effect::Compressor(CompressorState { threshold_db: -12.0, ..CompressorState::default() })];
         track.effect_slots = vec![];
+        track.fx = crate::arrangement::EffectGraph::new();
         let mut project = Project { arrangement, instruments: vec![], synth: None };
 
         project.migrate();
 
         let track = &project.arrangement.tracks[0];
         assert!(track.effects.is_empty(), "old-shape data should be drained, not left duplicated");
-        assert_eq!(track.effect_slots.len(), 1);
-        assert!(track.effect_slots[0].enabled, "an effect that was already on should stay on after migrating");
-        match track.effect_slots[0].effect {
+        assert!(track.effect_slots.is_empty(), "intermediate shape should also be drained, not left duplicated");
+        let ordered = track.fx.ordered();
+        assert_eq!(ordered.len(), 1);
+        assert!(ordered[0].enabled, "an effect that was already on should stay on after migrating");
+        match ordered[0].effect {
             Effect::Compressor(c) => assert_eq!(c.threshold_db, -12.0),
         }
     }

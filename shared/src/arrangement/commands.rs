@@ -4,8 +4,8 @@
 //! a plain stack of inverses.
 
 use super::model::{
-    Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
-    EffectSlot, Instrument, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId,
+    Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId, Effect,
+    EffectEdge, EffectNode, EffectNodeId, Instrument, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId,
 };
 #[cfg(test)]
 use super::model::DEFAULT_VELOCITY;
@@ -28,11 +28,19 @@ pub enum Command {
     RemoveMidiNote { clip: ClipId, start: Ticks, pitch: u8 },
     /// Sets (or, with `None`, removes) a track's instrument.
     SetInstrument { track: TrackId, instrument: Option<Instrument> },
-    /// Replaces a track's whole effect chain - same "replace the value,
-    /// inverse carries the old one" shape as `SetInstrument`, rather than
-    /// index-based add/remove, since there's only ever one effect type to
-    /// toggle so far.
-    SetTrackEffects { track: TrackId, effects: Vec<EffectSlot> },
+    /// Appends a new effect node at the end of a track's chain.
+    AddEffectNode { track: TrackId, effect: Effect },
+    /// Removes an effect node, reconnecting its neighbours - inverse
+    /// carries the exact removed node and its two edges so undo restores
+    /// precisely where it was, not just "a node with this effect".
+    RemoveEffectNode { track: TrackId, node: EffectNodeId },
+    /// The literal inverse of `RemoveEffectNode` - never emitted directly
+    /// by UI code, only produced as another command's undo.
+    ReinsertEffectNode { track: TrackId, node: EffectNode, inbound: EffectEdge, outbound: EffectEdge },
+    SetEffectEnabled { track: TrackId, node: EffectNodeId, enabled: bool },
+    /// Cosmetic (canvas position only) but still undoable, same as any
+    /// other edit here.
+    SetEffectNodePosition { track: TrackId, node: EffectNodeId, position: (f32, f32) },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -255,10 +263,35 @@ impl Command {
                 Command::SetInstrument { track, instrument: previous }
             }
 
-            Command::SetTrackEffects { track, effects } => {
-                let t = arr.track_mut(track).expect("SetTrackEffects: unknown track");
-                let previous = std::mem::replace(&mut t.effect_slots, effects);
-                Command::SetTrackEffects { track, effects: previous }
+            Command::AddEffectNode { track, effect } => {
+                let t = arr.track_mut(track).expect("AddEffectNode: unknown track");
+                let node = t.fx.push_at_end(effect);
+                Command::RemoveEffectNode { track, node }
+            }
+
+            Command::RemoveEffectNode { track, node } => {
+                let t = arr.track_mut(track).expect("RemoveEffectNode: unknown track");
+                let (node, inbound, outbound) = t.fx.remove(node).expect("RemoveEffectNode: unknown node");
+                Command::ReinsertEffectNode { track, node, inbound, outbound }
+            }
+
+            Command::ReinsertEffectNode { track, node, inbound, outbound } => {
+                let t = arr.track_mut(track).expect("ReinsertEffectNode: unknown track");
+                let id = node.id;
+                t.fx.reinsert(node, inbound, outbound);
+                Command::RemoveEffectNode { track, node: id }
+            }
+
+            Command::SetEffectEnabled { track, node, enabled } => {
+                let t = arr.track_mut(track).expect("SetEffectEnabled: unknown track");
+                let previous = t.fx.set_enabled(node, enabled);
+                Command::SetEffectEnabled { track, node, enabled: previous }
+            }
+
+            Command::SetEffectNodePosition { track, node, position } => {
+                let t = arr.track_mut(track).expect("SetEffectNodePosition: unknown track");
+                let previous = t.fx.set_position(node, position);
+                Command::SetEffectNodePosition { track, node, position: previous }
             }
 
             Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity } => {
@@ -435,6 +468,7 @@ mod tests {
             instrument: None,
             effects: vec![],
             effect_slots: vec![],
+            fx: crate::arrangement::EffectGraph::new(),
         });
         arr
     }
@@ -628,6 +662,7 @@ mod tests {
             instrument: None,
             effects: vec![],
             effect_slots: vec![],
+            fx: crate::arrangement::EffectGraph::new(),
         }
     }
 

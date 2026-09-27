@@ -68,6 +68,7 @@ mod tests {
             instrument: None,
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
         });
         arr.clips.push(Clip {
             id: 1,
@@ -128,6 +129,7 @@ mod tests {
             instrument: None,
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
         });
         let scheduled = notes_in_range(&arr, PPQ - 10, PPQ + 10);
         assert!(scheduled.note_on.is_empty());

@@ -55,25 +55,34 @@ pub struct Track {
     /// `default` so projects saved before instruments existed still load.
     #[serde(default)]
     pub instrument: Option<Instrument>,
-    /// The track's insert effect chain - separate from `instrument`
-    /// (an audio track has effects but no instrument; a MIDI track can
-    /// have both). `default` so projects saved before effects existed
-    /// still load. What all app code reads/writes now; `Project::migrate`
-    /// fills this in from `effects` (below) for a project saved before
-    /// per-effect enable bits existed.
+    /// The track's insert effect chain, as a graph (still walked in a
+    /// strict straight line until the parallel-branches phase - node
+    /// *order* comes from `EffectGraph`'s edges, never from a node's
+    /// on-canvas `position`, so dragging a node around and reordering
+    /// the signal chain stay decoupled). Separate from `instrument` (an
+    /// audio track has effects but no instrument; a MIDI track can have
+    /// both). `default` so projects saved before effects existed still
+    /// load; `Project::migrate` fills this in from `effect_slots`/
+    /// `effects` (below) for a project saved before the graph shape
+    /// existed.
     #[serde(default)]
+    pub fx: EffectGraph,
+    /// Old shape (a flat `Vec<EffectSlot>`, no positions/graph) - read-
+    /// only, kept only so `Project::migrate` can convert it into `fx`
+    /// once. Never written to a new save (`skip_serializing`).
+    #[serde(default, skip_serializing)]
     pub effect_slots: Vec<EffectSlot>,
-    /// Old shape (a bare `Effect`, no enable bit) - read-only, kept only
-    /// so `Project::migrate` can convert it into `effect_slots` once.
-    /// Never written to a new save (`skip_serializing`), same convention
-    /// as `Project`'s own `synth` legacy field.
+    /// Older still (a bare `Effect`, no enable bit either) - same
+    /// read-only, migrate-once, never-written-again treatment.
     #[serde(default, skip_serializing)]
     pub effects: Vec<Effect>,
 }
 
 /// One effect in a track's chain, plus whether it's actually running -
 /// added so the `TrackHeaderFx` pip control (filled = on, hollow = off)
-/// has a real bit to read instead of existence-only state.
+/// has a real bit to read instead of existence-only state. Superseded by
+/// `EffectNode` (which adds a graph position) but kept as the legacy
+/// shape `Project::migrate` reads from.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct EffectSlot {
     pub effect: Effect,
@@ -94,6 +103,160 @@ impl EffectSlot {
 impl From<Effect> for EffectSlot {
     fn from(effect: Effect) -> Self {
         Self::new(effect)
+    }
+}
+
+pub type EffectNodeId = u32;
+
+/// One real effect on the board, at a position the canvas can render it
+/// at (cosmetic only - see `EffectGraph`'s own doc comment on why
+/// position never drives audio order).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EffectNode {
+    pub id: EffectNodeId,
+    pub effect: Effect,
+    pub enabled: bool,
+    pub position: (f32, f32),
+}
+
+/// A directed connection between two nodes - `from`/`to` are either a
+/// real `EffectNode.id` or `EffectGraph::SOURCE`/`EffectGraph::OUTPUT`,
+/// the two fixed marker ids every graph has that never appear in `nodes`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EffectEdge {
+    pub from: EffectNodeId,
+    pub to: EffectNodeId,
+}
+
+/// A track's (or the master bus's) effect chain. Until the
+/// parallel-branches phase this is enforced-by-construction to stay a
+/// strict linear chain - every node has exactly one inbound and one
+/// outbound edge - so every mutating method here keeps that invariant
+/// rather than the caller having to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EffectGraph {
+    pub nodes: Vec<EffectNode>,
+    pub edges: Vec<EffectEdge>,
+    next_id: EffectNodeId,
+}
+
+impl EffectGraph {
+    /// Fixed marker ids for the chain's two ends - never real nodes, so
+    /// they never collide with a `next_id`-allocated `EffectNode.id`
+    /// (which starts at `SOURCE + 1` and only grows).
+    pub const SOURCE: EffectNodeId = 0;
+    pub const OUTPUT: EffectNodeId = 1;
+
+    pub fn new() -> Self {
+        Self { nodes: vec![], edges: vec![EffectEdge { from: Self::SOURCE, to: Self::OUTPUT }], next_id: 2 }
+    }
+
+    /// Rebuilds a graph from the old flat-list shape, in order - used
+    /// only by `Project::migrate`.
+    pub fn from_flat(slots: Vec<EffectSlot>) -> Self {
+        let mut graph = Self::new();
+        for (i, slot) in slots.into_iter().enumerate() {
+            let id = graph.push_at_end(slot.effect);
+            graph.set_enabled(id, slot.enabled);
+            if let Some(node) = graph.nodes.iter_mut().find(|n| n.id == id) {
+                node.position = (i as f32 * 166.0, 0.0);
+            }
+        }
+        graph
+    }
+
+    /// The real effect nodes, source-to-output. Every read site that used
+    /// to iterate the old flat `Vec<EffectSlot>` in order reads this
+    /// instead - it's the one thing that has to walk edges rather than
+    /// just `nodes` directly, since `nodes`' own storage order isn't
+    /// meaningful.
+    pub fn ordered(&self) -> Vec<&EffectNode> {
+        let mut out = Vec::with_capacity(self.nodes.len());
+        let mut current = Self::SOURCE;
+        while let Some(edge) = self.edges.iter().find(|e| e.from == current) {
+            if edge.to == Self::OUTPUT {
+                break;
+            }
+            match self.nodes.iter().find(|n| n.id == edge.to) {
+                Some(node) => out.push(node),
+                None => break,
+            }
+            current = edge.to;
+        }
+        out
+    }
+
+    pub fn node(&self, id: EffectNodeId) -> Option<&EffectNode> {
+        self.nodes.iter().find(|n| n.id == id)
+    }
+
+    /// Appends a new node right before the output, at the end of the
+    /// chain - the only way a node gets created pre-Phase-11, since the
+    /// graph stays a strict line until then.
+    pub fn push_at_end(&mut self, effect: Effect) -> EffectNodeId {
+        let id = self.next_id;
+        self.next_id += 1;
+        let last_index = self.edges.iter().position(|e| e.to == Self::OUTPUT).expect("EffectGraph: no edge into OUTPUT");
+        let last_edge = self.edges.remove(last_index);
+        let x = self.nodes.len() as f32 * 166.0;
+        self.nodes.push(EffectNode { id, effect, enabled: true, position: (x, 0.0) });
+        self.edges.push(EffectEdge { from: last_edge.from, to: id });
+        self.edges.push(EffectEdge { from: id, to: Self::OUTPUT });
+        id
+    }
+
+    /// Removes a node and reconnects its former neighbours directly -
+    /// only valid while the graph is a strict line (every node has
+    /// exactly one inbound/outbound edge to splice around). Returns the
+    /// removed node and its two edges so the caller's undo command can
+    /// restore the exact prior structure.
+    pub fn remove(&mut self, id: EffectNodeId) -> Option<(EffectNode, EffectEdge, EffectEdge)> {
+        let node_index = self.nodes.iter().position(|n| n.id == id)?;
+        let inbound_index = self.edges.iter().position(|e| e.to == id)?;
+        let outbound_index = self.edges.iter().position(|e| e.from == id)?;
+        let node = self.nodes.remove(node_index);
+        // Remove the higher index first so the second removal's index
+        // still points at the right element.
+        let (first, second) = if inbound_index > outbound_index { (inbound_index, outbound_index) } else { (outbound_index, inbound_index) };
+        let edge_a = self.edges.remove(first);
+        let edge_b = self.edges.remove(second);
+        let (inbound, outbound) = if edge_a.to == id { (edge_a, edge_b) } else { (edge_b, edge_a) };
+        self.edges.push(EffectEdge { from: inbound.from, to: outbound.to });
+        Some((node, inbound, outbound))
+    }
+
+    /// Re-inserts a node exactly where `remove` took it from - the
+    /// inverse half of `RemoveEffectNode`'s undo.
+    pub fn reinsert(&mut self, node: EffectNode, inbound: EffectEdge, outbound: EffectEdge) {
+        let splice_index = self.edges.iter().position(|e| e.from == inbound.from && e.to == outbound.to);
+        if let Some(i) = splice_index {
+            self.edges.remove(i);
+        }
+        self.nodes.push(node);
+        self.edges.push(inbound);
+        self.edges.push(outbound);
+    }
+
+    /// Returns the previous value, for the caller's undo inverse.
+    pub fn set_enabled(&mut self, id: EffectNodeId, enabled: bool) -> bool {
+        match self.nodes.iter_mut().find(|n| n.id == id) {
+            Some(node) => std::mem::replace(&mut node.enabled, enabled),
+            None => enabled,
+        }
+    }
+
+    /// Returns the previous value, for the caller's undo inverse.
+    pub fn set_position(&mut self, id: EffectNodeId, position: (f32, f32)) -> (f32, f32) {
+        match self.nodes.iter_mut().find(|n| n.id == id) {
+            Some(node) => std::mem::replace(&mut node.position, position),
+            None => position,
+        }
+    }
+}
+
+impl Default for EffectGraph {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -320,5 +483,88 @@ impl Arrangement {
 
     pub fn automation_lane_mut(&mut self, id: AutomationLaneId) -> Option<&mut AutomationLane> {
         self.automation.iter_mut().find(|a| a.id == id)
+    }
+}
+
+#[cfg(test)]
+mod effect_graph_tests {
+    use super::*;
+
+    fn compressor() -> Effect {
+        Effect::Compressor(CompressorState::default())
+    }
+
+    /// Every node has exactly one inbound and one outbound edge - the
+    /// "still a strict line" invariant every phase before parallel
+    /// branches relies on.
+    fn assert_still_linear(graph: &EffectGraph) {
+        for node in &graph.nodes {
+            let inbound = graph.edges.iter().filter(|e| e.to == node.id).count();
+            let outbound = graph.edges.iter().filter(|e| e.from == node.id).count();
+            assert_eq!(inbound, 1, "node {} has {inbound} inbound edges", node.id);
+            assert_eq!(outbound, 1, "node {} has {outbound} outbound edges", node.id);
+        }
+        // Exactly one edge into OUTPUT and one out of SOURCE.
+        assert_eq!(graph.edges.iter().filter(|e| e.to == EffectGraph::OUTPUT).count(), 1);
+        assert_eq!(graph.edges.iter().filter(|e| e.from == EffectGraph::SOURCE).count(), 1);
+    }
+
+    #[test]
+    fn new_graph_is_just_source_to_output() {
+        let graph = EffectGraph::new();
+        assert!(graph.nodes.is_empty());
+        assert!(graph.ordered().is_empty());
+        assert_still_linear(&graph);
+    }
+
+    #[test]
+    fn push_at_end_stays_linear_and_ordered() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        let c = graph.push_at_end(compressor());
+        assert_still_linear(&graph);
+        let ids: Vec<_> = graph.ordered().iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![a, b, c]);
+    }
+
+    #[test]
+    fn remove_middle_node_reconnects_neighbours() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        let c = graph.push_at_end(compressor());
+        graph.remove(b);
+        assert_still_linear(&graph);
+        let ids: Vec<_> = graph.ordered().iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![a, c]);
+    }
+
+    #[test]
+    fn remove_then_reinsert_restores_exact_structure() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        let before = graph.clone();
+        let (node, inbound, outbound) = graph.remove(b).unwrap();
+        assert_ne!(graph, before);
+        graph.reinsert(node, inbound, outbound);
+        let ids: Vec<_> = graph.ordered().iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![a, b]);
+        assert_still_linear(&graph);
+    }
+
+    #[test]
+    fn from_flat_preserves_order_and_enabled_bits() {
+        let slots = vec![
+            EffectSlot { effect: compressor(), enabled: true },
+            EffectSlot { effect: compressor(), enabled: false },
+        ];
+        let graph = EffectGraph::from_flat(slots);
+        assert_still_linear(&graph);
+        let ordered = graph.ordered();
+        assert_eq!(ordered.len(), 2);
+        assert!(ordered[0].enabled);
+        assert!(!ordered[1].enabled);
     }
 }

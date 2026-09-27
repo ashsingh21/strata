@@ -5,7 +5,7 @@ use vizia::prelude::*;
 use vizia::vg;
 
 use shared::arrangement::{
-    Arrangement, AutomationLaneId, ClipColor, EffectSlot, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT,
+    Arrangement, AutomationLaneId, ClipColor, EffectNode, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT,
     MAX_TRACK_HEIGHT, MIN_TRACK_HEIGHT,
 };
 
@@ -164,11 +164,11 @@ pub fn track_header<'a>(
     let mute = arrangement.map(move |arr| arr.track(track_id).map(|t| t.mute).unwrap_or(false));
     let solo = arrangement.map(move |arr| arr.track(track_id).map(|t| t.solo).unwrap_or(false));
     let arm = arrangement.map(move |arr| arr.track(track_id).map(|t| t.arm).unwrap_or(false));
-    let effect_slots: Memo<Vec<EffectSlot>> = arrangement.map(move |arr| {
-        arr.track(track_id).map(|t| t.effect_slots.clone()).unwrap_or_default()
+    let effect_nodes: Memo<Vec<EffectNode>> = arrangement.map(move |arr| {
+        arr.track(track_id).map(|t| t.fx.ordered().into_iter().copied().collect()).unwrap_or_default()
     });
-    let has_effects = effect_slots.map(|slots| !slots.is_empty());
-    let all_bypassed = effect_slots.map(|slots| !slots.is_empty() && slots.iter().all(|s| !s.enabled));
+    let has_effects = effect_nodes.map(|nodes| !nodes.is_empty());
+    let all_bypassed = effect_nodes.map(|nodes| !nodes.is_empty() && nodes.iter().all(|n| !n.enabled));
     // Phase 1 of the effects-board plan: there's no real board to open
     // yet, so "open" degrades to the existing device-panel toggle - this
     // becomes a real board-open flag once `fx_board` exists.
@@ -249,13 +249,13 @@ pub fn track_header<'a>(
                         Label::new(cx, "FX")
                             .class("meta")
                             .color(all_bypassed.map(move |b| if *b { theme.get().palette().ink_muted } else { theme.get().palette().ink }));
-                        Binding::new(cx, effect_slots, move |cx| {
-                            let slots = effect_slots.get();
-                            for slot in slots.iter().take(8) {
-                                Element::new(cx).class("fx-pip").toggle_class("is-on", slot.enabled);
+                        Binding::new(cx, effect_nodes, move |cx| {
+                            let nodes = effect_nodes.get();
+                            for node in nodes.iter().take(8) {
+                                Element::new(cx).class("fx-pip").toggle_class("is-on", node.enabled);
                             }
-                            if slots.len() > 8 {
-                                Label::new(cx, format!("+{}", slots.len() - 8)).class("meta");
+                            if nodes.len() > 8 {
+                                Label::new(cx, format!("+{}", nodes.len() - 8)).class("meta");
                             }
                         });
                     })

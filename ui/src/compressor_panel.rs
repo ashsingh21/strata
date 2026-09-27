@@ -53,20 +53,18 @@ pub fn compressor_panel(
     let state = arrangement.map(move |arr| {
         arr.track(track_id)
             .and_then(|t| {
-                t.effect_slots.iter().find_map(|s| match s.effect {
+                t.fx.ordered().iter().find_map(|n| match n.effect {
                     Effect::Compressor(c) => Some(c),
                 })
             })
             .unwrap_or_default()
     });
-    let slot_index = arrangement.map(move |arr| {
-        arr.track(track_id)
-            .and_then(|t| t.effect_slots.iter().position(|s| matches!(s.effect, Effect::Compressor(_))))
+    let node_id = arrangement.map(move |arr| {
+        arr.track(track_id).and_then(|t| t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))).map(|n| n.id))
     });
     let enabled = arrangement.map(move |arr| {
         arr.track(track_id)
-            .and_then(|t| t.effect_slots.iter().find(|s| matches!(s.effect, Effect::Compressor(_))))
-            .map(|s| s.enabled)
+            .and_then(|t| t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))).map(|n| n.enabled))
             .unwrap_or(true)
     });
 
@@ -75,8 +73,8 @@ pub fn compressor_panel(
         .class("sm")
         .toggle_class("is-on", enabled)
         .on_press(move |cx| {
-            if let Some(index) = slot_index.get() {
-                cx.emit(TimelineEvent::ToggleEffectEnabled(track_id, index));
+            if let Some(id) = node_id.get() {
+                cx.emit(TimelineEvent::ToggleEffectEnabled(track_id, id));
             }
         });
 

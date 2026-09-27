@@ -82,6 +82,7 @@ mod tests {
             instrument: None,
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
         });
         arr
     }

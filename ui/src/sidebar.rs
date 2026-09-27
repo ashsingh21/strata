@@ -132,7 +132,7 @@ pub fn sidebar(
                     selected_track
                         .get()
                         .and_then(|id| {
-                            arrangement.get().track(id).map(|t| t.effect_slots.iter().any(|s| matches!(s.effect, Effect::Compressor(_))))
+                            arrangement.get().track(id).map(|t| t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Compressor(_))))
                         })
                         .unwrap_or(false)
                 });

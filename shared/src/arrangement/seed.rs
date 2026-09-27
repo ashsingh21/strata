@@ -41,6 +41,7 @@ pub fn seed_arrangement() -> Arrangement {
         instrument: None,
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
     });
     arr.tracks.push(Track {
         id: bass,
@@ -55,6 +56,7 @@ pub fn seed_arrangement() -> Arrangement {
         instrument: Some(Instrument::Carve),
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
     });
     arr.tracks.push(Track {
         id: lead,
@@ -69,6 +71,7 @@ pub fn seed_arrangement() -> Arrangement {
         instrument: None,
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
     });
     arr.tracks.push(Track {
         id: pad,
@@ -83,6 +86,7 @@ pub fn seed_arrangement() -> Arrangement {
         instrument: Some(Instrument::Carve),
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
     });
 
     // -- Drums: one continuous take, sliced into three clips. ---------

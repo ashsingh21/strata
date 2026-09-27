@@ -428,7 +428,7 @@ impl Model for SynthModel {
                         snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
                         snapshot.compressor = owning_track
                             .and_then(|t| {
-                                t.effect_slots.iter().find_map(|s| match (s.enabled, s.effect) {
+                                t.fx.ordered().into_iter().find_map(|n| match (n.enabled, n.effect) {
                                     (true, shared::arrangement::Effect::Compressor(c)) => Some(c),
                                     (false, shared::arrangement::Effect::Compressor(_)) => None,
                                 })

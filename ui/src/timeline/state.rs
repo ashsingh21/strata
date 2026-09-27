@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    CompressorState, Effect, EffectSlot, Instrument,
+    CompressorState, Effect, EffectNodeId, Instrument,
     empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, Marker, MarkerId, MidiNote,
     PeakPyramid, SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
@@ -443,7 +443,7 @@ pub enum TimelineEvent {
     /// worth a history entry), and a no-op if the track has none.
     SetCompressorState(TrackId, CompressorState),
     /// Flips one effect slot's own enabled bit (the `TrackHeaderFx` pip).
-    ToggleEffectEnabled(TrackId, usize),
+    ToggleEffectEnabled(TrackId, EffectNodeId),
     /// Bypasses (`true`) or restores (`false`) every effect on the
     /// track at once - the header's Alt-click "bypass all".
     SetChainBypassed(TrackId, bool),
@@ -815,50 +815,49 @@ impl Model for TimelineState {
             TimelineEvent::AddCompressorEffect(track) => {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
-                    if !t.effect_slots.iter().any(|s| matches!(s.effect, Effect::Compressor(_))) {
-                        let mut effects = t.effect_slots.clone();
-                        effects.push(EffectSlot::new(Effect::Compressor(CompressorState::default())));
-                        self.do_command(Command::SetTrackEffects { track: *track, effects });
+                    if !t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Compressor(_))) {
+                        self.do_command(Command::AddEffectNode {
+                            track: *track,
+                            effect: Effect::Compressor(CompressorState::default()),
+                        });
                     }
                 }
             }
             TimelineEvent::RemoveCompressorEffect(track) => {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
-                    let effects: Vec<EffectSlot> =
-                        t.effect_slots.iter().filter(|s| !matches!(s.effect, Effect::Compressor(_))).cloned().collect();
-                    self.do_command(Command::SetTrackEffects { track: *track, effects });
+                    if let Some(node) = t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))) {
+                        self.do_command(Command::RemoveEffectNode { track: *track, node: node.id });
+                    }
                 }
             }
             TimelineEvent::SetCompressorState(track, state) => {
                 self.with_arrangement(|arr, _| {
                     if let Some(t) = arr.track_mut(*track) {
-                        if let Some(slot) =
-                            t.effect_slots.iter_mut().find(|s| matches!(s.effect, Effect::Compressor(_)))
-                        {
-                            slot.effect = Effect::Compressor(*state);
+                        if let Some(node) = t.fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Compressor(_))) {
+                            node.effect = Effect::Compressor(*state);
                         }
                     }
                 });
             }
-            TimelineEvent::ToggleEffectEnabled(track, index) => {
+            TimelineEvent::ToggleEffectEnabled(track, node) => {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
-                    let mut effects = t.effect_slots.clone();
-                    if let Some(slot) = effects.get_mut(*index) {
-                        slot.enabled = !slot.enabled;
-                        self.do_command(Command::SetTrackEffects { track: *track, effects });
+                    if let Some(n) = t.fx.node(*node) {
+                        self.do_command(Command::SetEffectEnabled { track: *track, node: *node, enabled: !n.enabled });
                     }
                 }
             }
             TimelineEvent::SetChainBypassed(track, bypassed) => {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
-                    let mut effects = t.effect_slots.clone();
-                    for slot in &mut effects {
-                        slot.enabled = !bypassed;
-                    }
-                    self.do_command(Command::SetTrackEffects { track: *track, effects });
+                    let commands = t
+                        .fx
+                        .ordered()
+                        .iter()
+                        .map(|n| Command::SetEffectEnabled { track: *track, node: n.id, enabled: !bypassed })
+                        .collect();
+                    self.do_command(Command::Batch(commands));
                 }
             }
             TimelineEvent::SetTrackHeight { track, height } => {
@@ -961,6 +960,7 @@ impl Model for TimelineState {
                         instrument: Instrument::default_for(*kind),
                         effects: vec![],
                         effect_slots: vec![],
+                        fx: shared::arrangement::EffectGraph::new(),
                     };
                     stack.do_command(
                         Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] },
@@ -1013,6 +1013,7 @@ impl Model for TimelineState {
                         instrument: None,
                         effects: vec![],
                         effect_slots: vec![],
+                        fx: shared::arrangement::EffectGraph::new(),
                     };
                     let clip = Clip {
                         id: clip_id,
@@ -1103,6 +1104,7 @@ impl Model for TimelineState {
                             instrument: None,
                             effects: vec![],
                             effect_slots: vec![],
+                            fx: shared::arrangement::EffectGraph::new(),
                         };
                         commands.push(Command::InsertTrack {
                             track: Box::new(track),
@@ -1232,6 +1234,7 @@ impl Model for TimelineState {
                             instrument: None,
                             effects: vec![],
                             effect_slots: vec![],
+                            fx: shared::arrangement::EffectGraph::new(),
                         };
                         stack.do_command(
                             Command::InsertTrack {

@@ -92,9 +92,10 @@ impl PlaybackPlan {
                     .unwrap_or(0)
                     .min(MAX_BUS_TRACKS - 1) as u8;
                 let compressor = track
-                    .effect_slots
-                    .iter()
-                    .find_map(|s| match (s.enabled, s.effect) {
+                    .fx
+                    .ordered()
+                    .into_iter()
+                    .find_map(|n| match (n.enabled, n.effect) {
                         (true, Effect::Compressor(c)) => Some(c),
                         (false, Effect::Compressor(_)) => None,
                     })
@@ -163,6 +164,7 @@ mod tests {
             instrument: None,
         effects: vec![],
         effect_slots: vec![],
+        fx: crate::arrangement::EffectGraph::new(),
         }
     }
 
