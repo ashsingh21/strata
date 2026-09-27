@@ -235,6 +235,12 @@ impl View for LaneArea {
     }
 }
 
+/// Per-frame state `draw_clip` needs, read from signals once per frame.
+struct ClipFrame<'a> {
+    tempo: &'a shared::arrangement::TempoMap,
+    missing_sources: &'a std::collections::HashSet<Arc<str>>,
+}
+
 impl LaneArea {
     fn local_pos(&self, cx: &EventContext) -> (f32, f32) {
         let bounds = cx.bounds();
@@ -670,6 +676,11 @@ impl LaneArea {
         let arr = self.arrangement.get();
         let transform = self.transform.get();
         let selection = self.selection.get();
+        // Read once per frame, not per clip: `Signal::get` clones, and a
+        // clone of the arrangement per clip made drawing quadratic in the
+        // clip count.
+        let missing_sources = self.missing_sources.get();
+        let frame = ClipFrame { tempo: &arr.tempo_map, missing_sources: &missing_sources };
         let rows = build_rows(&arr);
         let scroll_y = transform.scroll_y as f32;
         let sig = arr.tempo_map.time_signature_at(0);
@@ -847,7 +858,7 @@ impl LaneArea {
                 let y1 = bounds.y + track_row_top + row.height - CLIP_INSET;
 
                 let selected = selection.clips.contains(&clip.id);
-                self.draw_clip(canvas, &palette, clip, track_color, x0, y0, x1, y1, selected);
+                self.draw_clip(canvas, &palette, &frame, clip, track_color, x0, y0, x1, y1, selected);
             }
 
             // The in-progress take, if this is its track - a transient
@@ -873,7 +884,7 @@ impl LaneArea {
                             recording: true,
                             gain_db: 0.0,
                         };
-                        self.draw_clip(canvas, &palette, &preview_clip, track_color, x0, y0, x1, y1, false);
+                        self.draw_clip(canvas, &palette, &frame, &preview_clip, track_color, x0, y0, x1, y1, false);
                         let peaks = self.live_peaks.get();
                         if !peaks.is_empty() {
                             let header_bottom = (y0 + CLIP_HEADER_H).min(y1);
@@ -907,7 +918,7 @@ impl LaneArea {
                             let track_color =
                                 arr.track(target_track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Coral);
                             let selected = selection.clips.contains(&clip.id);
-                            self.draw_clip(canvas, &palette, clip, track_color, x0, y0, x1, y1, selected);
+                            self.draw_clip(canvas, &palette, &frame, clip, track_color, x0, y0, x1, y1, selected);
                         }
                     }
                 }
@@ -1084,6 +1095,7 @@ impl LaneArea {
         &self,
         canvas: &Canvas,
         palette: &crate::tokens::Palette,
+        frame: &ClipFrame,
         clip: &shared::arrangement::Clip,
         track_color: shared::arrangement::ClipColor,
         x0: f32,
@@ -1133,7 +1145,7 @@ impl LaneArea {
         }
 
         if y1 > header_bottom {
-            self.draw_clip_body(canvas, clip, x0, header_bottom, x1, y1);
+            self.draw_clip_body(canvas, frame, clip, x0, header_bottom, x1, y1);
         }
 
         if selected {
@@ -1210,6 +1222,7 @@ impl LaneArea {
     fn draw_clip_body(
         &self,
         canvas: &Canvas,
+        frame: &ClipFrame,
         clip: &shared::arrangement::Clip,
         x0: f32,
         y0: f32,
@@ -1222,7 +1235,7 @@ impl LaneArea {
 
         match &clip.content {
             ClipContent::Audio { peaks: Some(pyramid), source_offset_samples, .. } => {
-                let tempo = &self.arrangement.get().tempo_map;
+                let tempo = frame.tempo;
                 let bpm = tempo.bpm_at(clip.start);
                 let duration_samples =
                     ((clip.length as f64 / shared::arrangement::PPQ as f64) * (60.0 / bpm)
@@ -1256,7 +1269,7 @@ impl LaneArea {
                 paint.set_anti_alias(true);
                 canvas.draw_path(&path.detach(), &paint);
             }
-            ClipContent::Audio { peaks: None, source, .. } if self.missing_sources.get().contains(source) => {
+            ClipContent::Audio { peaks: None, source, .. } if frame.missing_sources.contains(source) => {
                 // The file couldn't be read: say so, rather than showing
                 // the loading placeholder forever.
                 let mut paint = vg::Paint::default();
