@@ -202,7 +202,11 @@ fn text(canvas: &Canvas, s: &str, x: f32, y: f32, size: f32, color: Color) {
 impl View for Grid {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|window_event, _| match window_event {
-            WindowEvent::MouseDown(MouseButton::Left) => {
+            // A quick second click on the same pixel arrives as a
+            // Double/TripleClick instead of a MouseDown - still a click.
+            WindowEvent::MouseDown(MouseButton::Left)
+            | WindowEvent::MouseDoubleClick(MouseButton::Left)
+            | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 let Some((clip_id, _clip_start, clip_length, notes)) = self.clip_info() else { return };
                 let bounds = cx.bounds();
                 let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums());

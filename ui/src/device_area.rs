@@ -78,9 +78,12 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
 
     device_chain(cx, p, panel);
 
-    // The editor replaces the device while a clip is open.
-    Binding::new(cx, p.open_clip, move |cx| {
-        if p.open_clip.get().is_some() {
+    // The editor replaces the device while a clip is open - and only while
+    // that clip still exists (after an undo removed it, a blank editor
+    // stayed up whose controls did nothing).
+    let open_existing = Memo::new(move |_| p.open_clip.get().filter(|id| p.arrangement.get().clip(*id).is_some()));
+    Binding::new(cx, open_existing, move |cx| {
+        if open_existing.get().is_some() {
             piano_roll::piano_roll_view(
                 cx,
                 p.theme,
@@ -181,7 +184,7 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             .width(Pixels(1.0))
             .height(Pixels(16.0));
 
-        let editing = p.open_clip.map(|c| c.is_some());
+        let editing = Memo::new(move |_| p.open_clip.get().is_some_and(|id| p.arrangement.get().clip(id).is_some()));
         let clip_name = Memo::new(move |_| {
             p.open_clip.get().and_then(|id| p.arrangement.get().clip(id).map(|c| c.name.clone())).unwrap_or_default()
         });

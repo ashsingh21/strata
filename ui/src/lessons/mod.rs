@@ -166,7 +166,9 @@ impl LessonModel {
             selected_track: self.selected_track.get(),
             playing: self.playing.get(),
             synth: self.synth.get(),
-            open_clip: self.open_clip.get(),
+            // Only a clip that still exists counts as open (the editor
+            // closes itself otherwise).
+            open_clip: self.open_clip.get().filter(|id| self.arrangement.get().clip(*id).is_some()),
         }
     }
 

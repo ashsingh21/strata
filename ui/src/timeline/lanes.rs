@@ -207,7 +207,13 @@ impl View for LaneArea {
 
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|window_event, _| match window_event {
-            WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
+            // Vizia delivers a second (or third) click on the same pixel as
+            // a Double/TripleClick *instead of* a MouseDown. Our own
+            // double-click detection needs every press, or a steady-handed
+            // double-click did nothing.
+            WindowEvent::MouseDown(MouseButton::Left)
+            | WindowEvent::MouseDoubleClick(MouseButton::Left)
+            | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 self.on_mouse_down(cx);
             }
             WindowEvent::MouseDown(button) if *button == MouseButton::Right => {
