@@ -11,7 +11,6 @@ use vizia::prelude::*;
 use engine::EngineHandle;
 use shared::{Params, Position, Telemetry};
 
-use crate::meter::HOT_THRESHOLD;
 use crate::tokens::ThemeId;
 
 /// -60 dBFS floor for the meter's dB-to-fraction mapping. `pub(crate)`
@@ -20,8 +19,6 @@ use crate::tokens::ThemeId;
 pub(crate) const METER_FLOOR_DB: f32 = -60.0;
 /// Release rate for meter ballistics.
 pub(crate) const METER_DECAY_DB_PER_SEC: f32 = 20.0;
-/// LFO rate for the Cutoff demo knob's modulation ring.
-const LFO_RATE_HZ: f32 = 0.5;
 
 pub struct AppData {
     pub theme: Signal<ThemeId>,
@@ -54,12 +51,6 @@ pub struct AppData {
     taps: Vec<Instant>,
     meter_db_l: f32,
     meter_db_r: f32,
-
-    // LFO demo.
-    pub cutoff: Signal<f32>,
-    pub cutoff_mod_center: Signal<f32>,
-    pub cutoff_mod_depth: Signal<f32>,
-    lfo_phase: f32,
 
     // Engine bridge (not reactive).
     params: Arc<Params>,
@@ -96,9 +87,6 @@ pub enum AppEvent {
     /// `PressDown`; moving focus to the root here means key-up finds a
     /// different focused entity than the one it armed, and presses nothing.
     ReleaseButtonFocus,
-    /// Only emitted by the LFO demo, which isn't currently mounted.
-    #[allow(dead_code)]
-    SetCutoff(f32),
     Tick,
 }
 
@@ -126,10 +114,6 @@ impl AppData {
             taps: Vec::with_capacity(8),
             meter_db_l: METER_FLOOR_DB,
             meter_db_r: METER_FLOOR_DB,
-            cutoff: Signal::new(0.45),
-            cutoff_mod_center: Signal::new(0.45),
-            cutoff_mod_depth: Signal::new(0.15),
-            lfo_phase: 0.0,
             params,
             telemetry,
             last_tick: Instant::now(),
@@ -202,9 +186,6 @@ impl Model for AppData {
                 self.params.set_bpm(*bpm);
             }
             AppEvent::ReleaseButtonFocus => cx.focus(),
-            AppEvent::SetCutoff(value) => {
-                self.cutoff.set(*value);
-            }
             AppEvent::Tick => self.tick(cx),
         });
     }
@@ -252,13 +233,5 @@ impl AppData {
         self.meter_db_l = if target_l > self.meter_db_l { target_l } else { (self.meter_db_l - decay).max(target_l) };
         self.meter_db_r = if target_r > self.meter_db_r { target_r } else { (self.meter_db_r - decay).max(target_r) };
         self.output_db.set(self.meter_db_l.max(self.meter_db_r));
-        let _ = HOT_THRESHOLD;
-
-        // Animate the Cutoff demo knob's modulation ring centre.
-        self.lfo_phase = (self.lfo_phase + LFO_RATE_HZ * std::f32::consts::TAU * dt) % std::f32::consts::TAU;
-        let base = self.cutoff.get();
-        let depth = self.cutoff_mod_depth.get();
-        let center = (base + self.lfo_phase.sin() * depth).clamp(0.0, 1.0);
-        self.cutoff_mod_center.set(center);
     }
 }

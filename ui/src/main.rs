@@ -12,7 +12,6 @@ mod fx_board;
 mod glyph;
 mod interval_input;
 mod knob;
-mod lfo_demo;
 mod meter;
 mod piano_roll;
 mod pill;
@@ -212,7 +211,7 @@ fn main() -> Result<(), ApplicationError> {
         interval_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
-        // the LFO demo's and synth's animated modulation rings/scope, syncs
+        // the synth's animated modulation rings/scope, syncs
         // the timeline playhead from the transport's live position, and
         // schedules Carve to play whatever MIDI notes the playhead crossed.
         let last_tick = std::cell::Cell::new(Instant::now());
