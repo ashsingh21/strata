@@ -1,6 +1,6 @@
 //! "House demo": a finished two-minute house track (64 bars at 128 BPM),
 //! opened from the sidebar as a new project. It exists to show what
-//! Strata does in one place: one-shot drum samples laid out as a groove,
+//! Strata does in one place: a Drum Kit track playing section patterns,
 //! four Carve patches (bass, stabs, pad, pluck lead), insert and
 //! master-bus effects, section markers, and automation lanes of every
 //! kind - track gain, an effect parameter and synth parameters.
@@ -8,13 +8,12 @@
 //! Every automation value is computed through the same `norm` functions
 //! the knobs use, so a lane's line always lands on the value it names.
 
-use std::sync::Arc;
-
 use crate::arrangement::{
     gain_db_to_fader_pos, Arrangement, AutomationLane, AutomationTarget, Breakpoint, Clip, ClipColor, ClipContent,
     CompressorState, Effect, EffectGraph, EffectNodeId, EffectParam, EqState, Instrument, Marker, MidiNote, TempoMap,
     Ticks, TimeSignature, Track, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT, PPQ,
 };
+use crate::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT};
 use crate::project::Project;
 use crate::synth::{
     deep_rave_bass, seed_synth, soft_pad, Envelope, Filter, FilterType, Fx, Lfo, LfoTarget, Oscillator, SynthParam,
@@ -50,14 +49,6 @@ const HOOK: [&[(i64, u8, i64)]; 4] = [
     &[(0, 74, 4), (4, 72, 2), (6, 69, 2), (8, 67, 6), (14, 69, 2)],
 ];
 
-fn bars(start: i64, end: i64) -> impl Iterator<Item = i64> {
-    start..end
-}
-
-fn in_sections(bar: i64, ranges: &[(i64, i64)]) -> bool {
-    ranges.iter().any(|&(s, e)| bar >= s && bar < e)
-}
-
 struct Builder {
     arr: Arrangement,
     instruments: Vec<(TrackId, SynthState)>,
@@ -92,23 +83,6 @@ impl Builder {
 
     fn patch(&self, track: TrackId) -> &SynthState {
         &self.instruments.iter().find(|(id, _)| *id == track).expect("synth track").1
-    }
-
-    /// One one-shot hit: a clip exactly as long as the sample.
-    fn hit(&mut self, track: TrackId, sample: &str, seconds: f64, start: Ticks, gain_db: f32) {
-        let id = self.arr.alloc_id();
-        let length = self.arr.tempo_map.seconds_to_ticks(seconds).max(1);
-        let name = self.arr.track(track).map(|t| t.name.clone()).unwrap_or_default();
-        self.arr.clips.push(Clip {
-            id,
-            track,
-            start,
-            length,
-            name,
-            content: ClipContent::Audio { source: Arc::from(sample), peaks: None, source_offset_samples: 0 },
-            recording: false,
-            gain_db,
-        });
     }
 
     fn midi_clip(&mut self, track: TrackId, name: &str, start_bar: i64, end_bar: i64, notes: Vec<MidiNote>) {
@@ -248,40 +222,55 @@ pub fn house_demo() -> Project {
         instruments: Vec::new(),
     };
 
-    // -- Drums: one-shot samples, one clip per hit. --------------------
-    let kick = b.track("Kick", ClipColor::Coral, TrackKind::Audio, -6.0);
-    let clap = b.track("Clap", ClipColor::Amber, TrackKind::Audio, -11.0);
-    let hats = b.track("Hats", ClipColor::Teal, TrackKind::Audio, -17.0);
-    let open_hat = b.track("Open Hat", ClipColor::Teal, TrackKind::Audio, -18.0);
-
-    for bar in bars(0, BARS).filter(|&b| !in_sections(b, &[(32, 40)])) {
-        for beat in 0..4 {
-            b.hit(kick, "drums/kick.wav", 0.35, bar * BAR + beat * PPQ, 0.0);
-        }
+    // -- Drums: one Drum Kit track, one MIDI clip per section. ---------
+    // Each clip is a one-bar pattern repeated; which parts play changes
+    // with the section. Velocities set each sound's level.
+    let drums = b.track("Drums", ClipColor::Coral, TrackKind::Midi, -6.0);
+    b.arr.track_mut(drums).expect("drums").instrument = Some(Instrument::Drums);
+    #[derive(Clone, Copy)]
+    struct Parts {
+        kick: bool,
+        clap: bool,
+        closed: bool,
+        open: bool,
     }
-    for bar in bars(0, BARS).filter(|&b| in_sections(b, &[(8, 32), (40, 56)])) {
-        for beat in [1, 3] {
-            b.hit(clap, "drums/clap.wav", 0.25, bar * BAR + beat * PPQ, 0.0);
+    let pattern = move |parts: Parts| {
+        move |_bar: i64| {
+            let mut hits = Vec::new();
+            for beat in 0..4 {
+                let at = beat * 4;
+                if parts.kick {
+                    hits.push((at, KICK, 1, 127));
+                }
+                if parts.clap && beat % 2 == 1 {
+                    hits.push((at, CLAP, 1, 86));
+                }
+                if parts.closed {
+                    hits.push((at + 1, CLOSED_HAT, 1, 55));
+                    hits.push((at + 3, CLOSED_HAT, 1, 40));
+                }
+                if parts.open {
+                    hits.push((at + 2, OPEN_HAT, 1, 51));
+                }
+            }
+            hits
         }
+    };
+    let (kick, open, clap, closed) = (true, true, true, true);
+    let sections: [(&str, i64, i64, Parts); 6] = [
+        ("Intro", 0, 4, Parts { kick, clap: false, closed: false, open: false }),
+        ("Intro", 4, 8, Parts { kick, clap: false, closed: false, open }),
+        ("Build", 8, 16, Parts { kick, clap, closed: false, open }),
+        ("Groove", 16, 32, Parts { kick, clap, closed, open }),
+        ("Drop", 40, 56, Parts { kick, clap, closed, open }),
+        ("Outro", 56, 64, Parts { kick, clap: false, closed: false, open }),
+    ];
+    for (name, start, end, parts) in sections {
+        b.midi_clip(drums, name, start, end, repeat(end - start, pattern(parts)));
     }
     // A clap roll into the drop, getting louder.
-    for step in 0..16 {
-        b.hit(clap, "drums/clap.wav", 0.25, 39 * BAR + step * SIXTEENTH, -14.0 + step as f32 * 0.8);
-    }
-    // Closed hats on the "e" and "a" of each beat, the "a" a touch softer.
-    for bar in bars(0, BARS).filter(|&b| in_sections(b, &[(16, 32), (40, 56)])) {
-        for beat in 0..4 {
-            let at = bar * BAR + beat * PPQ;
-            b.hit(hats, "drums/hihat_closed.wav", 0.08, at + SIXTEENTH, 0.0);
-            b.hit(hats, "drums/hihat_closed.wav", 0.08, at + 3 * SIXTEENTH, -4.0);
-        }
-    }
-    // The house off-beat: an open hat on every "and".
-    for bar in bars(0, BARS).filter(|&b| in_sections(b, &[(4, 32), (40, 64)])) {
-        for beat in 0..4 {
-            b.hit(open_hat, "drums/hihat_open.wav", 0.4, bar * BAR + beat * PPQ + PPQ / 2, 0.0);
-        }
-    }
+    let roll = (0..16).map(|step| (step, CLAP, 1, (40 + step * 3) as u8)).collect::<Vec<_>>();
+    b.midi_clip(drums, "Roll", 39, 40, repeat(1, move |_| roll.clone()));
 
     // -- Carve tracks. -------------------------------------------------
     let bass = b.synth_track("Bass", ClipColor::Blue, -7.0, house_bass());
@@ -388,7 +377,8 @@ mod tests {
     fn every_synth_track_has_a_patch_and_ids_are_unique() {
         let p = house_demo();
         for t in &p.arrangement.tracks {
-            assert_eq!(t.instrument.is_some(), p.instruments.iter().any(|(id, _)| *id == t.id), "{}", t.name);
+            let is_carve = t.instrument == Some(Instrument::Carve);
+            assert_eq!(is_carve, p.instruments.iter().any(|(id, _)| *id == t.id), "{}", t.name);
         }
         let arr = &p.arrangement;
         let mut ids: Vec<u32> = arr.tracks.iter().map(|t| t.id).collect();
