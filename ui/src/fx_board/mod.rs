@@ -19,7 +19,7 @@ use vizia::prelude::*;
 use shared::arrangement::{Arrangement, ClipColor, Effect, EffectGraph, EffectNodeId, TrackId};
 
 use cables::FxCables;
-use geometry::{effect_latency_ms, io_position, nearest_input_port, port_out, CANVAS_MARGIN_X, IO_H, IO_W, NODE_H, NODE_W};
+use geometry::{effect_latency_ms, io_position, nearest_input_port, port_out, CANVAS_MARGIN_X, IO_H, IO_W, NODE_H, NODE_W, ROW_Y};
 
 use crate::timeline::state::TimelineEvent;
 use crate::tokens::{self, ThemeId};
@@ -262,7 +262,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                         // canvas's left margin) - drag math below stays in
                         // this space throughout, then converts back to
                         // model-space only when committing/emitting.
-                        let (orig_x, orig_y) = (node.position.0 + CANVAS_MARGIN_X, node.position.1);
+                        let (orig_x, orig_y) = (node.position.0 + CANVAS_MARGIN_X, node.position.1 + ROW_Y);
                         let x = Memo::new(move |_| {
                             match drag_state.get() {
                                 Some((id, x, _)) if id == node.id => x,
@@ -358,9 +358,9 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                     drag_anchor.set(None);
                                     if let Some((_, x, y)) = drag_state.get() {
                                         // Back to model-space (strip the
-                                        // canvas margin) before snapping to
+                                        // canvas margins) before snapping to
                                         // the 16px dot grid.
-                                        let snapped = (((x - CANVAS_MARGIN_X) / 16.0).round() * 16.0, (y / 16.0).round() * 16.0);
+                                        let snapped = (((x - CANVAS_MARGIN_X) / 16.0).round() * 16.0, ((y - ROW_Y) / 16.0).round() * 16.0);
                                         cx.emit(TimelineEvent::SetEffectNodePosition(p.track, node.id, snapped));
                                     }
                                     drag_state.set(None);
@@ -397,7 +397,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                 // (display-space) point - strip the margin
                                 // before storing it as the node's model-space
                                 // position.
-                                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect, Some((x - CANVAS_MARGIN_X, y))));
+                                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect, Some((x - CANVAS_MARGIN_X, y - ROW_Y))));
                                 search_popover.set(None);
                             });
                         }

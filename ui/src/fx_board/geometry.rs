@@ -16,7 +16,11 @@ pub const IO_H: f32 = 40.0;
 /// `EffectGraph::push_at_end`'s own spacing so a freshly added node
 /// lines up with this board's layout instead of drifting from it.
 const NODE_SPACING: f32 = 166.0;
-const ROW_Y: f32 = 60.0;
+/// Display-space top of the node row. Like `CANVAS_MARGIN_X`, applied at
+/// the render boundary only - stored `EffectNode::position.1` stays
+/// 0-based (`push_at_end` writes 0), so effect nodes and the Source/Out
+/// pills (centred on this same row) line up and cables run straight.
+pub const ROW_Y: f32 = 60.0;
 /// Reserves room left of the first real node for the Source pill and its
 /// cable, so the graph never renders at a negative canvas-local x (which
 /// used to spill the Source node visually into the palette column).
@@ -57,7 +61,7 @@ pub fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNo
         };
         return (x, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
-    graph.node(id).map(|n| (n.position.0 + CANVAS_MARGIN_X, n.position.1)).unwrap_or((CANVAS_MARGIN_X, ROW_Y))
+    graph.node(id).map(|n| (n.position.0 + CANVAS_MARGIN_X, n.position.1 + ROW_Y)).unwrap_or((CANVAS_MARGIN_X, ROW_Y))
 }
 
 pub fn port_out(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
