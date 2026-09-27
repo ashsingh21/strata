@@ -320,7 +320,9 @@ impl LessonModel {
         let Some(show) = shows.get(index) else { return };
         let before = self.snapshot();
         let mut after = before.clone();
-        show(&mut after);
+        if !show::run(&**show, &mut after) {
+            return;
+        }
 
         let json = |a: &Arrangement| serde_json::to_string(a).unwrap_or_default();
         let edited = json(&after.arrangement) != json(&before.arrangement);

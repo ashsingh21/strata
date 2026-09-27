@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use shared::arrangement::{Arrangement, Ticks, TrackId};
 use shared::lessons::{
     BAR, BASSLINE, CHORDS, FIRST_BEAT, PROJECT_ARRANGE, PROJECT_BASS, PROJECT_CHORDS, PROJECT_FINISH, PROJECT_GROOVE,
-    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_REED, RECIPE_TANPURA,
+    ARRANGE_BHAIRAV, ARRANGE_HOUSE, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_REED, RECIPE_TANPURA,
 };
 use shared::project::Project;
 use shared::synth::SynthState;
@@ -67,9 +67,20 @@ fn project_take(mut project: Project, from_bar: i64, bars: i64) -> Take {
     }
 }
 
-/// Where `lesson` ends up, to hear before starting it - `None` where the
-/// lesson is about a change more than a result (the Carve tour, the
-/// arrangement walk-throughs, which play the finished songs anyway).
+/// The app as a lesson starts it: its starting project, the last track
+/// selected with its patch on screen (what `LessonEvent::Begin` does).
+pub fn starting_snapshot(lesson: &str) -> (Snapshot, BTreeMap<TrackId, SynthState>) {
+    let mut project = shared::lessons::starting_project(lesson);
+    project.migrate();
+    let patches: BTreeMap<_, _> = project.instruments.iter().cloned().collect();
+    let last = project.arrangement.tracks.last().map(|t| t.id);
+    let synth = last.and_then(|t| patches.get(&t).cloned()).unwrap_or_else(shared::synth::seed_synth);
+    let snap = Snapshot { arrangement: project.arrangement, selected_track: last, playing: false, synth, open_clip: None, playhead: 0 };
+    (snap, patches)
+}
+
+/// Where `lesson` ends up, to hear before starting it - `None` for the
+/// arrangement walk-throughs (they play the finished songs anyway).
 pub fn goal(lesson: &str, snap: &Snapshot, patches: &BTreeMap<TrackId, SynthState>) -> Option<Take> {
     let preset = match lesson {
         RECIPE_BASS => Some("Deep Bass"),
@@ -98,7 +109,17 @@ pub fn goal(lesson: &str, snap: &Snapshot, patches: &BTreeMap<TrackId, SynthStat
         // The breakdown dropping back into the groove.
         PROJECT_ARRANGE => project_take(project_after(4), 22, 4),
         PROJECT_FINISH => project_take(project_after(5), 22, 4),
-        _ => return None,
+        ARRANGE_HOUSE | ARRANGE_BHAIRAV => return None,
+        // Any other lesson: every step done by "Show me", from its start.
+        _ => {
+            let (mut done, patches) = starting_snapshot(lesson);
+            for show in super::show::steps(lesson) {
+                if !super::show::run(&*show, &mut done) {
+                    return None;
+                }
+            }
+            take_of(&done, &patches)
+        }
     })
 }
 
@@ -108,27 +129,17 @@ mod tests {
     use crate::lessons::course::LESSONS;
 
     fn start(id: &str) -> (Snapshot, BTreeMap<TrackId, SynthState>) {
-        let mut project = shared::lessons::starting_project(id);
-        project.migrate();
-        let patches: BTreeMap<_, _> = project.instruments.iter().cloned().collect();
-        let last = project.arrangement.tracks.last().map(|t| t.id);
-        let synth = last.and_then(|t| patches.get(&t).cloned()).unwrap_or_else(shared::synth::seed_synth);
-        let snap = Snapshot {
-            arrangement: project.arrangement,
-            selected_track: last,
-            playing: false,
-            synth,
-            open_clip: None,
-            playhead: 0,
-        };
-        (snap, patches)
+        starting_snapshot(id)
     }
 
     #[test]
     fn every_goal_has_something_to_hear() {
         for lesson in LESSONS {
             let (snap, patches) = start(lesson.id);
-            let Some(take) = goal(lesson.id, &snap, &patches) else { continue };
+            let Some(take) = goal(lesson.id, &snap, &patches) else {
+                assert!(lesson.group == crate::lessons::course::ARRANGEMENT, "{} has no goal", lesson.id);
+                continue;
+            };
             assert!(take.to > take.from, "{}", lesson.id);
             assert!(
                 take.arrangement.clips.iter().any(|c| c.start < take.to && c.start + c.length > take.from),

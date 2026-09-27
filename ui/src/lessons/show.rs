@@ -13,6 +13,18 @@ use super::Snapshot;
 
 pub type Show = Box<dyn Fn(&mut Snapshot)>;
 
+/// Runs `show` on `s`, false if it couldn't (the learner's project has
+/// wandered from what the step expects - a deleted track, say). Never
+/// takes the app down with it.
+pub fn run(show: &dyn Fn(&mut Snapshot), s: &mut Snapshot) -> bool {
+    let mut attempt = s.clone();
+    let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| show(&mut attempt))).is_ok();
+    if ok {
+        *s = attempt;
+    }
+    ok
+}
+
 fn b(f: impl Fn(&mut Snapshot) + 'static) -> Show {
     Box::new(f)
 }
