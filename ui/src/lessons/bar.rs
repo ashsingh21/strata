@@ -44,6 +44,16 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
 
             VStack::new(cx, move |cx| {
                 Label::new(cx, s.text).class("body").class("lesson-text");
+                // Under it: why the step just done sounds the way it does
+                // (while the change is still in your ears) - until a hint
+                // for this step is due, which takes the line instead.
+                let why = step.checked_sub(1).map(|i| l.steps[i].why).unwrap_or("");
+                if !why.is_empty() {
+                    Label::new(cx, format!("Just now: {why}"))
+                        .class("value")
+                        .class("lesson-why")
+                        .toggle_class("hidden", p.hint_visible.map(move |v| *v && !s.hint.is_empty()));
+                }
                 if !s.hint.is_empty() {
                     Label::new(cx, s.hint)
                         .class("value")
@@ -88,6 +98,10 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
         .padding_right(Pixels(tokens::SPACE_3))
         .alignment(Alignment::Left)
         .width(Stretch(1.0))
-        .height(Pixels(48.0));
+        // Grows for a two-line explanation.
+        .height(Auto)
+        .min_height(Pixels(48.0))
+        .padding_top(Pixels(6.0))
+        .padding_bottom(Pixels(6.0));
     });
 }

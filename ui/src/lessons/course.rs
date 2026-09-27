@@ -6,7 +6,7 @@ use shared::arrangement::{Clip, ClipContent, Instrument, Ticks, PPQ};
 use shared::drums::{CLAP, KICK, OPEN_HAT};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
-    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD,
+    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD,
 };
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
@@ -21,6 +21,9 @@ pub enum Kind {
 
 pub struct Step {
     pub text: &'static str,
+    /// Why this step sounds the way it does - shown once it's done, while
+    /// the change is still in your ears. Empty for most non-recipe steps.
+    pub why: &'static str,
     /// Shown if the step hasn't been done after a while.
     pub hint: &'static str,
     pub kind: Kind,
@@ -40,11 +43,22 @@ pub const CARVE: &str = "Carve synth";
 pub const RECIPES: &str = "Recipes";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
-    Step { text, hint, kind: Kind::Action { check, target } }
+    Step { text, why: "", hint, kind: Kind::Action { check, target } }
+}
+
+/// A recipe step: like `act`, plus the reason it sounds that way.
+const fn recipe(
+    text: &'static str,
+    why: &'static str,
+    hint: &'static str,
+    check: fn(&Snapshot) -> bool,
+    target: fn(&Snapshot) -> Option<Target>,
+) -> Step {
+    Step { text, why, hint, kind: Kind::Action { check, target } }
 }
 
 const fn info(text: &'static str) -> Step {
-    Step { text, hint: "", kind: Kind::Info }
+    Step { text, why: "", hint: "", kind: Kind::Info }
 }
 
 pub const LESSONS: &[Lesson] = &[
@@ -427,26 +441,30 @@ pub const LESSONS: &[Lesson] = &[
         title: "Deep bass",
         steps: &[
             act("Press Space: a beat and a plain saw bass.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
-            act(
+            recipe(
                 "Weight first: Oscillator 1 Octave to -1.",
+                "An octave down halves the pitch, moving the note into the range you feel in your chest more than hear.",
                 "The Octave knob under Oscillator 1, one step down.",
                 |s| carve(s).is_some_and(|p| p.osc1.octave == -1),
                 |_| Some(Target::Knob(SynthParam::Osc1Octave)),
             ),
-            act(
+            recipe(
                 "Sub up to about -6 dB: the sine underneath is what you feel on big speakers.",
+                "The sub is a pure sine an octave below. It adds weight without buzz, because a sine has no harmonics to clutter the mix.",
                 "Above -9 dB.",
                 |s| carve(s).is_some_and(|p| p.mix.sub_db > -9.0),
                 |_| Some(Target::Knob(SynthParam::SubLevel)),
             ),
-            act(
+            recipe(
                 "Close the filter: Cutoff to about 250 Hz. Bass wants weight, not fizz.",
+                "A saw's upper harmonics are the \u{201c}fizz\u{201d}. Closing the low-pass filter removes them and leaves the round low end.",
                 "Between 150 and 450 Hz.",
                 |s| carve(s).is_some_and(|p| (150.0..=450.0).contains(&p.filter.cutoff_hz)),
                 |_| Some(Target::Knob(SynthParam::Cutoff)),
             ),
-            act(
+            recipe(
                 "Make each note punch: Env amount about +2.5 oct and Filter Decay about 200 ms.",
+                "The filter envelope throws the filter open at each note and closes it within 200 ms: a burst of brightness your ear reads as a punch.",
                 "Env amount +1.5 to +3.5 oct; Filter Decay 100 to 350 ms.",
                 |s| carve(s).is_some_and(|p| (1.5..=3.5).contains(&p.filter.env_amount_oct) && (100.0..=350.0).contains(&p.filter_env.decay_ms)),
                 |s| {
@@ -457,14 +475,16 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "Grit: Drive past 6 dB.",
+                "Drive pushes the sound into the filter harder, adding harmonics back as grit, so the bass still cuts through on phone and laptop speakers.",
                 "Drive is in the Filter section.",
                 |s| carve(s).is_some_and(|p| p.filter.drive_db > 6.0),
                 |_| Some(Target::Knob(SynthParam::Drive)),
             ),
-            act(
+            recipe(
                 "Switch to Mono and set Glide to about 50 ms: notes slide into each other instead of stacking up.",
+                "Mono plays one note at a time, so overlaps can't pile into mud; glide slides the pitch between notes, like a bassist's finger.",
                 "Mono is at the top right of Carve; Glide is under Output (20 to 120 ms).",
                 |s| carve(s).is_some_and(|p| p.voice_mode == VoiceMode::Mono && (20.0..=120.0).contains(&p.output.glide_ms)),
                 |s| {
@@ -482,37 +502,137 @@ pub const LESSONS: &[Lesson] = &[
         ],
     },
     Lesson {
+        id: RECIPE_PAD,
+        group: RECIPES,
+        title: "Soft pad",
+        steps: &[
+            act("Press Space: two held chords on a plain saw.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Two saws, slightly apart: Osc 2 up to about -6 dB, and Osc 2 Detune about +9 cents.",
+                "Two saws a few cents apart drift in and out of step with each other - a slow, breathing movement that makes a pad feel alive rather than static.",
+                "Mixer Osc 2 above -9 dB; Detune +5 to +15 cents.",
+                |s| carve(s).is_some_and(|p| p.mix.osc2_db > -9.0 && (5.0..=15.0).contains(&p.osc2.knob_a_cents)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.mix.osc2_db > -9.0, Target::Knob(SynthParam::Osc2Level)),
+                        ((5.0..=15.0).contains(&p.osc2.knob_a_cents), Target::Knob(SynthParam::Osc2Detune)),
+                    ])
+                },
+            ),
+            recipe(
+                "Take the edge off: Cutoff about 900 Hz, Resonance low (under 20%).",
+                "A pad sits behind everything else, so it shouldn't fight the lead for the highs. Low-pass it, and keep resonance down so no single frequency pokes out.",
+                "Cutoff 600 Hz to 1.3 kHz; Resonance under 20%.",
+                |s| carve(s).is_some_and(|p| (600.0..=1300.0).contains(&p.filter.cutoff_hz) && p.filter.resonance < 0.2),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((600.0..=1300.0).contains(&p.filter.cutoff_hz), Target::Knob(SynthParam::Cutoff)),
+                        (p.filter.resonance < 0.2, Target::Knob(SynthParam::Resonance)),
+                    ])
+                },
+            ),
+            recipe(
+                "Swell in, fade out: Amp Attack about 500 ms and Release about 1.2 s.",
+                "A slow attack means no hard start - each chord fades in like a string section. The long release lets it hang over into the next chord, so the changes blur together.",
+                "Attack 300 to 900 ms; Release 0.8 to 2 s.",
+                |s| carve(s).is_some_and(|p| (300.0..=900.0).contains(&p.amp_env.attack_ms) && (800.0..=2000.0).contains(&p.amp_env.release_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((300.0..=900.0).contains(&p.amp_env.attack_ms), Target::Knob(SynthParam::AmpAttack)),
+                        ((800.0..=2000.0).contains(&p.amp_env.release_ms), Target::Knob(SynthParam::AmpRelease)),
+                    ])
+                },
+            ),
+            recipe(
+                "Let it bloom: Env amount about +1.5 oct, and Filter Attack about 800 ms.",
+                "With a slow filter attack, the filter opens gradually while each chord holds, so the pad gets brighter over time - movement without touching a knob.",
+                "Env amount +1 to +2.5 oct; Filter Attack 400 ms to 1.5 s.",
+                |s| carve(s).is_some_and(|p| (1.0..=2.5).contains(&p.filter.env_amount_oct) && (400.0..=1500.0).contains(&p.filter_env.attack_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((1.0..=2.5).contains(&p.filter.env_amount_oct), Target::Knob(SynthParam::EnvAmount)),
+                        ((400.0..=1500.0).contains(&p.filter_env.attack_ms), Target::Knob(SynthParam::FilterAttack)),
+                    ])
+                },
+            ),
+            recipe(
+                "Make it wide: Unison Voices to 3 or more, Unison Detune about 18 cents.",
+                "Unison stacks several detuned copies of every note and spreads them left and right - the width that makes a pad surround you instead of sitting in the middle.",
+                "Voices 3+; Detune 15 to 30 cents.",
+                |s| carve(s).is_some_and(|p| p.unison.voices >= 3 && (15.0..=30.0).contains(&p.unison.detune_cents)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.unison.voices >= 3, Target::Knob(SynthParam::UnisonVoices)),
+                        ((15.0..=30.0).contains(&p.unison.detune_cents), Target::Knob(SynthParam::UnisonDetune)),
+                    ])
+                },
+            ),
+            recipe(
+                "Shimmer and space: Chorus mix about 35%, Reverb mix about 35%, Reverb Size above 70%.",
+                "Chorus adds a gentle shimmer and a big reverb puts the pad in a large room. Both blur its edges - exactly what a background sound should do.",
+                "Chorus 25 to 50%; Reverb 25 to 50%; Size over 70%.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        (0.25..=0.5).contains(&p.fx.chorus_mix) && (0.25..=0.5).contains(&p.fx.reverb_mix) && p.fx.reverb_size > 0.7
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((0.25..=0.5).contains(&p.fx.chorus_mix), Target::Knob(SynthParam::ChorusMix)),
+                        ((0.25..=0.5).contains(&p.fx.reverb_mix), Target::Knob(SynthParam::ReverbMix)),
+                        (p.fx.reverb_size > 0.7, Target::Knob(SynthParam::ReverbSize)),
+                    ])
+                },
+            ),
+            info(
+                "Soft pad: two detuned saws, a darker filter that blooms, a slow swell, width and space. \
+                 Compare it with Carve's Soft Pad preset - same ideas, a few different settings.",
+            ),
+        ],
+    },
+    Lesson {
         id: RECIPE_FLUTE,
         group: RECIPES,
         title: "Flute",
         steps: &[
             act("Press Space: a slow melody, on a buzzy saw for now.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
-            act(
+            recipe(
                 "A flute is almost pure: set Oscillator 1 to the triangle.",
+                "A triangle's harmonics fade quickly, so it's close to a pure tone - which is what a flute's column of air produces.",
                 "The second wave shape above Oscillator 1.",
                 |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Triangle),
                 |_| Some(Target::OscWave(1)),
             ),
-            act(
+            recipe(
                 "Breath: Noise to about -26 dB.",
+                "A real flute is air rushing across an edge. A little noise under the tone is that breath.",
                 "Between -34 and -18 dB, in the Mixer.",
                 |s| carve(s).is_some_and(|p| (-34.0..=-18.0).contains(&p.mix.noise_db)),
                 |_| Some(Target::Knob(SynthParam::NoiseLevel)),
             ),
-            act(
+            recipe(
                 "Soften it: Cutoff about 2.5 kHz, so the breath isn't hissy.",
+                "Noise has energy at every frequency; cutting above ~2.5 kHz keeps the soft part that reads as breath and drops the hiss.",
                 "Between 1.5 and 3.5 kHz.",
                 |s| carve(s).is_some_and(|p| (1500.0..=3500.0).contains(&p.filter.cutoff_hz)),
                 |_| Some(Target::Knob(SynthParam::Cutoff)),
             ),
-            act(
+            recipe(
                 "Blow into it: Amp Attack about 80 ms, so each note breathes in.",
+                "It takes a moment of breath before a flute speaks. A short fade-in copies that; an instant attack gives it away as a synth.",
                 "Between 50 and 150 ms.",
                 |s| carve(s).is_some_and(|p| (50.0..=150.0).contains(&p.amp_env.attack_ms)),
                 |_| Some(Target::Knob(SynthParam::AmpAttack)),
             ),
-            act(
+            recipe(
                 "Vibrato: LFO 2 already points at Pitch. Set its Rate to about 5 Hz and Depth to about 20%.",
+                "Flautists add vibrato with their breath, about five wobbles a second. LFO 2 moving the pitch that fast, and only slightly, is exactly that.",
                 "Rate 4 to 7 Hz, Depth 10 to 35%, under LFO 2.",
                 |s| carve(s).is_some_and(vibrato),
                 |s| {
@@ -523,8 +643,9 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "A room to play in: Reverb mix about 30%.",
+                "Wind instruments are almost always heard in a room, and the room's echoes are part of their sound.",
                 "Between 20 and 50%.",
                 |s| carve(s).is_some_and(|p| (0.2..=0.5).contains(&p.fx.reverb_mix)),
                 |_| Some(Target::Knob(SynthParam::ReverbMix)),
@@ -546,8 +667,9 @@ pub const LESSONS: &[Lesson] = &[
                 |s| s.playing,
                 |_| Some(Target::Play),
             ),
-            act(
+            recipe(
                 "Strings are bright: keep the saw on Oscillator 1, and bring in Oscillator 2 as a square, one octave up, at about -10 dB.",
+                "A struck string is richest in harmonics at the moment it's hit. A square an octave up adds bright upper harmonics on top of the saw.",
                 "Osc 2 wave: square. Octave: +1. Mixer Osc 2: above -14 dB.",
                 |s| carve(s).is_some_and(|p| p.osc2.waveform == Waveform::Square && p.osc2.octave == 1 && p.mix.osc2_db > -14.0),
                 |s| {
@@ -559,8 +681,9 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "The pluck: Amp Attack all the way down (under 5 ms), Sustain to 0, Decay about 1 second.",
+                "A pluck is all start and fade: it speaks instantly and nothing is held, so attack near zero and sustain at zero.",
                 "Decay between 0.6 and 1.6 s.",
                 |s| carve(s).is_some_and(|p| p.amp_env.attack_ms < 5.0 && p.amp_env.sustain < 0.05 && (600.0..=1600.0).contains(&p.amp_env.decay_ms)),
                 |s| {
@@ -572,14 +695,16 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "Let the strings ring after each note: Amp Release about 1 second.",
+                "Strings keep ringing after the finger leaves them. A long release does the same, so the cascade blurs into a shimmer.",
                 "Between 0.6 and 1.6 s.",
                 |s| carve(s).is_some_and(|p| (600.0..=1600.0).contains(&p.amp_env.release_ms)),
                 |_| Some(Target::Knob(SynthParam::AmpRelease)),
             ),
-            act(
+            recipe(
                 "A string is brightest when struck, then mellows: Cutoff about 1 kHz, Env amount about +3 oct, Filter Decay about 300 ms.",
+                "Real strings lose their high harmonics first as they ring. A filter that starts open and closes over 300 ms copies that.",
                 "Cutoff 0.6 to 1.8 kHz, Env amount +2 to +4 oct, Filter Decay 150 to 500 ms.",
                 |s| {
                     carve(s).is_some_and(|p| {
@@ -597,14 +722,16 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "Shimmer: Chorus mix about 30%.",
+                "Swarmandal and santoor strings come in courses of nearly-matching strings; chorus imitates that slightly-out-of-tune doubling.",
                 "Between 20 and 50%, under Effects.",
                 |s| carve(s).is_some_and(|p| (0.2..=0.5).contains(&p.fx.chorus_mix)),
                 |_| Some(Target::Knob(SynthParam::ChorusMix)),
             ),
-            act(
+            recipe(
                 "Space around it: Reverb mix about 40%, and Size above 70%.",
+                "A big reverb lets each note hang into the next - the sustaining wash these instruments are known for.",
                 "Reverb mix 30 to 60%; Size over 70%.",
                 |s| carve(s).is_some_and(|p| (0.3..=0.6).contains(&p.fx.reverb_mix) && p.fx.reverb_size > 0.7),
                 |s| {
@@ -627,8 +754,9 @@ pub const LESSONS: &[Lesson] = &[
         title: "Lead melody",
         steps: &[
             act("Press Space: a beat and a hook on a plain saw.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
-            act(
+            recipe(
                 "A lead has to cut through: Oscillator 1 to the square, and Osc 2 up to about -8 dB, detuned about +7 cents.",
+                "Square plus saw gives a hollow body with a bright edge, and detuning them a few cents thickens it so it stands apart from the chords.",
                 "Osc 1 wave: square. Mixer Osc 2: above -12 dB. Osc 2 Detune: +3 to +15 cents.",
                 |s| {
                     carve(s).is_some_and(|p| {
@@ -644,8 +772,9 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "Bright but not harsh: Cutoff about 3 kHz, Resonance about 30%.",
+                "Our ears are most sensitive around 2-4 kHz. A lead that lives there, with a little resonance, cuts through without being loud.",
                 "Cutoff 1.8 to 4.5 kHz; Resonance 20 to 45%.",
                 |s| carve(s).is_some_and(|p| (1800.0..=4500.0).contains(&p.filter.cutoff_hz) && (0.2..=0.45).contains(&p.filter.resonance)),
                 |s| {
@@ -656,8 +785,9 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "Switch to Mono with Glide about 60 ms: notes slide like a voice.",
+                "Mono with glide makes each note connect to the next, the way a singer or a guitar bend moves between pitches.",
                 "Mono at the top right of Carve; Glide 30 to 120 ms, under Output.",
                 |s| carve(s).is_some_and(|p| p.voice_mode == VoiceMode::Mono && (30.0..=120.0).contains(&p.output.glide_ms)),
                 |s| {
@@ -668,8 +798,9 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "Expression: vibrato on LFO 2 - Rate about 5 Hz, Depth about 15%.",
+                "Singers and guitarists add vibrato to held notes. It's what makes a line sound performed rather than programmed.",
                 "Rate 4 to 7 Hz, Depth 10 to 35%.",
                 |s| carve(s).is_some_and(vibrato),
                 |s| {
@@ -680,8 +811,9 @@ pub const LESSONS: &[Lesson] = &[
                     ])
                 },
             ),
-            act(
+            recipe(
                 "Polish: Chorus mix about 20% and Reverb mix about 25%.",
+                "Chorus widens it and reverb gives it a place in the room - both kept small, so the lead stays up front.",
                 "Chorus 10 to 40%; Reverb 15 to 40%.",
                 |s| carve(s).is_some_and(|p| (0.1..=0.4).contains(&p.fx.chorus_mix) && (0.15..=0.4).contains(&p.fx.reverb_mix)),
                 |s| {
@@ -1040,6 +1172,53 @@ mod tests {
                 },
             ],
         );
+    }
+
+    #[test]
+    fn recipe_pad_can_be_done_step_by_step() {
+        walk(
+            RECIPE_PAD,
+            &[
+                &play,
+                &|s| {
+                    s.synth.mix.osc2_db = -6.0;
+                    s.synth.osc2.knob_a_cents = 9.0;
+                },
+                &|s| {
+                    s.synth.filter.cutoff_hz = 900.0;
+                    s.synth.filter.resonance = 0.1;
+                },
+                &|s| {
+                    s.synth.amp_env.attack_ms = 500.0;
+                    s.synth.amp_env.release_ms = 1200.0;
+                },
+                &|s| {
+                    s.synth.filter.env_amount_oct = 1.5;
+                    s.synth.filter_env.attack_ms = 800.0;
+                },
+                &|s| {
+                    s.synth.unison.voices = 3;
+                    s.synth.unison.detune_cents = 18.0;
+                },
+                &|s| {
+                    s.synth.fx.chorus_mix = 0.35;
+                    s.synth.fx.reverb_mix = 0.35;
+                    s.synth.fx.reverb_size = 0.8;
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn every_recipe_step_explains_itself() {
+        for l in LESSONS.iter().filter(|l| l.group == RECIPES) {
+            for step in l.steps {
+                if let Kind::Action { .. } = step.kind {
+                    let plays = step.text.starts_with("Press Space");
+                    assert!(plays || !step.why.is_empty(), "{}: no why for \"{}\"", l.id, step.text);
+                }
+            }
+        }
     }
 
     #[test]

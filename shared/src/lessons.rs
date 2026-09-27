@@ -36,6 +36,7 @@ pub const RECIPE_BASS: &str = "recipe-bass";
 pub const RECIPE_FLUTE: &str = "recipe-flute";
 pub const RECIPE_HARP: &str = "recipe-harp";
 pub const RECIPE_LEAD: &str = "recipe-lead";
+pub const RECIPE_PAD: &str = "recipe-pad";
 
 /// Carve lessons loop their riff this long, so there's time to turn knobs.
 const CARVE_BARS: i64 = 64;
@@ -87,8 +88,9 @@ fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
             steps(&[(0, 45, 2), (2, 45, 2), (4, 57, 2), (6, 45, 2), (8, 48, 2), (10, 45, 2), (12, 55, 2), (14, 45, 2)]),
             1,
         ),
-        // Held chords, A minor then F: slow movement needs time to show.
-        CARVE_MOVEMENT => {
+        // Held chords, A minor then F: slow movement (and a pad's slow
+        // swell) needs time to show.
+        CARVE_MOVEMENT | RECIPE_PAD => {
             let mut notes = steps(&[(0, 57, 15), (0, 60, 15), (0, 64, 15)]);
             notes.extend(steps(&[(16, 53, 15), (16, 57, 15), (16, 60, 15)]));
             ("Chords", notes, 2)
@@ -230,7 +232,7 @@ mod tests {
 
     #[test]
     fn carve_lessons_start_on_the_init_patch_with_a_riff() {
-        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD] {
+        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD] {
             let p = starting_project(id);
             let synth = p.arrangement.tracks.last().unwrap();
             assert_eq!(synth.instrument, Some(Instrument::Carve), "{id}");
