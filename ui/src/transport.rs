@@ -105,7 +105,16 @@ fn input_device_menu_item(
     let device_for_check = device.clone();
     let is_selected = Memo::new(move |_| selected.get() == device_for_check);
     HStack::new(cx, move |cx| {
-        Label::new(cx, label.clone()).class("body");
+        // Real device names ("HD-Audio Generic, ALC1220 Alt Analog") run
+        // well past this menu's fixed width - without this they overflowed
+        // straight off the edge of the window instead of staying inside
+        // the menu's own box. Same `.text_wrap(false).text_overflow(...)`
+        // pair Vizia's own `Select` widget uses for exactly this.
+        Label::new(cx, label.clone())
+            .class("body")
+            .text_wrap(false)
+            .text_overflow(TextOverflow::Ellipsis)
+            .width(Stretch(1.0));
     })
     .class("menu-item")
     .toggle_class("is-on", is_selected)
