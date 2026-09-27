@@ -305,12 +305,12 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             match node.effect {
                                 Effect::Eq(state) => {
                                     let state_signal = Memo::new(move |_| state);
-                                    crate::eq_curve::eq_curve(cx, state_signal, p.theme);
+                                    crate::eq_curve::EqCurve::new(cx, state_signal, p.theme).class("device").width(Stretch(1.0)).height(Stretch(1.0));
                                     Label::new(cx, format!("{:.0} Hz \u{b7} {:+.1} dB", state.freq_hz, state.gain_db)).class("meta");
                                 }
                                 Effect::Compressor(state) => {
                                     let state_signal = Memo::new(move |_| state);
-                                    crate::compressor_curve::compressor_curve(cx, state_signal, p.theme);
+                                    crate::compressor_curve::CompressorCurve::new(cx, state_signal, p.theme).class("device").width(Stretch(1.0)).height(Stretch(1.0));
                                     Label::new(cx, format!("{:.0}:1 \u{b7} {:+.1} dB", state.ratio, state.threshold_db)).class("meta");
                                 }
                             }
@@ -323,7 +323,10 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                         .width(Pixels(NODE_W))
                         .height(Pixels(NODE_H))
                         .padding(Pixels(6.0))
-                        .gap(Pixels(6.0))
+                        // The mini-display stretches into whatever height
+                        // the title row and meta line leave, so the node's
+                        // content can't overflow its box.
+                        .gap(Pixels(4.0))
                         .cursor(CursorIcon::Hand)
                         .on_mouse_down(move |cx, button| {
                             if button == MouseButton::Left {

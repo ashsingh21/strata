@@ -7,9 +7,11 @@
 use shared::arrangement::{Effect, EffectGraph, EffectNodeId};
 
 /// A node box's fixed size (per the FxBoard spec: effect nodes are
-/// 150x86; source/output are smaller, 88x40).
+/// 150x86; source/output are smaller, 88x40). Effect nodes are 100 tall
+/// rather than the spec's 86: title row + hairline + meta line + padding
+/// left the spec'd height too little room for a readable mini-display.
 pub const NODE_W: f32 = 150.0;
-pub const NODE_H: f32 = 86.0;
+pub const NODE_H: f32 = 100.0;
 pub const IO_W: f32 = 88.0;
 pub const IO_H: f32 = 40.0;
 /// Horizontal spacing between auto-laid-out nodes - matches

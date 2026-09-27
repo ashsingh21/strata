@@ -88,7 +88,3 @@ impl View for CompressorCurve {
         canvas.draw_path(&vg::Path::circle(vg::Point::new(kx, ky), 2.0, None), &knee);
     }
 }
-
-pub fn compressor_curve(cx: &mut Context, state: Memo<CompressorState>, theme: Signal<crate::tokens::ThemeId>) {
-    CompressorCurve::new(cx, state, theme).width(Pixels(96.0)).height(Pixels(48.0)).class("device");
-}
