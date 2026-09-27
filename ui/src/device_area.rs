@@ -23,6 +23,7 @@ use crate::tokens::{self, ThemeId};
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Panel {
     Carve,
+    Drums(TrackId),
     Effect(TrackId, EffectNodeId),
     NoInstrument(TrackId),
     Audio,
@@ -68,6 +69,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                 Panel::Effect(t.id, p.viewing_effect.get().unwrap())
             }
             Some(t) if t.kind == TrackKind::Audio => Panel::Audio,
+            Some(t) if t.instrument == Some(Instrument::Drums) => Panel::Drums(t.id),
             Some(t) if t.instrument.is_some() => Panel::Carve,
             Some(t) => Panel::NoInstrument(t.id),
             None => Panel::Nothing,
@@ -126,11 +128,20 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                     crate::effect_panel::effect_panel(cx, p.theme, p.arrangement, Some(track), node, color, p.playhead);
                 }
             }
+            Panel::Drums(track) => {
+                let color = p.arrangement.get().track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Coral);
+                crate::drum_kit_panel::drum_kit_panel(cx, color);
+            }
             Panel::NoInstrument(track) => empty_state(cx, "No instrument on this track", move |cx| {
                 Button::new(cx, |cx| Label::new(cx, "Add Carve"))
                     .class("btn")
                     .on_press(move |cx| {
                         cx.emit(TimelineEvent::SetInstrument { track, instrument: Some(Instrument::Carve) })
+                    });
+                Button::new(cx, |cx| Label::new(cx, "Add Drum Kit"))
+                    .class("btn")
+                    .on_press(move |cx| {
+                        cx.emit(TimelineEvent::SetInstrument { track, instrument: Some(Instrument::Drums) })
                     });
             }),
             Panel::Audio => empty_state(cx, "Audio track \u{b7} no instrument", |_| {}),
@@ -186,9 +197,19 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
         let has_instrument = Memo::new(move |_| {
             p.selected_track.get().and_then(|id| p.arrangement.get().track(id).map(|t| t.instrument.is_some())).unwrap_or(false)
         });
-        Button::new(cx, |cx| Label::new(cx, "Carve"))
+        let instrument_name = Memo::new(move |_| {
+            p.selected_track
+                .get()
+                .and_then(|id| p.arrangement.get().track(id).and_then(|t| t.instrument))
+                .map(|i| i.name())
+                .unwrap_or("Carve")
+        });
+        Button::new(cx, move |cx| Label::new(cx, instrument_name))
             .class("btn")
-            .toggle_class("is-on", Memo::new(move |_| panel.get() == Panel::Carve && !editing.get()))
+            .toggle_class(
+                "is-on",
+                Memo::new(move |_| matches!(panel.get(), Panel::Carve | Panel::Drums(_)) && !editing.get()),
+            )
             .toggle_class("hidden", has_instrument.map(|c| !*c))
             .on_press(move |cx| {
                 p.viewing_effect.set(None);
@@ -215,7 +236,7 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             .class("btn")
             .class("quiet")
             .toggle_class("hidden", no_instrument.map(|n| !*n))
-            .on_press(|cx| cx.emit(SynthEvent::AddCarveToSelected));
+            .on_press(|cx| cx.emit(SynthEvent::AddInstrumentToSelected(Instrument::Carve)));
 
         let has_compressor = Memo::new(move |_| {
             p.selected_track

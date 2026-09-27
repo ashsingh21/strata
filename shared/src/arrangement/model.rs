@@ -400,16 +400,19 @@ impl Default for EffectGraph {
     }
 }
 
-/// A track's instrument. Only Carve so far.
+/// A track's instrument.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Instrument {
     Carve,
+    /// Plays one-shot samples by note (see `crate::drums::DRUM_KIT`).
+    Drums,
 }
 
 impl Instrument {
     pub fn name(self) -> &'static str {
         match self {
             Instrument::Carve => "Carve",
+            Instrument::Drums => "Drum Kit",
         }
     }
 

@@ -4,6 +4,7 @@ mod canvas_text;
 mod compressor_curve;
 mod context_menu;
 mod device_area;
+mod drum_kit_panel;
 mod eq_curve;
 mod effect_panel;
 mod fader;
@@ -165,6 +166,11 @@ fn main() -> Result<(), ApplicationError> {
             &tl_arrangement.get(),
             playback_decode_tx,
         );
+        // The Drum Kit's samples, loaded up front: a kit can be added to
+        // any track at any time and must play on its first note.
+        for pad in &shared::drums::DRUM_KIT {
+            let _ = decode_request_tx.send(pad.sample.into());
+        }
         timeline_state.set_decode_sender(decode_request_tx.clone());
 
         timeline_state.build(cx);

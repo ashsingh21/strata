@@ -199,7 +199,7 @@ pub fn project(arrangement: &Arrangement, patches: &BTreeMap<TrackId, SynthState
     let instruments = arrangement
         .tracks
         .iter()
-        .filter(|t| t.instrument.is_some())
+        .filter(|t| t.instrument == Some(shared::arrangement::Instrument::Carve))
         .filter_map(|t| {
             let mut patch = patches.get(&t.id)?.clone();
             // Held keys are play state, not an edit.

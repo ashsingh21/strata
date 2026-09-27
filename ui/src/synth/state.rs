@@ -57,9 +57,9 @@ pub enum SynthEvent {
     /// A track was selected (header click, clip click, clip opened): the
     /// panel now shows and edits that track's instrument.
     SelectTrack(TrackId),
-    /// Sidebar's "Carve": gives the selected MIDI track a Carve if it has
-    /// no instrument yet.
-    AddCarveToSelected,
+    /// Sidebar's "Carve" / "Drum Kit": gives the selected MIDI track that
+    /// instrument (replacing a different one).
+    AddInstrumentToSelected(Instrument),
     ToggleHelp,
     /// Replaces the whole patch with a preset (keeping held keys held).
     LoadPreset(fn() -> SynthState),
@@ -268,8 +268,9 @@ impl SynthModel {
         }
     }
 
+    /// Whether `track` plays through Carve (the only instrument with a patch).
     fn has_instrument(&self, track: TrackId) -> bool {
-        self.arrangement.get().track(track).is_some_and(|t| t.instrument.is_some())
+        self.arrangement.get().track(track).is_some_and(|t| t.instrument == Some(Instrument::Carve))
     }
 
     /// Keeps engine slots matched to the tracks that have instruments:
@@ -292,7 +293,9 @@ impl SynthModel {
                     self.slots[free] = Some(track);
                 }
             }
-            if !self.patches.get().contains_key(&track) {
+            // Only Carve has a patch; a Drum Kit's sounds are fixed.
+            let is_carve = arr.track(track).and_then(|t| t.instrument) == Some(Instrument::Carve);
+            if is_carve && !self.patches.get().contains_key(&track) {
                 self.patches.update(|p| {
                     p.insert(track, seed_synth());
                 });
@@ -377,12 +380,12 @@ impl Model for SynthModel {
                     self.show_selected_patch();
                 }
             }
-            SynthEvent::AddCarveToSelected => {
+            SynthEvent::AddInstrumentToSelected(instrument) => {
                 if let Some(track) = self.selected_track.get() {
                     let arr = self.arrangement.get();
                     if let Some(t) = arr.track(track) {
-                        if t.kind == TrackKind::Midi && t.instrument.is_none() {
-                            cx.emit(TimelineEvent::SetInstrument { track, instrument: Some(Instrument::Carve) });
+                        if t.kind == TrackKind::Midi && t.instrument != Some(*instrument) {
+                            cx.emit(TimelineEvent::SetInstrument { track, instrument: Some(*instrument) });
                         }
                     }
                 }
@@ -444,6 +447,19 @@ impl Model for SynthModel {
                 let arrangement = self.arrangement.get();
                 let arr = arrangement.with_automation_at(self.playhead.get());
                 for (slot, track) in self.slots.iter().enumerate() {
+                    let owning_track = track.and_then(|t| arr.track(t));
+                    // A Drum Kit slot still needs its gain and effects.
+                    if let Some(t) = owning_track.filter(|t| t.instrument == Some(Instrument::Drums)) {
+                        let mut snapshot = SynthParams::default();
+                        snapshot.slot = slot as u8;
+                        snapshot.drums = true;
+                        snapshot.gain_db = t.gain_db;
+                        let (count, effects) = shared::playback::build_effect_units(&t.fx);
+                        snapshot.effect_count = count;
+                        snapshot.effects = effects;
+                        let _ = self.params_tx.push(snapshot);
+                        continue;
+                    }
                     if let Some(patch) = track.and_then(|t| patches.get(&t)) {
                         // Carve-parameter automation, applied to a copy.
                         let mut automated = patch.clone();
@@ -454,6 +470,7 @@ impl Model for SynthModel {
                         snapshot.slot = slot as u8;
                         let owning_track = track.and_then(|t| arr.track(t));
                         snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
+                        snapshot.drums = owning_track.and_then(|t| t.instrument) == Some(Instrument::Drums);
                         if let Some(t) = owning_track {
                             let (count, effects) = shared::playback::build_effect_units(&t.fx);
                             snapshot.effect_count = count;

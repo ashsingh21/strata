@@ -10,6 +10,7 @@
 
 pub mod input;
 mod compressor;
+mod drums;
 mod dsp;
 mod effects;
 mod eq;
@@ -25,6 +26,7 @@ use shared::playback::{DecodedSource, PlaybackPlan, DECODED_SOURCE_CAPACITY, MAX
 use shared::recorder::RecordCommand;
 use shared::synth::{NoteEvent, SynthParams, SynthTelemetry, MAX_INSTRUMENTS};
 use shared::{Params, Position, Telemetry};
+use drums::DrumEngine;
 use effects::EffectChain;
 use synth::SynthEngine;
 
@@ -261,6 +263,10 @@ where
     // One Carve per instrument track, all allocated here - before the
     // stream starts - so the audio thread never allocates.
     let mut synth_engines: Vec<SynthEngine> = (0..MAX_INSTRUMENTS).map(|_| SynthEngine::new(sample_rate)).collect();
+    // Same slots, for tracks whose instrument is a Drum Kit; `slot_is_drums`
+    // says which of the two plays each slot.
+    let mut drum_engines: Vec<DrumEngine> = (0..MAX_INSTRUMENTS).map(|_| DrumEngine::new(sample_rate)).collect();
+    let mut slot_is_drums = [false; MAX_INSTRUMENTS];
     // Each slot's owning track's mixer gain, as a linear multiplier - unity
     // until the first `SynthParams` snapshot for that slot arrives, so a
     // freshly added track isn't silent before the UI's first tick.
@@ -303,14 +309,28 @@ where
                     if let Some(chain) = slot_effects.get_mut(next.slot as usize) {
                         chain.set_state(next.effect_count, &next.effects);
                     }
-                    if let Some(engine) = synth_engines.get_mut(next.slot as usize) {
+                    let slot = next.slot as usize;
+                    if slot < MAX_INSTRUMENTS && slot_is_drums[slot] != next.drums {
+                        // The track switched instruments: silence the old one.
+                        let off = NoteEvent { slot: next.slot, note: shared::synth::ALL_NOTES_OFF, on: false, velocity: 0 };
+                        synth_engines[slot].handle_note_event(off);
+                        drum_engines[slot].handle_note_event(off, &current_sources);
+                        slot_is_drums[slot] = next.drums;
+                    }
+                    if let Some(engine) = synth_engines.get_mut(slot) {
                         engine.set_params(next);
                     }
                 }
                 // Ordered: every note on/off matters.
                 while let Ok(event) = note_events.pop() {
-                    if let Some(engine) = synth_engines.get_mut(event.slot as usize) {
-                        engine.handle_note_event(event);
+                    let slot = event.slot as usize;
+                    if slot >= MAX_INSTRUMENTS {
+                        continue;
+                    }
+                    if slot_is_drums[slot] {
+                        drum_engines[slot].handle_note_event(event, &current_sources);
+                    } else {
+                        synth_engines[slot].handle_note_event(event);
                     }
                 }
                 // Latest-wins: the clip layout only, not any one sample.
@@ -342,6 +362,8 @@ where
                     &mut sample_counter,
                     sample_rate,
                     &mut synth_engines,
+                    &mut drum_engines,
+                    &slot_is_drums,
                     &slot_gain,
                     &mut slot_gain_smooth,
                     &mut bus_gain_smooth,
@@ -373,6 +395,8 @@ fn write_block<T>(
     sample_counter: &mut u64,
     sample_rate: f32,
     synth_engines: &mut [SynthEngine],
+    drum_engines: &mut [DrumEngine],
+    slot_is_drums: &[bool],
     slot_gain: &[f32],
     slot_gain_smooth: &mut [SmoothedGain],
     bus_gain_smooth: &mut [SmoothedGain],
@@ -412,7 +436,7 @@ fn write_block<T>(
         let mut synth_l = 0.0f32;
         let mut synth_r = 0.0f32;
         for (i, engine) in synth_engines.iter_mut().enumerate() {
-            let (raw_l, raw_r) = engine.process();
+            let (raw_l, raw_r) = if slot_is_drums[i] { drum_engines[i].process(sources) } else { engine.process() };
             // Chain order: instrument -> Compressor insert -> track fader,
             // same as a real device chain (the fader is the last thing
             // before the master sum, not part of the chain itself).

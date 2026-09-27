@@ -121,10 +121,13 @@ pub fn context_menu_view(
                             cx.emit(TimelineEvent::SetInstrument { track: track_id, instrument: None })
                         });
                     } else {
-                        item(cx, "Add Carve", move |cx| {
-                            cx.emit(TimelineEvent::SetInstrument { track: track_id, instrument: Some(Instrument::Carve) });
-                            cx.emit(SynthEvent::SelectTrack(track_id));
-                        });
+                        for instrument in [Instrument::Carve, Instrument::Drums] {
+                            let label = if instrument == Instrument::Carve { "Add Carve" } else { "Add Drum Kit" };
+                            item(cx, label, move |cx| {
+                                cx.emit(TimelineEvent::SetInstrument { track: track_id, instrument: Some(instrument) });
+                                cx.emit(SynthEvent::SelectTrack(track_id));
+                            });
+                        }
                     }
                 }
                 separator(cx);

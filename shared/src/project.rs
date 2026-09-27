@@ -36,7 +36,7 @@ impl Project {
                 track.instrument = Some(crate::arrangement::Instrument::Carve);
             }
             let has_patch = self.instruments.iter().any(|(id, _)| *id == track.id);
-            if track.instrument.is_some() && !has_patch {
+            if track.instrument == Some(crate::arrangement::Instrument::Carve) && !has_patch {
                 let patch = legacy.clone().unwrap_or_else(crate::synth::seed_synth);
                 self.instruments.push((track.id, patch));
             }

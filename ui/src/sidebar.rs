@@ -6,7 +6,7 @@
 
 use vizia::prelude::*;
 
-use shared::arrangement::{Arrangement, Effect, TrackId};
+use shared::arrangement::{Arrangement, Effect, Instrument, TrackId};
 use shared::synth::{SynthState, PRESETS};
 
 use crate::synth::state::SynthEvent;
@@ -69,18 +69,20 @@ pub fn sidebar(
 
         ScrollView::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
-                section_head(cx, "Instruments", 1);
-                // Adds Carve to the selected MIDI track; lit when that
-                // track already plays through Carve.
-                let selected_has_carve = Memo::new(move |_| {
-                    selected_track
-                        .get()
-                        .and_then(|id| arrangement.get().track(id).map(|t| t.instrument.is_some()))
-                        .unwrap_or(false)
-                });
-                row(cx, "Carve".to_string(), query, true)
-                    .toggle_class("is-on", selected_has_carve)
-                    .on_press(|cx| cx.emit(SynthEvent::AddCarveToSelected));
+                section_head(cx, "Instruments", 2);
+                // Puts the instrument on the selected MIDI track; lit when
+                // that track already plays through it.
+                for instrument in [Instrument::Carve, Instrument::Drums] {
+                    let selected_has = Memo::new(move |_| {
+                        selected_track
+                            .get()
+                            .and_then(|id| arrangement.get().track(id).map(|t| t.instrument == Some(instrument)))
+                            .unwrap_or(false)
+                    });
+                    row(cx, instrument.name().to_string(), query, true)
+                        .toggle_class("is-on", selected_has)
+                        .on_press(move |cx| cx.emit(SynthEvent::AddInstrumentToSelected(instrument)));
+                }
 
                 section_head(cx, "Presets", PRESETS.len());
                 for (name, build) in PRESETS {

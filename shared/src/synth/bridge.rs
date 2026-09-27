@@ -68,6 +68,9 @@ pub struct SynthParams {
     /// `Copy` and allocation-free across the ring buffer.
     pub effect_count: u8,
     pub effects: [EffectUnitState; MAX_EFFECTS_PER_CHAIN],
+    /// This slot is a Drum Kit, not a Carve: notes trigger kit samples and
+    /// the synth voice fields above are ignored. Set by the caller.
+    pub drums: bool,
 }
 
 impl SynthParams {
@@ -95,6 +98,7 @@ impl SynthParams {
             gain_db: 0.0,
             effect_count: 0,
             effects: [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN],
+            drums: false,
         }
     }
 }
@@ -120,7 +124,7 @@ pub fn lfo_rate_hz(rate_norm: f32) -> f32 {
 /// drains and applies all pending events rather than just the latest.
 #[derive(Clone, Copy, Debug)]
 pub struct NoteEvent {
-    /// Which Carve instance plays it.
+    /// Which instrument slot plays it.
     pub slot: u8,
     pub note: u8,
     pub on: bool,

@@ -195,7 +195,7 @@ impl Arrangement {
                 Some(format!("{} \u{b7} {}", param.effect_name(), param.name()))
             }
             AutomationTarget::Synth(param) => {
-                self.track(track)?.instrument?;
+                (self.track(track)?.instrument? == super::model::Instrument::Carve).then_some(())?;
                 Some(format!("Carve \u{b7} {}", param.long_name()))
             }
         }
