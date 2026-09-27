@@ -51,7 +51,16 @@ pub struct Knob<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + '
     prev_drag_y: f32,
     continuous: f32,
     on_changing: Option<ChangeCallback>,
+    /// When the pointer came to rest over this knob (None when it isn't).
+    hovered_since: Option<std::time::Instant>,
+    /// Passing wheel events through to the panel until this time: a
+    /// scroll that started elsewhere keeps scrolling while it continues.
+    wheel_passing_until: Option<std::time::Instant>,
 }
+
+/// How long the pointer must rest on a knob before the wheel turns it -
+/// so scrolling a panel full of knobs doesn't nudge whatever passes by.
+const WHEEL_INTENT: std::time::Duration = std::time::Duration::from_millis(300);
 
 impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Knob<V, M> {
     /// `modulation` is `Some((centre, depth))` to draw a modulation ring, or
@@ -76,6 +85,8 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Kno
             prev_drag_y: 0.0,
             continuous: initial,
             on_changing: Some(Box::new(on_changing)),
+            hovered_since: None,
+            wheel_passing_until: None,
         }
         .build(cx, |_| {})
         .bind(value, |mut handle| handle.needs_redraw())
@@ -129,7 +140,9 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Vie
             }
         };
 
-        event.map(|window_event, _| match window_event {
+        event.map(|window_event, meta| match window_event {
+            WindowEvent::MouseEnter => self.hovered_since = Some(std::time::Instant::now()),
+            WindowEvent::MouseLeave => self.hovered_since = None,
             WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
                 self.is_dragging = true;
                 self.prev_drag_y = cx.mouse().left.pos_down.1;
@@ -156,9 +169,21 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Vie
             }
 
             WindowEvent::MouseScroll(_, y) => {
-                if *y != 0.0 {
-                    let new_value = self.continuous + *y * WHEEL_SCALAR;
-                    move_value(self, cx, new_value);
+                let now = std::time::Instant::now();
+                let rested = self.hovered_since.is_some_and(|t| now.duration_since(t) >= WHEEL_INTENT);
+                let passing = self.wheel_passing_until.is_some_and(|t| now < t);
+                if rested && !passing {
+                    // Aimed at this knob: turn it, and don't also scroll
+                    // the panel it sits in.
+                    if *y != 0.0 {
+                        let new_value = self.value.get() + *y * WHEEL_SCALAR;
+                        move_value(self, cx, new_value);
+                    }
+                    meta.consume();
+                } else {
+                    // A scroll passing over: leave it to the panel, for as
+                    // long as it keeps coming.
+                    self.wheel_passing_until = Some(now + WHEEL_INTENT);
                 }
             }
 
