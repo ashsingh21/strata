@@ -107,6 +107,38 @@ pub fn build_effect_units(fx: &crate::arrangement::EffectGraph) -> (u8, [EffectU
     (count as u8, effects)
 }
 
+/// What the engine needs to play `track`'s instrument at `tick`: its patch
+/// (for Carve) with synth-parameter automation applied, plus the track's
+/// gain and effect chain as automated (`automated` is
+/// `arr.with_automation_at(tick)`). `None` if the track has no instrument,
+/// or a Carve track has no patch. Shared by live playback and export, so
+/// an exported song sounds like the one you hear.
+pub fn instrument_params(
+    arr: &crate::arrangement::Arrangement,
+    automated: &crate::arrangement::Arrangement,
+    track: crate::arrangement::TrackId,
+    slot: u8,
+    patch: Option<&crate::synth::SynthState>,
+    tick: crate::arrangement::Ticks,
+) -> Option<crate::synth::SynthParams> {
+    use crate::arrangement::Instrument;
+    let t = automated.track(track)?;
+    let mut params = match t.instrument? {
+        Instrument::Drums => crate::synth::SynthParams { drums: true, ..Default::default() },
+        Instrument::Carve => {
+            let mut patch = patch?.clone();
+            arr.apply_synth_automation(track, tick, &mut patch);
+            crate::synth::SynthParams::from_state(&patch)
+        }
+    };
+    params.slot = slot;
+    params.gain_db = t.gain_db;
+    let (count, effects) = build_effect_units(&t.fx);
+    params.effect_count = count;
+    params.effects = effects;
+    Some(params)
+}
+
 impl PlaybackPlan {
     /// Builds a plan from the arrangement's current audio clips, converting
     /// each one's tick position to samples at `sample_rate` and skipping

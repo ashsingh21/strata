@@ -87,7 +87,7 @@ fn load_and_build(path: &Path) -> Option<PeakPyramid> {
 /// whenever a read comes back with zero samples, rather than trusting the
 /// first attempt. A file that's genuinely empty (or missing) just burns
 /// this budget and still returns empty, same as before.
-fn decode_wav(path: &Path) -> Option<(Vec<f32>, hound::WavSpec)> {
+pub fn decode_wav(path: &Path) -> Option<(Vec<f32>, hound::WavSpec)> {
     for attempt in 0..25 {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(20));

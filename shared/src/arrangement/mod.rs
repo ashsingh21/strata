@@ -23,7 +23,7 @@ pub use model::{
     EffectParam, ModTarget,
 };
 pub use peaks::{PeakLevel, PeakPyramid};
-pub use schedule::{notes_in_range, ScheduledNotes};
+pub use schedule::{notes_in_range, timed_notes_in_range, ScheduledNotes, TimedNote};
 pub use seed::{empty_arrangement, seed_arrangement};
 pub use step_entry::step_entry_commit;
 pub use time::{position_to_ticks, TempoEvent, TempoMap, TimeSignature, Ticks, PPQ};

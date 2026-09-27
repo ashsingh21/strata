@@ -52,6 +52,48 @@ pub fn notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> ScheduledNot
     result
 }
 
+/// One note on or off at an exact tick (see `timed_notes_in_range`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TimedNote {
+    pub tick: Ticks,
+    pub track: TrackId,
+    pub pitch: u8,
+    pub velocity: u8,
+    pub on: bool,
+}
+
+/// `notes_in_range`, with each event's own tick, sorted by time (a note-off
+/// before a note-on at the same tick, so a repeated note retriggers). For
+/// offline rendering, where every note can land on its exact sample.
+pub fn timed_notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> Vec<TimedNote> {
+    let mut events = Vec::new();
+    if to <= from {
+        return events;
+    }
+    let any_solo = arr.tracks.iter().any(|t| t.solo);
+    for clip in &arr.clips {
+        if !matches!(clip.content, ClipContent::Midi { .. }) || clip.end() < from || clip.start > to {
+            continue;
+        }
+        let Some(track) = arr.track(clip.track) else { continue };
+        if track.mute || (any_solo && !track.solo) {
+            continue;
+        }
+        for note in &clip.played_notes() {
+            let start = clip.start + note.start;
+            let end = start + note.length;
+            if start > from && start <= to {
+                events.push(TimedNote { tick: start, track: clip.track, pitch: note.pitch, velocity: note.velocity, on: true });
+            }
+            if end > from && end <= to {
+                events.push(TimedNote { tick: end, track: clip.track, pitch: note.pitch, velocity: 0, on: false });
+            }
+        }
+    }
+    events.sort_by_key(|e| (e.tick, e.on));
+    events
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

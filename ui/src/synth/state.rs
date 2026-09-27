@@ -446,36 +446,12 @@ impl Model for SynthModel {
                 // playhead - never written back to the arrangement.
                 let arrangement = self.arrangement.get();
                 let arr = arrangement.with_automation_at(self.playhead.get());
+                let tick = self.playhead.get();
                 for (slot, track) in self.slots.iter().enumerate() {
-                    let owning_track = track.and_then(|t| arr.track(t));
-                    // A Drum Kit slot still needs its gain and effects.
-                    if let Some(t) = owning_track.filter(|t| t.instrument == Some(Instrument::Drums)) {
-                        let mut snapshot = SynthParams::default();
-                        snapshot.slot = slot as u8;
-                        snapshot.drums = true;
-                        snapshot.gain_db = t.gain_db;
-                        let (count, effects) = shared::playback::build_effect_units(&t.fx);
-                        snapshot.effect_count = count;
-                        snapshot.effects = effects;
-                        let _ = self.params_tx.push(snapshot);
-                        continue;
-                    }
-                    if let Some(patch) = track.and_then(|t| patches.get(&t)) {
-                        // Carve-parameter automation, applied to a copy.
-                        let mut automated = patch.clone();
-                        if let Some(t) = *track {
-                            arrangement.apply_synth_automation(t, self.playhead.get(), &mut automated);
-                        }
-                        let mut snapshot = SynthParams::from_state(&automated);
-                        snapshot.slot = slot as u8;
-                        let owning_track = track.and_then(|t| arr.track(t));
-                        snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
-                        snapshot.drums = owning_track.and_then(|t| t.instrument) == Some(Instrument::Drums);
-                        if let Some(t) = owning_track {
-                            let (count, effects) = shared::playback::build_effect_units(&t.fx);
-                            snapshot.effect_count = count;
-                            snapshot.effects = effects;
-                        }
+                    let Some(track) = *track else { continue };
+                    if let Some(snapshot) =
+                        shared::playback::instrument_params(&arrangement, &arr, track, slot as u8, patches.get(&track), tick)
+                    {
                         let _ = self.params_tx.push(snapshot);
                     }
                 }

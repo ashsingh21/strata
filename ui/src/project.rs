@@ -107,6 +107,36 @@ fn zenity_save_file(dir: &Path, suggested_name: &str) -> Option<PathBuf> {
     Some(PathBuf::from(path))
 }
 
+/// The Export Audio dialog: a .wav path, `.wav` added if left off.
+fn zenity_export_file(dir: &Path, suggested_name: &str) -> Option<PathBuf> {
+    let output = std::process::Command::new("zenity")
+        .arg("--file-selection")
+        .arg("--save")
+        .arg("--confirm-overwrite")
+        .arg("--title=Export Audio")
+        // Only .wav files listed: otherwise the dialog pre-selects the
+        // first file in the folder (a project .json) over the suggested name.
+        .arg("--file-filter=WAV audio | *.wav")
+        .arg(format!("--filename={}/{suggested_name}.wav", dir.display()))
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    // OK with the name left empty hands back the folder: use the project's name.
+    let path = PathBuf::from(path);
+    if path.is_dir() {
+        return Some(path.join(format!("{suggested_name}.wav")));
+    }
+    let path = path.to_string_lossy().into_owned();
+    let path = if path.to_lowercase().ends_with(".wav") { path } else { format!("{path}.wav") };
+    Some(PathBuf::from(path))
+}
+
 /// The file this app has always saved to before project management
 /// existed - still the default a fresh checkout opens, so upgrading
 /// doesn't lose anyone's place.
@@ -138,6 +168,10 @@ pub struct ProjectModel {
     /// The project as last saved (or loaded), serialized - the header
     /// compares the live project against it to show "Saved" or "Edited".
     pub saved: Signal<String>,
+    /// The status bar's export line: progress, then the result. Empty when
+    /// no export has run.
+    pub export_status: Signal<String>,
+    exporting: bool,
     /// An action waiting on the unsaved-changes dialog, or on a Save As
     /// the dialog's "Save" kicked off - runs once that save succeeds.
     pending: Option<GuardedAction>,
@@ -173,6 +207,12 @@ pub enum ProjectEvent {
     /// that ran it (see `spawn_dialog`) - `None` if the user cancelled.
     OpenPicked(Option<PathBuf>),
     SaveAsPicked(Option<PathBuf>),
+    /// File > Export Audio: pick a .wav path, then render to it.
+    ExportDialog,
+    ExportPicked(Option<PathBuf>),
+    ExportProgress(f32),
+    /// The written file, or what went wrong.
+    ExportDone(Result<PathBuf, String>),
     /// The unsaved-changes dialog's answer for a pending action.
     DiscardDecided(GuardedAction, DiscardChoice),
 }
@@ -249,6 +289,8 @@ impl ProjectModel {
             current_path: Signal::new(initial_path),
             display_name,
             saved,
+            export_status: Signal::new(String::new()),
+            exporting: false,
             pending: None,
             asking: false,
             allow_close: false,
@@ -284,6 +326,58 @@ impl ProjectModel {
             crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
             let _ = self.decode_request_tx.send(source);
         }
+    }
+
+    /// Renders the project as it is now to `path` on a background thread,
+    /// reporting progress to the status bar. The render reads a snapshot,
+    /// so editing while it runs doesn't affect it.
+    fn start_export(&mut self, cx: &mut EventContext, path: PathBuf) {
+        const SAMPLE_RATE: u32 = 48_000;
+        self.exporting = true;
+        self.export_status.set("Exporting\u{2026}".to_string());
+        let arrangement = self.arrangement.get();
+        let patches = self.patches.get();
+        cx.spawn(move |proxy| {
+            let result = (|| {
+                if engine::render::song_end(&arrangement) == 0 {
+                    return Err("nothing to export: the project has no clips".to_string());
+                }
+                // Every sample the song can play: its audio clips, and the
+                // drum kit if any track uses it.
+                let assets = crate::timeline::assets_dir();
+                let mut names: Vec<Arc<str>> = crate::timeline::peaks_loader::audio_sources(&arrangement).into_iter().collect();
+                if arrangement.tracks.iter().any(|t| t.instrument == Some(shared::arrangement::Instrument::Drums)) {
+                    names.extend(shared::drums::DRUM_KIT.iter().map(|p| Arc::from(p.sample)));
+                }
+                names.sort();
+                names.dedup();
+                let sources = names
+                    .into_iter()
+                    .filter_map(|name| {
+                        let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&assets.join(&*name))?;
+                        Some(shared::playback::DecodedSource {
+                            source: name,
+                            sample_rate: spec.sample_rate,
+                            channels: spec.channels,
+                            samples: Arc::from(samples),
+                        })
+                    })
+                    .collect();
+                let job = engine::render::RenderJob { arrangement, patches, sources, sample_rate: SAMPLE_RATE };
+                let mut last = -1.0f32;
+                let audio = engine::render::render(&job, |p| {
+                    if p - last >= 0.02 {
+                        last = p;
+                        let _ = proxy.emit(ProjectEvent::ExportProgress(p));
+                    }
+                    true
+                })
+                .ok_or("cancelled")?;
+                engine::render::write_wav(&path, &audio, SAMPLE_RATE).map_err(|e| e.to_string())?;
+                Ok(path)
+            })();
+            let _ = proxy.emit(ProjectEvent::ExportDone(result));
+        });
     }
 
     fn save_to(&mut self, path: PathBuf) -> bool {
@@ -390,6 +484,30 @@ impl Model for ProjectModel {
             // Cancelling the Save As a "Save" answer opened cancels the
             // action it was saving for, too.
             ProjectEvent::SaveAsPicked(None) => self.pending = None,
+            ProjectEvent::ExportDialog => {
+                if !self.exporting {
+                    let name = self.display_name.get();
+                    spawn_dialog(cx, move || zenity_export_file(&default_projects_dir(), &name), ProjectEvent::ExportPicked);
+                }
+            }
+            ProjectEvent::ExportPicked(Some(path)) => self.start_export(cx, path.clone()),
+            ProjectEvent::ExportPicked(None) => {}
+            ProjectEvent::ExportProgress(p) => {
+                self.export_status.set(format!("Exporting\u{2026} {:.0}%", p * 100.0));
+            }
+            ProjectEvent::ExportDone(result) => {
+                self.exporting = false;
+                match result {
+                    Ok(path) => {
+                        let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                        self.export_status.set(format!("Exported {file}"));
+                    }
+                    Err(e) => {
+                        eprintln!("export: {e}");
+                        self.export_status.set("Export failed".to_string());
+                    }
+                }
+            }
             ProjectEvent::New => self.guard(cx, GuardedAction::New),
             ProjectEvent::OpenDemo => self.guard(cx, GuardedAction::Demo),
             ProjectEvent::DiscardDecided(action, choice) => {

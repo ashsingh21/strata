@@ -206,6 +206,7 @@ fn main() -> Result<(), ApplicationError> {
         let project_model = ProjectModel::new(tl_arrangement, synth_patches, decode_request_tx.clone(), startup_path);
         let project_saved = project_model.saved;
         let project_name = project_model.display_name;
+        let export_status = project_model.export_status;
         project_model.build(cx);
         let save_status = Memo::new(move |_| {
             let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
@@ -519,7 +520,7 @@ fn main() -> Result<(), ApplicationError> {
             .height(Stretch(1.0));
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
-            sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status);
+            sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status);
 
             timeline::drums_menu_view(cx, tl_drums_menu_open);
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);

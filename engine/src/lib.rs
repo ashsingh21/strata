@@ -11,6 +11,7 @@
 pub mod input;
 mod compressor;
 mod drums;
+pub mod render;
 mod dsp;
 mod effects;
 mod eq;
@@ -44,6 +45,12 @@ struct SmoothedGain {
 impl SmoothedGain {
     fn new(sample_rate: f32) -> Self {
         Self { current: 1.0, coeff: 1.0 - (-1.0 / (0.005 * sample_rate)).exp() }
+    }
+
+    /// Jumps straight to `value` (no glide) - for a start with no previous
+    /// level to glide from.
+    fn reset(&mut self, value: f32) {
+        self.current = value;
     }
 
     fn next(&mut self, target: f32) -> f32 {

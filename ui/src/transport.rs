@@ -300,6 +300,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             file_menu_sep(cx);
             file_menu_item_with_shortcut(cx, "Save", "Ctrl+S", file_menu_open, |cx| cx.emit(ProjectEvent::Save));
             file_menu_item(cx, "Save As...", file_menu_open, |cx| cx.emit(ProjectEvent::SaveAsDialog));
+            file_menu_item(cx, "Export Audio...", file_menu_open, |cx| cx.emit(ProjectEvent::ExportDialog));
             file_menu_sep(cx);
             // Undo/Redo were keyboard-only; listed here (with their keys)
             // so they're discoverable.

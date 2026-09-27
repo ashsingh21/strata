@@ -195,6 +195,7 @@ pub fn status_bar(
     block_frames: Signal<u32>,
     touched: Signal<Option<(String, Memo<String>)>>,
     save_status: Memo<String>,
+    export_status: Signal<String>,
 ) {
     HStack::new(cx, move |cx| {
         let audio = block_frames.map(move |&frames| {
@@ -214,6 +215,7 @@ pub fn status_bar(
         });
         Label::new(cx, touched_text).class("value");
         Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(12.0));
+        Label::new(cx, export_status).class("value").toggle_class("hidden", export_status.map(|s| s.is_empty()));
         Label::new(cx, save_status).class("value");
     })
     .class("statusbar")
