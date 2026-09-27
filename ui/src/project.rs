@@ -208,8 +208,26 @@ pub fn project(arrangement: &Arrangement, patches: &BTreeMap<TrackId, SynthState
 }
 
 /// The project's saved form, for comparing against the last save.
+///
+/// Id counters (`next_id`, in the arrangement and in every effect graph)
+/// are left out: they only ever grow - an undone "add track" doesn't give
+/// its id back - so including them made a project that matched its saved
+/// file still read "Edited" after undo. Only the comparison drops them;
+/// real saves keep them.
 pub fn snapshot(arrangement: &Arrangement, patches: &BTreeMap<TrackId, SynthState>) -> String {
-    serde_json::to_string(&project(arrangement, patches)).unwrap_or_default()
+    fn strip_id_counters(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("next_id");
+                map.values_mut().for_each(strip_id_counters);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(strip_id_counters),
+            _ => {}
+        }
+    }
+    let Ok(mut value) = serde_json::to_value(project(arrangement, patches)) else { return String::new() };
+    strip_id_counters(&mut value);
+    value.to_string()
 }
 
 impl ProjectModel {
