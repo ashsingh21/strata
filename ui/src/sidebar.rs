@@ -10,7 +10,7 @@ use shared::arrangement::{Arrangement, Effect, TrackId};
 use shared::synth::{SynthState, PRESETS};
 
 use crate::synth::state::SynthEvent;
-use crate::timeline::state::{display_name_from_stem, TimelineEvent};
+use crate::timeline::state::TimelineEvent;
 
 fn section_head(cx: &mut Context, title: &'static str, count: usize) {
     HStack::new(cx, move |cx| {
@@ -48,7 +48,7 @@ pub fn sidebar(
     open: Signal<bool>,
 ) {
     let query = Signal::new(String::new());
-    let samples = crate::timeline::drum_samples();
+    let sample_categories = crate::timeline::drum_sample_categories();
 
     VStack::new(cx, move |cx| {
         Textbox::new(cx, query)
@@ -81,12 +81,37 @@ pub fn sidebar(
                         .on_press(move |cx| cx.emit(SynthEvent::LoadPreset(build)));
                 }
 
-                section_head(cx, "Drum samples", samples.len());
-                for filename in &samples {
-                    let source: std::sync::Arc<str> = format!("drums/{filename}").into();
-                    let display = display_name_from_stem(filename.strip_suffix(".wav").unwrap_or(filename));
-                    row(cx, display, query, true)
-                        .on_press(move |cx| cx.emit(TimelineEvent::AddDrumSample(source.clone())));
+                for category in &sample_categories {
+                    section_head(cx, category.label, category.files.len());
+                    // Each row's (display name, import source) computed
+                    // up front and moved in as owned data - the ScrollView
+                    // closure has to be 'static, so it can't hold a
+                    // borrow of `category`/`sample_categories` itself.
+                    let entries: Vec<(String, std::sync::Arc<str>)> = category
+                        .files
+                        .iter()
+                        .map(|filename| {
+                            (crate::timeline::sample_display_name(category, filename), format!("drums/{filename}").into())
+                        })
+                        .collect();
+                    // Its own bounded, bordered scroll box, not just more
+                    // rows in the sidebar's own scroll - so a long list
+                    // (a dropped-in pack) browses in place instead of
+                    // pushing every section below it far down the page.
+                    ScrollView::new(cx, move |cx| {
+                        VStack::new(cx, move |cx| {
+                            for (display, source) in entries.clone() {
+                                row(cx, display, query, true)
+                                    .on_press(move |cx| cx.emit(TimelineEvent::AddDrumSample(source.clone())));
+                            }
+                        })
+                        .width(Stretch(1.0))
+                        .height(Auto);
+                    })
+                    .class("panel")
+                    .width(Stretch(1.0))
+                    .height(Auto)
+                    .max_height(Pixels(200.0));
                 }
 
                 // A finished multi-bar groove across new tracks in one

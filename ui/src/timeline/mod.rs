@@ -249,33 +249,95 @@ pub fn drum_samples() -> Vec<String> {
     samples
 }
 
-pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
-    let samples = drum_samples();
+/// A group of `drum_samples()` filenames sharing a naming prefix - so a
+/// folder that's grown well past a handful of one-shots (a dropped-in
+/// pack of loops, say) still browses as a short list of short lists,
+/// not one long undifferentiated one.
+pub struct SampleCategory {
+    pub label: &'static str,
+    pub prefix: &'static str,
+    pub files: Vec<String>,
+}
 
-    VStack::new(cx, move |cx| {
-        Label::new(cx, "Drum samples").class("label");
-        if samples.is_empty() {
-            Label::new(cx, "none in assets/drums/").class("meta");
+/// Buckets `drum_samples()` by filename prefix, dropping the prefix from
+/// each file's own display name (redundant once it's already the
+/// section header) and omitting any category with nothing in it. What
+/// doesn't match a known prefix - the original hand-picked one-shots -
+/// stays under the plain "Drum samples" heading.
+pub fn drum_sample_categories() -> Vec<SampleCategory> {
+    const CATEGORIES: &[(&str, &str)] = &[("Piano loops", "piano_"), ("Ambient sketches", "micro_")];
+
+    let mut samples = drum_samples();
+    let mut categories: Vec<SampleCategory> = CATEGORIES
+        .iter()
+        .map(|(label, prefix)| SampleCategory { label, prefix, files: Vec::new() })
+        .collect();
+
+    samples.retain(|filename| {
+        for category in categories.iter_mut() {
+            if filename.starts_with(category.prefix) {
+                category.files.push(filename.clone());
+                return false;
+            }
         }
-        for filename in &samples {
-            let source: std::sync::Arc<str> = format!("drums/{filename}").into();
-            let display = state::display_name_from_stem(filename.strip_suffix(".wav").unwrap_or(filename));
-            Button::new(cx, move |cx| Label::new(cx, display.clone()))
-                .class("btn")
-                .class("sm")
-                .width(Stretch(1.0))
-                .on_press(move |cx| cx.emit(TimelineEvent::AddDrumSample(source.clone())));
-        }
+        true
+    });
+
+    let mut all = vec![SampleCategory { label: "Drum samples", prefix: "", files: samples }];
+    all.extend(categories);
+    all.retain(|c| !c.files.is_empty());
+    all
+}
+
+/// A category's file's display name, with its category prefix (if any)
+/// stripped first - the section header already says "Piano loops", so
+/// every row under it repeating "Piano" would be noise, not information.
+pub fn sample_display_name(category: &SampleCategory, filename: &str) -> String {
+    let stem = filename.strip_suffix(".wav").unwrap_or(filename);
+    let stem = stem.strip_prefix(category.prefix).unwrap_or(stem);
+    state::display_name_from_stem(stem)
+}
+
+pub fn drums_menu_view(cx: &mut Context, open: Signal<bool>) {
+    let categories = drum_sample_categories();
+    let empty = categories.is_empty();
+
+    // A floating quick-add menu, not the sidebar's full browser - still
+    // grouped the same way (so a huge dropped-in pack doesn't turn this
+    // into an undifferentiated wall either), but capped and scrollable
+    // rather than `Auto`-height, now that the folder can hold far more
+    // than a handful of one-shots.
+    ScrollView::new(cx, move |cx| {
+        VStack::new(cx, move |cx| {
+            if empty {
+                Label::new(cx, "none in assets/drums/").class("meta");
+            }
+            for category in &categories {
+                Label::new(cx, category.label).class("label");
+                for filename in &category.files {
+                    let source: std::sync::Arc<str> = format!("drums/{filename}").into();
+                    let display = sample_display_name(category, filename);
+                    Button::new(cx, move |cx| Label::new(cx, display.clone()))
+                        .class("btn")
+                        .class("sm")
+                        .width(Stretch(1.0))
+                        .on_press(move |cx| cx.emit(TimelineEvent::AddDrumSample(source.clone())));
+                }
+            }
+        })
+        .gap(Pixels(tokens::SPACE_1))
+        .width(Stretch(1.0))
+        .height(Auto);
     })
     .class("panel")
     .class("drums-menu")
     .toggle_class("hidden", open.map(|o| !*o))
-    .gap(Pixels(tokens::SPACE_1))
     .padding(Pixels(tokens::SPACE_2))
     .position_type(PositionType::Absolute)
     // Just right of the sidebar, under the header and ruler.
     .top(Pixels(tokens::SIZE_TOOLBAR + tokens::SIZE_RULER + 8.0))
     .left(Pixels(216.0))
     .width(Pixels(160.0))
-    .height(Auto);
+    .height(Auto)
+    .max_height(Pixels(320.0));
 }

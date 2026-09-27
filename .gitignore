@@ -11,3 +11,7 @@ assets/drums/kick_80s.wav
 assets/drums/kick_loop.wav
 assets/drums/loop_fairy_130bpm.wav
 assets/drums/snare_classic.wav
+# The piano-loops and microcompositions packs (~1.7GB together) - listed
+# by prefix rather than one line each.
+assets/drums/piano_*.wav
+assets/drums/micro_*.wav
