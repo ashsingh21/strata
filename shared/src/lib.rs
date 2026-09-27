@@ -13,6 +13,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
+pub mod analysis;
 pub mod arrangement;
 pub mod demo;
 pub mod drums;

@@ -18,10 +18,14 @@ pub struct LessonBarProps {
     pub has_goal: Signal<bool>,
     pub change_step: Signal<Option<usize>>,
     pub shown_step: Signal<Option<usize>>,
+    pub match_target: Signal<Option<std::sync::Arc<shared::analysis::Analysis>>>,
+    pub match_yours: Signal<Option<std::sync::Arc<shared::analysis::Analysis>>>,
+    pub match_score: Signal<Option<f32>>,
+    pub theme: Signal<crate::tokens::ThemeId>,
 }
 
 impl LessonBarProps {
-    pub fn of(model: &LessonModel) -> Self {
+    pub fn of(model: &LessonModel, theme: Signal<crate::tokens::ThemeId>) -> Self {
         Self {
             active: model.active,
             hint_visible: model.hint_visible,
@@ -29,6 +33,10 @@ impl LessonBarProps {
             has_goal: model.has_goal,
             change_step: model.change_step,
             shown_step: model.shown_step,
+            match_target: model.match_target,
+            match_yours: model.match_yours,
+            match_score: model.match_score,
+            theme,
         }
     }
 }
@@ -107,8 +115,12 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
                     .on_press(|cx| cx.emit(LessonEvent::TryYourself));
             }
 
-            // Where this lesson is going, to have in your ears first.
-            preview_button(cx, p, Which::Goal, "Hear the goal").toggle_class("hidden", p.has_goal.map(|g| !*g));
+            // Where this lesson is going, to have in your ears first (a
+            // Sound match has its own Target / Yours buttons instead).
+            let is_match = super::sound_match::target(l.id).is_some();
+            if !is_match {
+                preview_button(cx, p, Which::Goal, "Hear the goal").toggle_class("hidden", p.has_goal.map(|g| !*g));
+            }
 
             let last = step + 1 == l.steps.len();
             match s.kind {
@@ -161,7 +173,45 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
         .min_height(Pixels(48.0))
         .padding_top(Pixels(6.0))
         .padding_bottom(Pixels(6.0));
+
+        if super::sound_match::target(l.id).is_some() {
+            match_panel(cx, p);
+        }
     });
+}
+
+/// Sound match: the Target against yours - spectrum and loudness - with
+/// the score and buttons to hear each.
+fn match_panel(cx: &mut Context, p: LessonBarProps) {
+    use super::match_view::{Graph, MatchGraph};
+    HStack::new(cx, move |cx| {
+        MatchGraph::new(cx, Graph::Spectrum, p.match_target, p.match_yours, p.theme).width(Stretch(2.0)).height(Stretch(1.0));
+        MatchGraph::new(cx, Graph::Loudness, p.match_target, p.match_yours, p.theme).width(Stretch(1.0)).height(Stretch(1.0));
+        VStack::new(cx, move |cx| {
+            Label::new(
+                cx,
+                p.match_score.map(|s| match s {
+                    Some(s) => format!("{:.0}%", s * 100.0),
+                    None => "\u{2026}".to_string(),
+                }),
+            )
+            .class("match-score")
+            .toggle_class("is-matched", p.match_score.map(|s| s.is_some_and(|s| s >= super::sound_match::WIN)));
+            Label::new(cx, "match").class("value");
+            preview_button(cx, p, Which::Goal, "Target").width(Stretch(1.0));
+            preview_button(cx, p, Which::Yours, "Yours").width(Stretch(1.0));
+        })
+        .gap(Pixels(4.0))
+        .alignment(Alignment::TopCenter)
+        .width(Pixels(110.0))
+        .height(Stretch(1.0));
+    })
+    .class("lesson-bar")
+    .gap(Pixels(tokens::SPACE_3))
+    .padding(Pixels(tokens::SPACE_3))
+    .padding_top(Pixels(0.0))
+    .width(Stretch(1.0))
+    .height(Pixels(150.0));
 }
 
 /// "▸ {label}", or "■ Stop" while `which` plays.

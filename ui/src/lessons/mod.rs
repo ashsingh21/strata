@@ -8,9 +8,11 @@
 //! functions of a [`Snapshot`], so each lesson is unit-tested end to end.
 
 pub mod bar;
+pub mod match_view;
 pub mod course;
 pub mod preview;
 pub mod show;
+pub mod sound_match;
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -42,6 +44,9 @@ pub struct Snapshot {
     pub open_clip: Option<shared::arrangement::ClipId>,
     /// Where the playhead is.
     pub playhead: shared::arrangement::Ticks,
+    /// In a Sound match challenge: how close the patch is to the target
+    /// (0 to 1; 0 elsewhere).
+    pub match_score: f32,
 }
 
 /// A control a step can make glow.
@@ -137,6 +142,9 @@ pub enum LessonEvent {
     TryYourself,
     /// A preview finished rendering; `generation` drops a stale one.
     PreviewReady { generation: u64, which: preview::Which, audio: Arc<[f32]> },
+    /// A Sound match measurement finished: the target's, or (with the
+    /// patch it measured) yours.
+    MatchMeasured { lesson: usize, patch: Option<SynthState>, analysis: Arc<shared::analysis::Analysis> },
 }
 
 pub struct LessonModel {
@@ -187,6 +195,14 @@ pub struct LessonModel {
     finished: Option<&'static str>,
     /// When the current step was last checked.
     last_check: Instant,
+    /// Sound match: the target and your sound, measured, and how alike.
+    pub match_target: Signal<Option<Arc<shared::analysis::Analysis>>>,
+    pub match_yours: Signal<Option<Arc<shared::analysis::Analysis>>>,
+    pub match_score: Signal<Option<f32>>,
+    /// A measurement of yours is running.
+    match_measuring: bool,
+    /// The patch `match_yours` measured.
+    match_measured: Option<SynthState>,
 }
 
 /// How often a step checks itself: 15 times a second is instant to a
@@ -243,6 +259,11 @@ impl LessonModel {
             last_save: Instant::now(),
             finished: None,
             last_check: Instant::now(),
+            match_target: Signal::new(None),
+            match_yours: Signal::new(None),
+            match_score: Signal::new(None),
+            match_measuring: false,
+            match_measured: None,
         }
     }
 
@@ -256,6 +277,7 @@ impl LessonModel {
             // closes itself otherwise).
             open_clip: self.open_clip.get().filter(|id| self.arrangement.get().clip(*id).is_some()),
             playhead: self.playhead.get(),
+            match_score: self.match_score.get().unwrap_or(0.0),
         }
     }
 
@@ -290,8 +312,34 @@ impl LessonModel {
         }
     }
 
+    fn reset_match(&mut self) {
+        self.match_target.set(None);
+        self.match_yours.set(None);
+        self.match_score.set(None);
+        self.match_measured = None;
+    }
+
+    /// Measures the current patch if it's changed since the last
+    /// measurement (one at a time, on a worker thread).
+    fn measure_yours(&mut self, cx: &mut EventContext, lesson: usize) {
+        if self.match_measuring {
+            return;
+        }
+        let mut patch = self.synth.get();
+        patch.held_notes.clear();
+        if self.match_measured.as_ref() == Some(&patch) {
+            return;
+        }
+        self.match_measuring = true;
+        cx.spawn(move |proxy| {
+            let analysis = Arc::new(sound_match::measure(&patch));
+            let _ = proxy.emit(LessonEvent::MatchMeasured { lesson, patch: Some(patch), analysis });
+        });
+    }
+
     fn exit(&mut self) {
         self.active.set(None);
+        self.reset_match();
         self.stop_preview();
         self.step_before = None;
         self.last_change = None;
@@ -311,6 +359,7 @@ impl LessonModel {
             preview::Which::Goal => preview::goal(course::LESSONS[lesson].id, &self.snapshot(), &self.patches.get()),
             preview::Which::Before => self.last_change.as_ref().map(|(_, before, _)| before.clone()),
             preview::Which::After => self.last_change.as_ref().map(|(_, _, after)| after.clone()),
+            preview::Which::Yours => Some(preview::take_of(&self.snapshot(), &self.patches.get())),
         };
         let Some(take) = take else { return };
         // One thing at a time: the song stops for a preview.
@@ -437,6 +486,14 @@ impl Model for LessonModel {
                     cx.emit(crate::synth::state::SynthEvent::SelectTrack(last.id));
                 }
                 self.last_change = None;
+                self.reset_match();
+                if let Some(target) = sound_match::target(course::LESSONS[*lesson].id) {
+                    let lesson = *lesson;
+                    cx.spawn(move |proxy| {
+                        let analysis = Arc::new(sound_match::measure(&target));
+                        let _ = proxy.emit(LessonEvent::MatchMeasured { lesson, patch: None, analysis });
+                    });
+                }
                 self.go_to(*lesson, 0);
                 let has_goal = preview::goal(course::LESSONS[*lesson].id, &self.snapshot(), &self.patches.get()).is_some();
                 self.has_goal.set(has_goal);
@@ -457,6 +514,9 @@ impl Model for LessonModel {
                     cx.emit(crate::project::ProjectEvent::LessonFinished(id));
                 }
                 let Some((lesson, step)) = self.active.get() else { return };
+                if self.match_target.get().is_some() {
+                    self.measure_yours(cx, lesson);
+                }
                 if self.last_save.elapsed() >= AUTO_SAVE_EVERY {
                     self.last_save = Instant::now();
                     cx.emit(crate::project::ProjectEvent::AutoSave);
@@ -490,6 +550,24 @@ impl Model for LessonModel {
             }
             LessonEvent::Hear(which) => self.hear(cx, *which),
             LessonEvent::ShowMe => self.show_me(cx),
+            LessonEvent::MatchMeasured { lesson, patch, analysis } => {
+                if patch.is_some() {
+                    self.match_measuring = false;
+                }
+                if self.active.get().map(|(l, _)| l) != Some(*lesson) {
+                    return;
+                }
+                match patch {
+                    None => self.match_target.set(Some(analysis.clone())),
+                    Some(patch) => {
+                        self.match_measured = Some(patch.clone());
+                        self.match_yours.set(Some(analysis.clone()));
+                    }
+                }
+                if let (Some(t), Some(y)) = (self.match_target.get(), self.match_yours.get()) {
+                    self.match_score.set(Some(shared::analysis::likeness(&t, &y)));
+                }
+            }
             LessonEvent::TryYourself => self.try_yourself(cx),
             LessonEvent::PreviewReady { generation, which, audio } => {
                 if *generation != self.preview_generation || self.active.get().is_none() {

@@ -36,6 +36,8 @@ pub enum Which {
     Goal,
     Before,
     After,
+    /// Sound match: your patch now.
+    Yours,
 }
 
 /// The app as it stands in `snap`: the on-screen patch is the selected
@@ -75,7 +77,8 @@ pub fn starting_snapshot(lesson: &str) -> (Snapshot, BTreeMap<TrackId, SynthStat
     let patches: BTreeMap<_, _> = project.instruments.iter().cloned().collect();
     let last = project.arrangement.tracks.last().map(|t| t.id);
     let synth = last.and_then(|t| patches.get(&t).cloned()).unwrap_or_else(shared::synth::seed_synth);
-    let snap = Snapshot { arrangement: project.arrangement, selected_track: last, playing: false, synth, open_clip: None, playhead: 0 };
+    let snap =
+        Snapshot { arrangement: project.arrangement, selected_track: last, playing: false, synth, open_clip: None, playhead: 0, match_score: 0.0 };
     (snap, patches)
 }
 

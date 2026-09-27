@@ -54,6 +54,18 @@ pub const PROJECT_FINISH: &str = "project-finish";
 /// lo-fi" in two more on top of it - one chain, each part starting from
 /// the one before.
 pub const RECIPE_KEYS: &str = "recipe-keys";
+/// "Sound match": hear a hidden target, read its spectrum, rebuild it.
+pub const MATCH_WAVE: &str = "match-wave";
+pub const MATCH_CUTOFF: &str = "match-cutoff";
+pub const MATCH_RESONANCE: &str = "match-resonance";
+pub const MATCH_SUB: &str = "match-sub";
+pub const MATCH_PLUCK: &str = "match-pluck";
+pub const MATCH_SWELL: &str = "match-swell";
+pub const MATCH_MYSTERY: &str = "match-mystery";
+/// The note the Sound match challenges play and measure: A3, held.
+pub const MATCH_NOTE: u8 = 57;
+/// How long it's held, in 16ths.
+pub const MATCH_NOTE_16THS: i64 = 12;
 pub const LOFI_BEAT: &str = "lofi-beat";
 pub const LOFI_KEYS: &str = "lofi-keys";
 pub const LOFI_BASS: &str = "lofi-bass";
@@ -151,6 +163,9 @@ fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
             (0, 57, 2), (0, 60, 2), (0, 64, 2), (0, 67, 2), (6, 57, 2), (6, 60, 2), (6, 64, 2), (6, 67, 2),
             (16, 57, 2), (16, 60, 2), (16, 64, 2), (16, 65, 2), (22, 57, 2), (22, 60, 2), (22, 64, 2), (22, 65, 2),
         ]), 2),
+        // One held note, the one the challenge measures, and a gap to
+        // hear its tail.
+        _ if lesson.starts_with("match-") => ("Note", steps(&[(0, MATCH_NOTE, MATCH_NOTE_16THS)]), 1),
         RECIPE_BASS => ("Bassline", steps(&[(2, 45, 1), (6, 45, 1), (10, 45, 1), (14, 57, 1)]), 1),
         // Slow and singing, in A minor pentatonic.
         RECIPE_FLUTE => ("Melody", steps(&[(0, 69, 3), (4, 72, 3), (8, 74, 7), (16, 76, 11), (28, 74, 3)]), 2),
@@ -217,7 +232,7 @@ pub fn starting_project(lesson: &str) -> Project {
         BOLLY_DRONE => return lofi_after(5),
         _ => {}
     }
-    if lesson.starts_with("carve-") || lesson.starts_with("recipe-") {
+    if lesson.starts_with("carve-") || lesson.starts_with("recipe-") || lesson.starts_with("match-") {
         return carve_lesson(lesson);
     }
     let mut arr = empty_arrangement();

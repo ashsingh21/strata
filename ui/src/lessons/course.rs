@@ -9,8 +9,9 @@ use shared::lessons::{
     RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
     PROJECT_ARRANGE, PROJECT_BASS, PROJECT_BASS_ROOTS, PROJECT_CHORDS, PROJECT_CHORDS_NOTES, PROJECT_FINISH, PROJECT_GROOVE,
     RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
-    SIXTEENTH,
+    SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
 };
+use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
 use super::{selected, tracks_with, Snapshot, Target};
@@ -46,6 +47,7 @@ pub const CARVE: &str = "Carve synth";
 pub const RECIPES: &str = "Recipes";
 pub const ARRANGEMENT: &str = "Arrangement";
 pub const PROJECTS: &str = "Projects";
+pub const SOUND_MATCH: &str = "Sound match";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -1901,6 +1903,156 @@ pub const LESSONS: &[Lesson] = &[
             ),
         ],
     },
+    Lesson {
+        id: MATCH_WAVE,
+        group: SOUND_MATCH,
+        title: "Which wave?",
+        steps: &[
+            info(
+                "Sound match: a hidden sound - the Target - to rebuild in Carve. The graphs show both: the filled \
+                 shape is the Target, the line is yours. Hear each with \u{25b8} Target and \u{25b8} Yours.",
+            ),
+            info(
+                "Reading the spectrum: a note isn't one frequency but a stack of them, its harmonics - each one a \
+                 peak, from low pitch on the left to high on the right. Yours is a saw: every harmonic, each a \
+                 little quieter than the last. Now look at the Target's peaks.",
+            ),
+            recipe(
+                "Match it: pick the wave whose peaks look like the Target's. 92% wins.",
+                "A square wave has only the odd harmonics (1st, 3rd, 5th...), so every other peak is missing. Those gaps are its hollow, woody sound.",
+                "Try each wave shape above Oscillator 1 and watch the peaks.",
+                |s| s.match_score >= WIN,
+                |_| Some(Target::OscWave(1)),
+            ),
+            info(
+                "Gaps between the peaks: a square (or a hollow sound, like a clarinet). Every peak: a saw, bright \
+                 and buzzy. A single peak: a sine, pure.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MATCH_CUTOFF,
+        group: SOUND_MATCH,
+        title: "Where's the cutoff?",
+        steps: &[
+            info(
+                "This Target is a saw too - but look where its peaks drop away. Above a point the harmonics fall \
+                 fast: that point is a filter's cutoff.",
+            ),
+            recipe(
+                "Match it: turn Cutoff until your peaks fall away where the Target's do.",
+                "A low-pass filter removes what's above its cutoff, so the high harmonics - the brightness - go. The lower the cutoff, the darker and rounder the sound.",
+                "Hear both: the Target is darker. Watch where the two shapes part.",
+                |s| s.match_score >= WIN,
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            info("Reading a sound's brightness off its spectrum is how producers match a sound they've heard."),
+        ],
+    },
+    Lesson {
+        id: MATCH_RESONANCE,
+        group: SOUND_MATCH,
+        title: "A bump at the edge",
+        steps: &[
+            info(
+                "This Target has a bump: a few peaks louder than the rest, just before the drop. That's resonance - \
+                 the filter ringing at its cutoff.",
+            ),
+            recipe(
+                "Match it: set Cutoff where the bump is, then raise Resonance until your bump matches.",
+                "Resonance feeds the filter back into itself, boosting the harmonics right at the cutoff - the squelchy, vocal sound of acid basslines.",
+                "The bump is a little above 1 kHz.",
+                |s| s.match_score >= WIN,
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((900.0..=1600.0).contains(&p.filter.cutoff_hz), Target::Knob(SynthParam::Cutoff)),
+                        (true, Target::Knob(SynthParam::Resonance)),
+                    ])
+                },
+            ),
+            info("A bump at the edge of the drop: resonance. The taller the bump, the more the filter sings."),
+        ],
+    },
+    Lesson {
+        id: MATCH_SUB,
+        group: SOUND_MATCH,
+        title: "Something underneath",
+        steps: &[
+            info(
+                "Look at the far left: the Target has a peak below your lowest one. Something is playing an octave \
+                 under the note.",
+            ),
+            recipe(
+                "Match it: bring in the Sub oscillator until your low peak is as tall as the Target's.",
+                "The sub oscillator plays a pure tone an octave down. It adds weight you feel more than hear - why bass sounds use it.",
+                "Sub, in the Mixer.",
+                |s| s.match_score >= WIN,
+                |_| Some(Target::Knob(SynthParam::SubLevel)),
+            ),
+            info("A peak below the note: a sub. Bass sounds live there."),
+        ],
+    },
+    Lesson {
+        id: MATCH_PLUCK,
+        group: SOUND_MATCH,
+        title: "Pluck",
+        steps: &[
+            info(
+                "Now the right-hand graph: loudness over time. Yours holds steady while the note is held. The \
+                 Target starts loud and dies away, like a plucked string.",
+            ),
+            recipe(
+                "Match it: Amp Sustain down to zero, then set Decay so your fade matches the Target's.",
+                "With no sustain a note fades to silence however long it's held; decay sets how fast. Short decays pluck, long ones ring.",
+                "Sustain and Decay, in the Amp envelope. The Target fades in about a quarter of a second.",
+                |s| s.match_score >= WIN,
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[(p.amp_env.sustain <= 0.05, Target::Knob(SynthParam::AmpSustain)), (false, Target::Knob(SynthParam::AmpDecay))])
+                },
+            ),
+            info("A loud start and a quick fade: a pluck. The spectrum can't show that - the loudness curve can."),
+        ],
+    },
+    Lesson {
+        id: MATCH_SWELL,
+        group: SOUND_MATCH,
+        title: "Swell",
+        steps: &[
+            info("This Target's loudness curve starts at nothing and rises: it fades in."),
+            recipe(
+                "Match it: raise Amp Attack until your curve rises as slowly as the Target's.",
+                "Attack is how long a note takes to reach full volume. A long attack makes pads and strings swell in instead of starting with a hit.",
+                "About half a second.",
+                |s| s.match_score >= WIN,
+                |_| Some(Target::Knob(SynthParam::AmpAttack)),
+            ),
+            info("A slow rise at the start: a long attack. Pads, strings and bowed sounds are built on it."),
+        ],
+    },
+    Lesson {
+        id: MATCH_MYSTERY,
+        group: SOUND_MATCH,
+        title: "Mystery sound",
+        steps: &[
+            info(
+                "No clues this time: the Target differs in its wave, its brightness and its shape over time. Use \
+                 both graphs - and your ears.",
+            ),
+            recipe(
+                "Match it. 92% wins.",
+                "A hollow wave (gaps between the peaks), a filter taking the top off (where they fall away), and a fade to a lower level (the loudness curve's drop) - all three read off the graphs.",
+                "Check the gaps between peaks, where the peaks fall away, and the drop after the start of the loudness curve.",
+                |s| s.match_score >= WIN,
+                |_| None,
+            ),
+            info(
+                "You rebuilt a sound by reading it. That's what producers do with a reference: listen, look, then \
+                 turn the knobs.",
+            ),
+        ],
+    },
 ];
 
 /// The "and" of every beat.
@@ -2387,7 +2539,7 @@ mod tests {
         let synth = selected
             .and_then(|id| p.instruments.iter().find(|(t, _)| *t == id).map(|(_, patch)| patch.clone()))
             .unwrap_or_else(shared::synth::seed_synth);
-        Snapshot { arrangement: p.arrangement, selected_track: selected, playing: false, synth, open_clip: None, playhead: 0 }
+        Snapshot { arrangement: p.arrangement, selected_track: selected, playing: false, synth, open_clip: None, playhead: 0, match_score: 0.0 }
     }
 
     fn lesson(id: &str) -> &'static Lesson {
@@ -2426,6 +2578,14 @@ mod tests {
             let id = l.id;
             let mut s = start(id);
             let shows = crate::lessons::show::steps(id);
+            // A Sound match's score, as the model measures it.
+            let target = crate::lessons::sound_match::target(id).map(|t| crate::lessons::sound_match::measure(&t));
+            let score = |s: &mut Snapshot| {
+                if let Some(t) = &target {
+                    s.match_score = shared::analysis::likeness(t, &crate::lessons::sound_match::measure(&s.synth));
+                }
+            };
+            score(&mut s);
             let actions: Vec<&Step> = l.steps.iter().filter(|st| matches!(st.kind, Kind::Action { .. })).collect();
             assert_eq!(shows.len(), actions.len(), "{id}: one Show me per action step");
             for (i, (step, show)) in actions.iter().zip(&shows).enumerate() {
@@ -2433,6 +2593,7 @@ mod tests {
                 assert!(!check(&s), "{id} action {} already passes: {}", i + 1, step.text);
                 let _ = target(&s);
                 show(&mut s);
+                score(&mut s);
                 assert!(check(&s), "{id} action {} doesn't pass after Show me: {}", i + 1, step.text);
             }
         }

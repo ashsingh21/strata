@@ -254,7 +254,7 @@ fn main() -> Result<(), ApplicationError> {
             lesson_preview.take().expect("the app is built once"),
             engine_sample_rate,
         );
-        let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model);
+        let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model, theme);
         let lower_panel_height =
             Signal::new(settings::load_lower_panel_height().unwrap_or(splitter::DEFAULT_PANEL_HEIGHT));
         let lessons_active = lesson_model.active;

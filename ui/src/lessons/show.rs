@@ -593,6 +593,13 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 s.playing = true;
             }),
         ],
+        MATCH_WAVE => vec![b(|s| s.synth = super::sound_match::target(MATCH_WAVE).unwrap())],
+        MATCH_CUTOFF => vec![b(|s| s.synth = super::sound_match::target(MATCH_CUTOFF).unwrap())],
+        MATCH_RESONANCE => vec![b(|s| s.synth = super::sound_match::target(MATCH_RESONANCE).unwrap())],
+        MATCH_SUB => vec![b(|s| s.synth = super::sound_match::target(MATCH_SUB).unwrap())],
+        MATCH_PLUCK => vec![b(|s| s.synth = super::sound_match::target(MATCH_PLUCK).unwrap())],
+        MATCH_SWELL => vec![b(|s| s.synth = super::sound_match::target(MATCH_SWELL).unwrap())],
+        MATCH_MYSTERY => vec![b(|s| s.synth = super::sound_match::target(MATCH_MYSTERY).unwrap())],
         _ => vec![],
     }
 }
