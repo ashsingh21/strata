@@ -1,6 +1,6 @@
 //! The Strata vertical fader: a track hairline plus a draggable cap with a
 //! centre tick, matching `.st-fader` / `.st-fader .cap` in the design spec.
-//! Used by the timeline's track headers and (dead for now) the mixer strip.
+//! Used by the timeline's track headers.
 
 use vizia::prelude::*;
 use vizia::vg;
@@ -18,9 +18,9 @@ const WHEEL_SCALAR: f32 = 0.02;
 
 type ChangeCallback = Box<dyn Fn(&mut EventContext, f32)>;
 
-/// Generic over the value source so both a plain `Signal<f32>` (the mixer
-/// strip) and a derived `Memo<f32>` (the timeline's per-track fader, read
-/// out of the arrangement) work without an extra indirection layer.
+/// Generic over the value source, so a plain `Signal<f32>` or a derived
+/// `Memo<f32>` (the timeline's per-track fader, read out of the
+/// arrangement) both work without an extra indirection layer.
 pub struct Fader<V: SignalGet<f32> + Copy + 'static> {
     value: V,
     default_value: f32,
