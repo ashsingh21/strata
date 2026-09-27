@@ -416,6 +416,8 @@ pub enum TimelineEvent {
     SetLoopRange(Option<LoopRange>),
     SetTempo(f64),
     SetTimeSignature { numerator: u8, denominator: u8 },
+    /// A whole new arrangement as one undoable edit (a lesson's "Show me").
+    ReplaceArrangement(Box<Arrangement>),
     Undo,
     Redo,
     CycleSnap,
@@ -830,6 +832,9 @@ impl Model for TimelineState {
             }
             TimelineEvent::SetTimeSignature { numerator, denominator } => {
                 self.do_command(Command::SetTimeSignature { numerator: *numerator, denominator: *denominator });
+            }
+            TimelineEvent::ReplaceArrangement(next) => {
+                self.do_command(Command::Replace(next.clone()));
             }
             TimelineEvent::Undo => {
                 self.with_arrangement(|arr, stack| {

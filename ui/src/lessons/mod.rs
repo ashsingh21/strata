@@ -10,6 +10,7 @@
 pub mod bar;
 pub mod course;
 pub mod preview;
+pub mod show;
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -130,6 +131,10 @@ pub enum LessonEvent {
     /// Play the lesson's goal, or the last step's before / after (again:
     /// stop it).
     Hear(preview::Which),
+    /// Do the current step for the learner (undo gives it back).
+    ShowMe,
+    /// Take back what "Show me" just did and return to that step.
+    TryYourself,
     /// A preview finished rendering; `generation` drops a stale one.
     PreviewReady { generation: u64, which: preview::Which, audio: Arc<[f32]> },
 }
@@ -167,6 +172,14 @@ pub struct LessonModel {
     pub has_goal: Signal<bool>,
     /// The step whose before / after can be heard (the one just done).
     pub change_step: Signal<Option<usize>>,
+    /// Keys "Show me" pressed on the on-screen keyboard, released a
+    /// moment later.
+    release_keys: Option<(Instant, Vec<u8>)>,
+    /// The step "Show me" just did, the patch before it (if it changed
+    /// the sound), and whether it made an (undoable) arrangement edit.
+    shown: Option<(usize, Option<SynthState>, bool)>,
+    /// That step, for the bar's "Try it yourself".
+    pub shown_step: Signal<Option<usize>>,
 }
 
 impl LessonModel {
@@ -209,6 +222,9 @@ impl LessonModel {
             last_change: None,
             has_goal: Signal::new(false),
             change_step: Signal::new(None),
+            release_keys: None,
+            shown: None,
+            shown_step: Signal::new(None),
         }
     }
 
@@ -238,6 +254,11 @@ impl LessonModel {
             self.last_change = None;
         }
         self.change_step.set(self.last_change.as_ref().map(|(i, ..)| *i));
+        // "Try it yourself" is offered only right after the shown step.
+        if self.shown.as_ref().is_some_and(|(i, ..)| i + 1 != step) {
+            self.shown = None;
+        }
+        self.shown_step.set(self.shown.as_ref().map(|(i, ..)| *i));
         self.hint_visible.set(false);
         self.set_highlight(None);
         // Reaching the closing step is finishing the lesson.
@@ -289,6 +310,76 @@ impl LessonModel {
         });
     }
 
+    /// Makes the app match the current step done: the arrangement as one
+    /// undoable edit, then the selection, sound, editor and transport.
+    fn show_me(&mut self, cx: &mut EventContext) {
+        let Some((lesson, step)) = self.active.get() else { return };
+        let steps = course::LESSONS[lesson].steps;
+        let index = steps[..step].iter().filter(|s| matches!(s.kind, course::Kind::Action { .. })).count();
+        let shows = show::steps(course::LESSONS[lesson].id);
+        let Some(show) = shows.get(index) else { return };
+        let before = self.snapshot();
+        let mut after = before.clone();
+        show(&mut after);
+
+        let json = |a: &Arrangement| serde_json::to_string(a).unwrap_or_default();
+        let edited = json(&after.arrangement) != json(&before.arrangement);
+        if edited {
+            cx.emit(TimelineEvent::ReplaceArrangement(Box::new(after.arrangement.clone())));
+        }
+        if let Some(track) = after.selected_track.filter(|t| Some(*t) != before.selected_track) {
+            cx.emit(crate::synth::state::SynthEvent::SelectTrack(track));
+        }
+        let mut patch = after.synth.clone();
+        patch.held_notes = before.synth.held_notes.clone();
+        let sound_changed = patch != before.synth;
+        if sound_changed {
+            cx.emit(crate::synth::state::SynthEvent::Update(Box::new(move |p| {
+                let held = std::mem::take(&mut p.held_notes);
+                *p = patch.clone();
+                p.held_notes = held;
+            })));
+        }
+        let pressed: Vec<u8> = after.synth.held_notes.iter().copied().filter(|n| !before.synth.held_notes.contains(n)).collect();
+        for &note in &pressed {
+            cx.emit(crate::synth::state::SynthEvent::KeyPress(note));
+        }
+        if !pressed.is_empty() {
+            self.release_keys = Some((Instant::now() + Duration::from_millis(600), pressed));
+        }
+        if let Some(clip) = after.open_clip.filter(|c| Some(*c) != before.open_clip) {
+            cx.emit(PianoRollEvent::Open(clip));
+        }
+        if after.playhead != before.playhead {
+            cx.emit(TimelineEvent::ScrubPlayhead(after.playhead));
+        }
+        if after.playing && !before.playing {
+            cx.emit(AppEvent::TogglePlay);
+        }
+        // Remembered once the step passes (next tick), for "Try it yourself".
+        self.shown = Some((step, sound_changed.then_some(before.synth), edited));
+    }
+
+    fn try_yourself(&mut self, cx: &mut EventContext) {
+        let Some((lesson, step)) = self.active.get() else { return };
+        let Some((shown, patch, edited)) = self.shown.take() else { return };
+        if shown + 1 != step {
+            return;
+        }
+        if edited {
+            cx.emit(TimelineEvent::Undo);
+        }
+        if let Some(patch) = patch {
+            cx.emit(crate::synth::state::SynthEvent::Update(Box::new(move |p| {
+                let held = std::mem::take(&mut p.held_notes);
+                *p = patch.clone();
+                p.held_notes = held;
+            })));
+        }
+        self.last_change = None;
+        self.go_to(lesson, shown);
+    }
+
     fn stop_preview(&mut self) {
         if self.previewing.get().is_some() {
             let _ = self.preview_tx.push(Arc::from(Vec::new()));
@@ -331,6 +422,11 @@ impl Model for LessonModel {
             }
             LessonEvent::Tick => {
                 while self.preview_retired.pop().is_ok() {}
+                if self.release_keys.as_ref().is_some_and(|(at, _)| Instant::now() >= *at) {
+                    for note in self.release_keys.take().map(|(_, n)| n).unwrap_or_default() {
+                        cx.emit(crate::synth::state::SynthEvent::KeyRelease(note));
+                    }
+                }
                 if self.previewing.get().is_some()
                     && (self.playing.get() || self.preview_ends.is_some_and(|t| Instant::now() >= t))
                 {
@@ -358,6 +454,8 @@ impl Model for LessonModel {
             }
             LessonEvent::Exit => self.exit(),
             LessonEvent::Hear(which) => self.hear(cx, *which),
+            LessonEvent::ShowMe => self.show_me(cx),
+            LessonEvent::TryYourself => self.try_yourself(cx),
             LessonEvent::PreviewReady { generation, which, audio } => {
                 if *generation != self.preview_generation || self.active.get().is_none() {
                     return;

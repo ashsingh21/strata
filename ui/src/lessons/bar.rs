@@ -17,6 +17,7 @@ pub struct LessonBarProps {
     pub previewing: Signal<Option<Which>>,
     pub has_goal: Signal<bool>,
     pub change_step: Signal<Option<usize>>,
+    pub shown_step: Signal<Option<usize>>,
 }
 
 impl LessonBarProps {
@@ -27,6 +28,7 @@ impl LessonBarProps {
             previewing: model.previewing,
             has_goal: model.has_goal,
             change_step: model.change_step,
+            shown_step: model.shown_step,
         }
     }
 }
@@ -90,6 +92,15 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
             .width(Stretch(1.0))
             .height(Auto);
 
+            // Just watched "Show me" do the last step: undo it and have a go.
+            if step > 0 {
+                Button::new(cx, |cx| Label::new(cx, "\u{21b6} Try it yourself"))
+                    .class("btn")
+                    .class("is-on")
+                    .toggle_class("hidden", p.shown_step.map(move |s| *s != Some(step - 1)))
+                    .on_press(|cx| cx.emit(LessonEvent::TryYourself));
+            }
+
             // Where this lesson is going, to have in your ears first.
             preview_button(cx, p, Which::Goal, "Hear the goal").toggle_class("hidden", p.has_goal.map(|g| !*g));
 
@@ -110,6 +121,18 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
                         .on_press(|cx| cx.emit(LessonEvent::Continue));
                 }
                 Kind::Action { .. } => {
+                    // Stuck? Watch it done - then Undo to try it yourself.
+                    Button::new(cx, |cx| Label::new(cx, "Show me"))
+                        .class("btn")
+                        .class("quiet")
+                        .tooltip(|cx| {
+                            Tooltip::new(cx, |cx| {
+                                Label::new(cx, "Does this step for you - then \u{201c}Try it yourself\u{201d} takes it back.");
+                            })
+                            .placement(Placement::Bottom)
+                            .arrow(false)
+                        })
+                        .on_press(|cx| cx.emit(LessonEvent::ShowMe));
                     Button::new(cx, |cx| Label::new(cx, "Skip"))
                         .class("btn")
                         .class("quiet")

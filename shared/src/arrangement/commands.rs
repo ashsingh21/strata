@@ -95,6 +95,9 @@ pub enum Command {
     /// per-position time signature changes yet, so every caller already
     /// treats it as one global value).
     SetTimeSignature { numerator: u8, denominator: u8 },
+    /// Swaps in a whole arrangement - for an edit made elsewhere as a
+    /// finished result (a lesson's "Show me"), undone in one step.
+    Replace(Box<Arrangement>),
 }
 
 impl Command {
@@ -119,6 +122,11 @@ impl Command {
 
     fn apply_one(self, arr: &mut Arrangement) -> Command {
         match self {
+            Command::Replace(mut next) => {
+                std::mem::swap(arr, &mut next);
+                Command::Replace(next)
+            }
+
             Command::Batch(cmds) => {
                 // Applied in the given order (later commands may depend on
                 // earlier ones, e.g. referencing a clip an earlier InsertClip
