@@ -128,10 +128,27 @@ fn file_menu_item(
     menu_open: Signal<bool>,
     action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
 ) {
+    file_menu_item_with_shortcut(cx, label, "", menu_open, action);
+}
+
+/// A File-menu row with a right-aligned shortcut hint - same shape as the
+/// timeline context menu's `item_with_shortcut`.
+fn file_menu_item_with_shortcut(
+    cx: &mut Context,
+    label: &'static str,
+    shortcut: &'static str,
+    menu_open: Signal<bool>,
+    action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
+) {
     HStack::new(cx, move |cx| {
         Label::new(cx, label).class("body");
+        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+        if !shortcut.is_empty() {
+            Label::new(cx, shortcut).class("value");
+        }
     })
     .class("menu-item")
+    .gap(Pixels(SPACE_3))
     .on_press(move |cx| {
         action(cx);
         menu_open.set(false);
@@ -272,8 +289,13 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             file_menu_item(cx, "New", file_menu_open, |cx| cx.emit(ProjectEvent::New));
             file_menu_item(cx, "Open...", file_menu_open, |cx| cx.emit(ProjectEvent::OpenDialog));
             file_menu_sep(cx);
-            file_menu_item(cx, "Save", file_menu_open, |cx| cx.emit(ProjectEvent::Save));
+            file_menu_item_with_shortcut(cx, "Save", "Ctrl+S", file_menu_open, |cx| cx.emit(ProjectEvent::Save));
             file_menu_item(cx, "Save As...", file_menu_open, |cx| cx.emit(ProjectEvent::SaveAsDialog));
+            file_menu_sep(cx);
+            // Undo/Redo were keyboard-only; listed here (with their keys)
+            // so they're discoverable.
+            file_menu_item_with_shortcut(cx, "Undo", "Ctrl+Z", file_menu_open, |cx| cx.emit(TimelineEvent::Undo));
+            file_menu_item_with_shortcut(cx, "Redo", "Ctrl+Shift+Z", file_menu_open, |cx| cx.emit(TimelineEvent::Redo));
             file_menu_sep(cx);
             file_menu_item(cx, "Rename...", file_menu_open, move |_cx| {
                 rename_draft.set(project_name.get());
@@ -291,7 +313,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .padding_bottom(Pixels(SPACE_2))
         .padding_left(Pixels(SPACE_1))
         .padding_right(Pixels(SPACE_1))
-        .width(Pixels(160.0))
+        .width(Pixels(200.0))
         .height(Auto);
 
         vsep(cx);
