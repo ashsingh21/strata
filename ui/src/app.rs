@@ -20,8 +20,6 @@ use crate::tokens::ThemeId;
 pub(crate) const METER_FLOOR_DB: f32 = -60.0;
 /// Release rate for meter ballistics.
 pub(crate) const METER_DECAY_DB_PER_SEC: f32 = 20.0;
-/// Linear amplitude above which the clip LED latches (~-0.3 dBFS).
-const CLIP_THRESHOLD: f32 = 0.965;
 /// LFO rate for the Cutoff demo knob's modulation ring.
 const LFO_RATE_HZ: f32 = 0.5;
 
@@ -48,17 +46,6 @@ pub struct AppData {
     cpu_peak: f32,
     cpu_peak_age: f32,
     taps: Vec<Instant>,
-
-    // The one mixer strip.
-    pub fader: Signal<f32>,
-    pub pan: Signal<f32>,
-    pub mute: Signal<bool>,
-    pub solo: Signal<bool>,
-    pub gain_db: Signal<f32>,
-    pub meter_level_l: Signal<f32>,
-    pub meter_level_r: Signal<f32>,
-    pub meter_clip_l: Signal<bool>,
-    pub meter_clip_r: Signal<bool>,
     meter_db_l: f32,
     meter_db_r: f32,
 
@@ -88,17 +75,12 @@ pub enum AppEvent {
     ToggleLoop,
     ToggleArm,
     ToggleClick,
-    SetFader(f32),
-    SetPan(f32),
     /// Mirrors TimelineEvent::SetTempo into the engine's own Params, so the
     /// click/position stay in sync with the arrangement's tempo map. Two
     /// separate events because AppData and TimelineState each own one half
     /// of what "the current tempo" means: the engine-facing atomic vs. the
     /// undoable arrangement data.
     SetBpm(f64),
-    ToggleMute,
-    ToggleSolo,
-    ResetClip,
     /// Only emitted by the LFO demo, which isn't currently mounted.
     #[allow(dead_code)]
     SetCutoff(f32),
@@ -126,15 +108,6 @@ impl AppData {
             cpu_peak: 0.0,
             cpu_peak_age: 0.0,
             taps: Vec::with_capacity(8),
-            fader: Signal::new(0.75),
-            pan: Signal::new(0.5),
-            mute: Signal::new(false),
-            solo: Signal::new(false),
-            gain_db: Signal::new(0.0),
-            meter_level_l: Signal::new(0.0),
-            meter_level_r: Signal::new(0.0),
-            meter_clip_l: Signal::new(false),
-            meter_clip_r: Signal::new(false),
             meter_db_l: METER_FLOOR_DB,
             meter_db_r: METER_FLOOR_DB,
             cutoff: Signal::new(0.45),
@@ -147,23 +120,6 @@ impl AppData {
             _engine: engine,
         }
     }
-}
-
-/// Linear fader position (0..1) to gain, with unity (0 dB) at 0.75 and a
-/// steep tail down to silence, matching typical DAW fader taper.
-pub fn fader_to_gain(position: f32) -> f32 {
-    let position = position.clamp(0.0, 1.0);
-    if position <= 0.0 {
-        return 0.0;
-    }
-    let db = if position >= 0.75 {
-        // 0.75..1.0 maps to 0..+6 dB.
-        (position - 0.75) / 0.25 * 6.0
-    } else {
-        // 0.0..0.75 maps to -inf..0 dB.
-        (position / 0.75 - 1.0) * 60.0
-    };
-    10f32.powf(db / 20.0)
 }
 
 pub(crate) fn gain_to_db(gain: f32) -> f32 {
@@ -224,30 +180,8 @@ impl Model for AppData {
                 self.click_on.update(|v| *v = !*v);
                 self.params.set_click_enabled(self.click_on.get());
             }
-            AppEvent::SetFader(value) => {
-                self.fader.set(*value);
-                let gain = fader_to_gain(*value);
-                self.gain_db.set(gain_to_db(gain));
-                self.params.set_gain(gain);
-            }
-            AppEvent::SetPan(value) => {
-                self.pan.set(*value);
-                self.params.set_pan(value * 2.0 - 1.0);
-            }
             AppEvent::SetBpm(bpm) => {
                 self.params.set_bpm(*bpm);
-            }
-            AppEvent::ToggleMute => {
-                self.mute.update(|v| *v = !*v);
-                let gain = if self.mute.get() { 0.0 } else { fader_to_gain(self.fader.get()) };
-                self.params.set_gain(gain);
-            }
-            AppEvent::ToggleSolo => {
-                self.solo.update(|v| *v = !*v);
-            }
-            AppEvent::ResetClip => {
-                self.meter_clip_l.set(false);
-                self.meter_clip_r.set(false);
             }
             AppEvent::SetCutoff(value) => {
                 self.cutoff.set(*value);
@@ -293,17 +227,8 @@ impl AppData {
         let target_r = gain_to_db(peak_r).max(METER_FLOOR_DB);
         self.meter_db_l = if target_l > self.meter_db_l { target_l } else { (self.meter_db_l - decay).max(target_l) };
         self.meter_db_r = if target_r > self.meter_db_r { target_r } else { (self.meter_db_r - decay).max(target_r) };
-        self.meter_level_l.set(db_to_meter_fraction(self.meter_db_l));
-        self.meter_level_r.set(db_to_meter_fraction(self.meter_db_r));
         self.output_db.set(self.meter_db_l.max(self.meter_db_r));
         let _ = HOT_THRESHOLD;
-
-        if peak_l >= CLIP_THRESHOLD {
-            self.meter_clip_l.set(true);
-        }
-        if peak_r >= CLIP_THRESHOLD {
-            self.meter_clip_r.set(true);
-        }
 
         // Animate the Cutoff demo knob's modulation ring centre.
         self.lfo_phase = (self.lfo_phase + LFO_RATE_HZ * std::f32::consts::TAU * dt) % std::f32::consts::TAU;

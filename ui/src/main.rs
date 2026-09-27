@@ -14,7 +14,6 @@ mod interval_input;
 mod knob;
 mod lfo_demo;
 mod meter;
-mod mixer;
 mod piano_roll;
 mod pill;
 mod project;

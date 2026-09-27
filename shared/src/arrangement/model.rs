@@ -842,7 +842,7 @@ mod effect_graph_tests {
     fn move_before_to_own_successor_is_a_no_op() {
         let mut graph = EffectGraph::new();
         let a = graph.push_at_end(compressor());
-        let b = graph.push_at_end(compressor());
+        graph.push_at_end(compressor());
         let before = graph.clone();
         let successor = graph.successor_of(a).unwrap();
         graph.move_before(a, successor);

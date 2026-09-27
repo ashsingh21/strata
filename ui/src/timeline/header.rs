@@ -107,9 +107,8 @@ impl<V: SignalGet<f32> + Copy + 'static> View for TrackResizeHandle<V> {
     }
 }
 
-/// Same taper as the mixer strip's fader (`app::fader_to_gain`, in dB
-/// instead of linear gain): unity at 0.75, +6 dB at the top, -60..0 dB
-/// below that.
+/// A fader's position (0..1) to gain in dB: unity at 0.75, +6 dB at the
+/// top, -60..0 dB below that - typical DAW fader taper.
 fn fader_pos_to_gain_db(position: f32) -> f32 {
     let position = position.clamp(0.0, 1.0);
     if position <= 0.0 {
