@@ -1057,21 +1057,29 @@ impl LaneArea {
     /// bar's x position is only ever a function of its own index, so
     /// already-drawn bars never move - new ones just append past them.
     fn draw_live_waveform(&self, canvas: &Canvas, peaks: &[f32], x0: f32, y0: f32, x1: f32, y1: f32) {
-        const PX_PER_PEAK: f32 = 1.0;
-        let mid = (y0 + y1) * 0.5;
-        let half_h = (y1 - y0) * 0.5 - 1.0;
-        let n = (((x1 - x0) / PX_PER_PEAK).floor() as usize).min(peaks.len());
-        if n == 0 {
+        let n = peaks.len();
+        if n < 2 || x1 <= x0 {
             return;
         }
+        let mid = (y0 + y1) * 0.5;
+        let half_h = (y1 - y0) * 0.5 - 1.0;
+        let width = x1 - x0;
 
         // Only an abs-peak per block is available here (no true signed
         // min/max, unlike the decoded waveform below), so the sign
         // alternates per entry to fake the same single-line zigzag rather
         // than a flat one-sided trace.
+        //
+        // Spread every peak across the box's *actual* width rather than
+        // a fixed pixel stride per peak: one peak is one audio callback
+        // block (a few ms), and at any real zoom that's far less than a
+        // pixel's worth of time, so a fixed stride only ever drew the
+        // first sliver of the recording - the growing box quickly
+        // outran it, leaving the rest empty no matter how long the take
+        // ran.
         let mut path = vg::PathBuilder::new();
-        for (i, &p) in peaks[..n].iter().enumerate() {
-            let x = x0 + i as f32 * PX_PER_PEAK;
+        for (i, &p) in peaks.iter().enumerate() {
+            let x = x0 + (i as f32 / (n - 1) as f32) * width;
             let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
             let y = mid - (p * WAVEFORM_BOOST).min(1.0) * half_h * sign;
             if i == 0 {
