@@ -56,9 +56,9 @@ pub const LESSONS: &[Lesson] = &[
             ),
             act(
                 "Kick on every beat: in the grid below, click the Kick row at 1, 2, 3 and 4.",
-                "The numbers along the top are beats. Click the square right under each one.",
+                "The numbers along the top are beats. Grid not showing? Double-click the clip to open it.",
                 |s| drum_pattern_has(s, KICK, &[0, PPQ, 2 * PPQ, 3 * PPQ]),
-                |_| Some(Target::PianoRollRow(KICK)),
+                |s| row_or_clip(s, Instrument::Drums, KICK),
             ),
             act(
                 "Press Space to hear it. (Space again stops.)",
@@ -70,13 +70,13 @@ pub const LESSONS: &[Lesson] = &[
                 "Clap on beats 2 and 4: click the Clap row under 2 and 4.",
                 "Beats 2 and 4 are the claps in almost every house and pop beat.",
                 |s| drum_pattern_has(s, CLAP, &[PPQ, 3 * PPQ]),
-                |_| Some(Target::PianoRollRow(CLAP)),
+                |s| row_or_clip(s, Instrument::Drums, CLAP),
             ),
             act(
                 "Open hat between the beats: click the Open Hat row halfway between each beat.",
                 "Halfway is two squares after each beat number (the \u{201c}and\u{201d}: 1-and, 2-and...).",
                 |s| drum_pattern_has(s, OPEN_HAT, &[PPQ / 2, PPQ + PPQ / 2, 2 * PPQ + PPQ / 2, 3 * PPQ + PPQ / 2]),
-                |_| Some(Target::PianoRollRow(OPEN_HAT)),
+                |s| row_or_clip(s, Instrument::Drums, OPEN_HAT),
             ),
             act(
                 "Make it loop: in the timeline, drag the clip's right edge out to bar 9.",
@@ -122,7 +122,7 @@ pub const LESSONS: &[Lesson] = &[
                 "Bass between the kicks: on the bottom row (A), click halfway between each beat.",
                 "Halfway is two squares after each beat number - the same places as the open hat.",
                 |s| carve_pattern_has(s, BASS_NOTE, &[PPQ / 2, PPQ + PPQ / 2, 2 * PPQ + PPQ / 2, 3 * PPQ + PPQ / 2]),
-                |_| Some(Target::PianoRollRow(BASS_NOTE)),
+                |s| row_or_clip(s, Instrument::Carve, BASS_NOTE),
             ),
             act("Press Space to hear it with the drums.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(
@@ -169,13 +169,13 @@ pub const LESSONS: &[Lesson] = &[
                 "A minor: on beats 1 and 3 of bar 1, click A, C and E (stacked).",
                 "Beats 1 and 3 are the 1.1 and 1.3 marks. A is the bottom row.",
                 |s| chord_at(s, &[57, 60, 64], &[0, 2 * PPQ]),
-                |s| first_missing(s, &[57, 60, 64], &[0, 2 * PPQ]).map(Target::PianoRollRow),
+                |s| if s.open_clip.is_none() { s.selected_track.map(Target::Lane) } else { first_missing(s, &[57, 60, 64], &[0, 2 * PPQ]).map(Target::PianoRollRow) },
             ),
             act(
                 "C major: on beats 1 and 3 of bar 2, click C, E and G.",
                 "Bar 2 starts at the 2 mark.",
                 |s| chord_at(s, &[60, 64, 67], &[4 * PPQ, 6 * PPQ]),
-                |s| first_missing(s, &[60, 64, 67], &[4 * PPQ, 6 * PPQ]).map(Target::PianoRollRow),
+                |s| if s.open_clip.is_none() { s.selected_track.map(Target::Lane) } else { first_missing(s, &[60, 64, 67], &[4 * PPQ, 6 * PPQ]).map(Target::PianoRollRow) },
             ),
             act("Press Space to hear all three parts.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             info(
@@ -196,6 +196,15 @@ fn clips_on(s: &Snapshot, instrument: Instrument) -> impl Iterator<Item = &Clip>
 fn chord_clips(s: &Snapshot) -> impl Iterator<Item = &Clip> {
     let tracks: Vec<_> = tracks_with(s, Instrument::Carve).filter(|t| t.name != "Bass").map(|t| t.id).collect();
     s.arrangement.clips.iter().filter(move |c| tracks.contains(&c.track))
+}
+
+/// The row to click - or, with no clip open in the editor, the lane
+/// holding the clip (double-clicking it opens the grid).
+fn row_or_clip(s: &Snapshot, instrument: Instrument, pitch: u8) -> Option<Target> {
+    if s.open_clip.is_some() {
+        return Some(Target::PianoRollRow(pitch));
+    }
+    clips_on(s, instrument).next().map(|c| Target::Lane(c.track))
 }
 
 /// Whether `clip`'s pattern has `pitch` at every one of `starts`.
@@ -241,6 +250,7 @@ mod tests {
             selected_track: None,
             playing: false,
             synth: shared::synth::seed_synth(),
+            open_clip: None,
         }
     }
 

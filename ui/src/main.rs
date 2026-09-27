@@ -242,6 +242,7 @@ fn main() -> Result<(), ApplicationError> {
             playing,
             synth_state,
             sidebar_open,
+            piano_roll_open_clip,
         );
         let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model);
         let lessons_active = lesson_model.active;

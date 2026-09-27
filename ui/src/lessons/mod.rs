@@ -34,6 +34,8 @@ pub struct Snapshot {
     pub playing: bool,
     /// The on-screen Carve patch (its name, and the keys held right now).
     pub synth: SynthState,
+    /// The clip open in the editor, if any.
+    pub open_clip: Option<shared::arrangement::ClipId>,
 }
 
 /// A control a step can make glow.
@@ -106,6 +108,7 @@ pub struct LessonModel {
     playing: Signal<bool>,
     synth: Signal<SynthState>,
     sidebar_open: Signal<bool>,
+    open_clip: Signal<Option<shared::arrangement::ClipId>>,
 }
 
 impl LessonModel {
@@ -116,6 +119,7 @@ impl LessonModel {
         playing: Signal<bool>,
         synth: Signal<SynthState>,
         sidebar_open: Signal<bool>,
+        open_clip: Signal<Option<shared::arrangement::ClipId>>,
     ) -> Self {
         let highlight = Signal::new(None);
         HIGHLIGHT.set(Some(highlight));
@@ -130,6 +134,7 @@ impl LessonModel {
             playing,
             synth,
             sidebar_open,
+            open_clip,
         }
     }
 
@@ -139,6 +144,7 @@ impl LessonModel {
             selected_track: self.selected_track.get(),
             playing: self.playing.get(),
             synth: self.synth.get(),
+            open_clip: self.open_clip.get(),
         }
     }
 
