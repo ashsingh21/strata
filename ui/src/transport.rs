@@ -544,14 +544,29 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             });
             // Capped with an ellipsis: device names are arbitrary OS strings,
             // and an uncapped one widened the header past the window edge.
+            // A drop-down like Key's: mic icon, the device, a chevron.
             with_tip(
                 Button::new(cx, move |cx| {
-                    Label::new(cx, device_label).text_wrap(false).text_overflow(TextOverflow::Ellipsis).max_width(Pixels(140.0))
+                    HStack::new(cx, move |cx| {
+                        Glyph::new(cx, GlyphKind::Mic, Signal::new(true), theme, crate::glyph::ink_when_on)
+                            .size(Pixels(13.0))
+                            .hoverable(false);
+                        Label::new(cx, device_label)
+                            .font_size(13.0)
+                            .text_wrap(false)
+                            .text_overflow(TextOverflow::Ellipsis)
+                            .max_width(Pixels(130.0))
+                            .hoverable(false);
+                        Label::new(cx, "\u{2304}").font_size(13.0).hoverable(false);
+                    })
+                    .gap(Pixels(SPACE_2))
+                    .alignment(Alignment::Center)
+                    .size(Auto)
+                    .hoverable(false)
                 }),
                 "Recording input device",
             )
                 .class("btn")
-                .class("quiet")
                 .on_press(move |cx| {
                     // Opening: list again, so a just-plugged-in interface is there.
                     if !input_device_menu_open.get() {

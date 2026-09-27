@@ -20,6 +20,8 @@ pub enum GlyphKind {
     Rewind,
     Loop,
     Metronome,
+    /// A microphone: the recording input.
+    Mic,
 }
 
 /// Picks the glyph's colour from the current palette and its on/off state.
@@ -123,6 +125,22 @@ impl<M: SignalGet<bool> + Copy + 'static> View for Glyph<M> {
                 let mut head = poly(&[(4.0, 6.5), (1.5, 8.5), (4.0, 10.5)]);
                 head.close();
                 canvas.draw_path(&head.detach(), &fill);
+            }
+            GlyphKind::Mic => {
+                // Capsule, the stand's cradle, then its stem and foot.
+                let capsule = vg::RRect::new_rect_xy(
+                    vg::Rect::new(ox + 4.25 * unit, oy + 1.25 * unit, ox + 7.75 * unit, oy + 7.25 * unit),
+                    1.75 * unit,
+                    1.75 * unit,
+                );
+                canvas.draw_rrect(capsule, &stroke);
+                let mut cradle =
+                    poly(&[(2.75, 5.5), (3.1, 7.2), (4.3, 8.5), (6.0, 9.0), (7.7, 8.5), (8.9, 7.2), (9.25, 5.5)]);
+                canvas.draw_path(&cradle.detach(), &stroke);
+                let mut stand = poly(&[(6.0, 9.0), (6.0, 10.75)]);
+                canvas.draw_path(&stand.detach(), &stroke);
+                let mut foot = poly(&[(4.25, 10.75), (7.75, 10.75)]);
+                canvas.draw_path(&foot.detach(), &stroke);
             }
             GlyphKind::Metronome => {
                 let mut body = poly(&[(4.5, 1.5), (7.5, 1.5), (10.0, 10.5), (2.0, 10.5)]);
