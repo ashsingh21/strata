@@ -303,19 +303,19 @@ fn main() -> Result<(), ApplicationError> {
             ),
             (
                 KeyChord::new(Modifiers::empty(), Code::Delete),
-                KeymapEntry::new(10u8, |cx| cx.emit(TimelineEvent::DeleteSelected)),
+                KeymapEntry::new(10u8, |cx| if !text_input_focused(cx) { cx.emit(TimelineEvent::DeleteSelected) }),
             ),
             (
                 KeyChord::new(Modifiers::empty(), Code::Backspace),
-                KeymapEntry::new(11u8, |cx| cx.emit(TimelineEvent::DeleteSelected)),
+                KeymapEntry::new(11u8, |cx| if !text_input_focused(cx) { cx.emit(TimelineEvent::DeleteSelected) }),
             ),
             (
                 KeyChord::new(Modifiers::empty(), Code::KeyF),
-                KeymapEntry::new(12u8, |cx| cx.emit(TimelineEvent::ToggleFollow)),
+                KeymapEntry::new(12u8, |cx| if !text_input_focused(cx) { cx.emit(TimelineEvent::ToggleFollow) }),
             ),
             (
                 KeyChord::new(Modifiers::empty(), Code::Escape),
-                KeymapEntry::new(13u8, |cx| cx.emit(PianoRollEvent::Close)),
+                KeymapEntry::new(13u8, |cx| if !text_input_focused(cx) { cx.emit(PianoRollEvent::Close) }),
             ),
             (
                 KeyChord::new(Modifiers::CTRL, Code::KeyS),
@@ -339,6 +339,19 @@ fn main() -> Result<(), ApplicationError> {
             (KeyChord::new(Modifiers::SUPER, Code::KeyX), KeymapEntry::new(21u8, |cx| cx.emit(TimelineEvent::Cut))),
             (KeyChord::new(Modifiers::CTRL, Code::KeyV), KeymapEntry::new(22u8, |cx| cx.emit(TimelineEvent::Paste))),
             (KeyChord::new(Modifiers::SUPER, Code::KeyV), KeymapEntry::new(23u8, |cx| cx.emit(TimelineEvent::Paste))),
+            (
+                KeyChord::new(Modifiers::empty(), Code::Space),
+                KeymapEntry::new(24u8, |cx| {
+                    if !text_input_focused(cx) {
+                        cx.emit(AppEvent::TogglePlay);
+                        cx.emit(AppEvent::ReleaseButtonFocus);
+                    }
+                }),
+            ),
+            (
+                KeyChord::new(Modifiers::empty(), Code::Home),
+                KeymapEntry::new(25u8, |cx| if !text_input_focused(cx) { cx.emit(AppEvent::Rewind) }),
+            ),
         ])
         .build(cx);
 
@@ -464,4 +477,12 @@ fn main() -> Result<(), ApplicationError> {
     .inner_size((1600, 1360))
     .ignore_default_theme()
     .run()
+}
+
+/// True while a text field has keyboard focus - bare-key shortcuts (Space,
+/// Delete, Backspace, F, Home, Escape) must not fire while the user is
+/// typing a track name or a search. Every Textbox in the app is
+/// `Textbox<Signal<String>, String>`, so one downcast covers them all.
+pub(crate) fn text_input_focused(cx: &EventContext) -> bool {
+    cx.get_view_with::<Textbox<Signal<String>, String>>(cx.focused()).is_some()
 }

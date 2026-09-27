@@ -87,6 +87,15 @@ pub enum AppEvent {
     /// of what "the current tempo" means: the engine-facing atomic vs. the
     /// undoable arrangement data.
     SetBpm(f64),
+    /// Space is play/stop, but Vizia also treats Space as "activate the
+    /// focused button": key-down queues a `PressDown` to whatever button
+    /// was last clicked (which re-focuses it), and key-up then presses it
+    /// - after clicking Play, Space would toggle twice and do nothing, and
+    /// after clicking "+ Audio track" it would add another track. Emitted
+    /// right after the Space action so it's queued *behind* that
+    /// `PressDown`; moving focus to the root here means key-up finds a
+    /// different focused entity than the one it armed, and presses nothing.
+    ReleaseButtonFocus,
     /// Only emitted by the LFO demo, which isn't currently mounted.
     #[allow(dead_code)]
     SetCutoff(f32),
@@ -192,6 +201,7 @@ impl Model for AppData {
             AppEvent::SetBpm(bpm) => {
                 self.params.set_bpm(*bpm);
             }
+            AppEvent::ReleaseButtonFocus => cx.focus(),
             AppEvent::SetCutoff(value) => {
                 self.cutoff.set(*value);
             }

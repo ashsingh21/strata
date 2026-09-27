@@ -445,7 +445,7 @@ impl Model for SynthModel {
         });
 
         event.map(|window_event, _| match window_event {
-            WindowEvent::KeyDown(code, _) if cx.modifiers().is_empty() => match code {
+            WindowEvent::KeyDown(code, _) if cx.modifiers().is_empty() && !crate::text_input_focused(cx) => match code {
                 Code::Equal => {
                     self.octave_shift.update(|o| *o = (*o + 1).min(MAX_OCTAVE_SHIFT));
                 }
