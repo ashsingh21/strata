@@ -22,6 +22,12 @@ enum Drag {
     LoopStart,
     LoopEnd,
     LoopMiddle { grab_offset: Ticks },
+    /// Dragging on the ruler with no loop range set yet - there was
+    /// previously no way to create the *first* one at all (every other
+    /// drag variant only adjusts an existing range). A plain click still
+    /// just scrubs, same as always: this only becomes a real loop if the
+    /// drag actually covers a nonzero span by mouse-up.
+    CreateLoop { anchor: Ticks },
 }
 
 pub struct Ruler {
@@ -82,9 +88,10 @@ impl View for Ruler {
                     Some(range) if tick > range.start && tick < range.end => {
                         Drag::LoopMiddle { grab_offset: tick - range.start }
                     }
-                    _ => Drag::Scrub,
+                    Some(_) => Drag::Scrub,
+                    None => Drag::CreateLoop { anchor: tick.max(0) },
                 });
-                if matches!(self.drag, Some(Drag::Scrub)) {
+                if matches!(self.drag, Some(Drag::Scrub) | Some(Drag::CreateLoop { .. })) {
                     cx.emit(TimelineEvent::ScrubPlayhead(tick.max(0)));
                 }
                 cx.capture();
@@ -141,15 +148,35 @@ impl View for Ruler {
                                 cx.needs_redraw();
                             }
                         }
+                        Drag::CreateLoop { anchor } => {
+                            let lo = anchor.min(tick).max(0);
+                            let hi = anchor.max(tick).max(0);
+                            self.loop_preview = Some(LoopRange { start: lo, end: hi });
+                            cx.needs_redraw();
+                        }
                     }
                 }
             }
 
             WindowEvent::MouseUp(button) if *button == MouseButton::Left => {
-                if !matches!(self.drag, Some(Drag::Scrub) | None) {
-                    if let Some(range) = self.loop_preview.take() {
-                        cx.emit(TimelineEvent::SetLoopRange(Some(range)));
+                match self.drag {
+                    Some(Drag::LoopStart) | Some(Drag::LoopEnd) | Some(Drag::LoopMiddle { .. }) => {
+                        if let Some(range) = self.loop_preview.take() {
+                            cx.emit(TimelineEvent::SetLoopRange(Some(range)));
+                        }
                     }
+                    // Only a real drag (nonzero span) becomes a loop - a
+                    // plain click (start == end, or never moved far enough
+                    // to snap to a different grid line) just scrubbed the
+                    // playhead already, on mouse-down.
+                    Some(Drag::CreateLoop { .. }) => {
+                        if let Some(range) = self.loop_preview.take() {
+                            if range.end > range.start {
+                                cx.emit(TimelineEvent::SetLoopRange(Some(range)));
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 self.drag = None;
                 self.loop_preview = None;
