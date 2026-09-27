@@ -185,7 +185,14 @@ pub struct LessonModel {
     /// A lesson just reached its end (reported to the project on the
     /// next tick).
     finished: Option<&'static str>,
+    /// When the current step was last checked.
+    last_check: Instant,
 }
+
+/// How often a step checks itself: 15 times a second is instant to a
+/// person, and a quarter of the work of checking every frame (each check
+/// copies the whole project).
+const CHECK_EVERY: Duration = Duration::from_millis(66);
 
 /// How often a running lesson saves the learner's track.
 const AUTO_SAVE_EVERY: Duration = Duration::from_secs(5);
@@ -235,6 +242,7 @@ impl LessonModel {
             shown_step: Signal::new(None),
             last_save: Instant::now(),
             finished: None,
+            last_check: Instant::now(),
         }
     }
 
@@ -454,6 +462,10 @@ impl Model for LessonModel {
                     cx.emit(crate::project::ProjectEvent::AutoSave);
                 }
                 let course::Kind::Action { check, target } = course::LESSONS[lesson].steps[step].kind else { return };
+                if self.last_check.elapsed() < CHECK_EVERY {
+                    return;
+                }
+                self.last_check = Instant::now();
                 let snap = self.snapshot();
                 if check(&snap) {
                     if let Some(before) = self.step_before.take() {
