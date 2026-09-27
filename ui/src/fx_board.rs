@@ -34,7 +34,16 @@ pub struct FxBoardProps {
     pub board_open_track: Signal<Option<TrackId>>,
 }
 
-fn io_position(graph: &EffectGraph, id: EffectNodeId) -> (f32, f32) {
+/// A node's position, honoring a live drag preview for whichever node
+/// (if any) is currently being dragged - so cables follow the drag
+/// without needing the model itself (and thus the whole node list) to
+/// change until the drag actually commits on release.
+fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
+    if let Some((drag_id, x, y)) = drag {
+        if drag_id == id {
+            return (x, y);
+        }
+    }
     if id == EffectGraph::SOURCE {
         return (-NODE_SPACING, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
@@ -46,14 +55,14 @@ fn io_position(graph: &EffectGraph, id: EffectNodeId) -> (f32, f32) {
     graph.node(id).map(|n| n.position).unwrap_or((0.0, ROW_Y))
 }
 
-fn port_out(graph: &EffectGraph, id: EffectNodeId) -> (f32, f32) {
-    let (x, y) = io_position(graph, id);
+fn port_out(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
+    let (x, y) = io_position(graph, id, drag);
     let (w, h) = node_size(id);
     (x + w, y + h * 0.5)
 }
 
-fn port_in(graph: &EffectGraph, id: EffectNodeId) -> (f32, f32) {
-    let (x, y) = io_position(graph, id);
+fn port_in(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
+    let (x, y) = io_position(graph, id, drag);
     let (_, h) = node_size(id);
     (x, y + h * 0.5)
 }
@@ -74,6 +83,7 @@ struct FxCables {
     track: TrackId,
     theme: Signal<ThemeId>,
     selected: Signal<Option<EffectNodeId>>,
+    drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
 }
 
 impl FxCables {
@@ -83,12 +93,14 @@ impl FxCables {
         track: TrackId,
         theme: Signal<ThemeId>,
         selected: Signal<Option<EffectNodeId>>,
+        drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, track, theme, selected }
+        Self { arrangement, track, theme, selected, drag_state }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
             .bind(selected, |mut h| h.needs_redraw())
+            .bind(drag_state, |mut h| h.needs_redraw())
     }
 }
 
@@ -100,10 +112,11 @@ impl View for FxCables {
         let Some(track) = arr.track(self.track) else { return };
         let graph = &track.fx;
         let selected = self.selected.get();
+        let drag = self.drag_state.get();
 
         for edge in &graph.edges {
-            let (x0, y0) = port_out(graph, edge.from);
-            let (x1, y1) = port_in(graph, edge.to);
+            let (x0, y0) = port_out(graph, edge.from, drag);
+            let (x1, y1) = port_in(graph, edge.to, drag);
             let (x0, y0, x1, y1) = (bounds.x + x0, bounds.y + y0, bounds.x + x1, bounds.y + y1);
             let mid = (x0 + x1) * 0.5;
 
@@ -129,11 +142,13 @@ impl View for FxCables {
         let draw_dot = |x: f32, y: f32| {
             canvas.draw_path(&vg::Path::circle(vg::Point::new(bounds.x + x, bounds.y + y), 3.0, None), &dot);
         };
-        draw_dot(port_out(graph, EffectGraph::SOURCE).0, port_out(graph, EffectGraph::SOURCE).1);
-        draw_dot(port_in(graph, EffectGraph::OUTPUT).0, port_in(graph, EffectGraph::OUTPUT).1);
+        let (sx, sy) = port_out(graph, EffectGraph::SOURCE, drag);
+        draw_dot(sx, sy);
+        let (ox, oy) = port_in(graph, EffectGraph::OUTPUT, drag);
+        draw_dot(ox, oy);
         for node in &graph.nodes {
-            let (ox, oy) = port_out(graph, node.id);
-            let (ix, iy) = port_in(graph, node.id);
+            let (ox, oy) = port_out(graph, node.id, drag);
+            let (ix, iy) = port_in(graph, node.id, drag);
             draw_dot(ox, oy);
             draw_dot(ix, iy);
         }
@@ -142,6 +157,13 @@ impl View for FxCables {
 
 pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
     let selected: Signal<Option<EffectNodeId>> = Signal::new(None);
+    // Live drag preview: (node, x, y) while a node's being dragged, so
+    // the node box and its cables can redraw without committing to the
+    // model (and thus without an undo step) until the drag releases.
+    let drag_state: Signal<Option<(EffectNodeId, f32, f32)>> = Signal::new(None);
+    // (node, grab-x, grab-y, original-node-x, original-node-y) captured
+    // on mouse-down, read on every subsequent move to compute the delta.
+    let drag_anchor: Signal<Option<(EffectNodeId, f32, f32, f32, f32)>> = Signal::new(None);
     let track_name = p.arrangement.map(move |arr| arr.track(p.track).map(|t| t.name.clone()).unwrap_or_default());
     let track_color = p.arrangement.map(move |arr| arr.track(p.track).map(|t| t.color).unwrap_or(ClipColor::Violet));
     let all_bypassed = p.arrangement.map(move |arr| {
@@ -200,7 +222,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
             // Canvas.
             let search_popover: Signal<Option<(f32, f32)>> = Signal::new(None);
             ZStack::new(cx, move |cx| {
-                FxCables::new(cx, p.arrangement, p.track, p.theme, selected).width(Stretch(1.0)).height(Stretch(1.0));
+                FxCables::new(cx, p.arrangement, p.track, p.theme, selected, drag_state).width(Stretch(1.0)).height(Stretch(1.0));
 
                 Element::new(cx)
                     .width(Stretch(1.0))
@@ -217,7 +239,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     let graph = &track.fx;
 
                     for id in [EffectGraph::SOURCE, EffectGraph::OUTPUT] {
-                        let (x, y) = io_position(graph, id);
+                        let (x, y) = io_position(graph, id, None);
                         let label = if id == EffectGraph::SOURCE { "Source" } else { "Out" };
                         let meta = if id == EffectGraph::SOURCE { track.instrument.map(|i| i.name()).unwrap_or("\u{2014}") } else { "to mixer" };
                         VStack::new(cx, move |cx| {
@@ -234,7 +256,19 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     }
 
                     for node in graph.nodes.clone() {
-                        let (x, y) = node.position;
+                        let (orig_x, orig_y) = node.position;
+                        let x = Memo::new(move |_| {
+                            match drag_state.get() {
+                                Some((id, x, _)) if id == node.id => x,
+                                _ => orig_x,
+                            }
+                        });
+                        let y = Memo::new(move |_| {
+                            match drag_state.get() {
+                                Some((id, _, y)) if id == node.id => y,
+                                _ => orig_y,
+                            }
+                        });
                         let is_selected = selected.map(move |s| *s == Some(node.id));
                         VStack::new(cx, move |cx| {
                             HStack::new(cx, move |cx| {
@@ -275,16 +309,52 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                         .class("panel")
                         .toggle_class("is-sel", is_selected)
                         .position_type(PositionType::Absolute)
-                        .left(Pixels(x))
-                        .top(Pixels(y))
+                        .left(x.map(|v| Pixels(*v)))
+                        .top(y.map(|v| Pixels(*v)))
                         .width(Pixels(NODE_W))
                         .height(Pixels(NODE_H))
                         .padding(Pixels(4.0))
                         .gap(Pixels(4.0))
                         .cursor(CursorIcon::Hand)
-                        .on_press(move |cx| {
-                            selected.set(Some(node.id));
-                            let _ = cx;
+                        .on_mouse_down(move |cx, button| {
+                            if button == MouseButton::Left {
+                                selected.set(Some(node.id));
+                                cx.capture();
+                                drag_anchor.set(Some((
+                                    node.id,
+                                    cx.mouse().cursor_x,
+                                    cx.mouse().cursor_y,
+                                    orig_x,
+                                    orig_y,
+                                )));
+                                drag_state.set(Some((node.id, orig_x, orig_y)));
+                            }
+                        })
+                        .on_mouse_move(move |_cx, mx, my| {
+                            if let Some((id, anchor_mx, anchor_my, base_x, base_y)) = drag_anchor.get() {
+                                if id == node.id {
+                                    let new_x = base_x + (mx - anchor_mx);
+                                    let new_y = base_y + (my - anchor_my);
+                                    drag_state.set(Some((id, new_x, new_y)));
+                                }
+                            }
+                        })
+                        .on_mouse_up(move |cx, button| {
+                            if button != MouseButton::Left {
+                                return;
+                            }
+                            if let Some((id, _, _, _, _)) = drag_anchor.get() {
+                                if id == node.id {
+                                    cx.release();
+                                    drag_anchor.set(None);
+                                    if let Some((_, x, y)) = drag_state.get() {
+                                        // Snap to the 16px dot grid.
+                                        let snapped = ((x / 16.0).round() * 16.0, (y / 16.0).round() * 16.0);
+                                        cx.emit(TimelineEvent::SetEffectNodePosition(p.track, node.id, snapped));
+                                    }
+                                    drag_state.set(None);
+                                }
+                            }
                         });
                     }
                 });
