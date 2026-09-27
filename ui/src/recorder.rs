@@ -48,16 +48,12 @@ pub struct RecorderModel {
     /// live envelope instead of sitting flat until the take is decoded.
     /// Empty whenever nothing's being recorded.
     pub live_peaks: Signal<Arc<[f32]>>,
-    /// The saved input device name (`settings::load_input_device`), or
-    /// `None` for the OS default - read once at startup. Changing it
-    /// only updates the save file (`settings::save_input_device`); the
-    /// engine already opened its input stream by the time this model
-    /// exists, so it takes effect on the next launch, not immediately -
-    /// see `input_device_menu` for where that's shown to the user.
+    /// The chosen input device name, or `None` for the OS default. Saved
+    /// (`settings::save_input_device`) and switched to immediately.
     pub selected_input_device: Signal<Option<Arc<str>>>,
-    /// Every input device the host can currently see, for the picker -
-    /// captured once at startup (device lists don't change often enough
-    /// to justify re-enumerating every frame).
+    /// Every input device the host can see, for the picker - listed at
+    /// startup and again each time the picker opens (so an interface
+    /// plugged in later shows up).
     pub available_input_devices: Signal<Arc<[Arc<str>]>>,
     record_params: Arc<RecordParams>,
 }
@@ -70,6 +66,8 @@ pub enum RecorderModelEvent {
     SetLivePeaks(Arc<[f32]>),
     /// `None` reverts to "whatever the OS calls default".
     SetInputDevice(Option<Arc<str>>),
+    /// Re-list the input devices (the picker is opening).
+    RefreshInputDevices,
 }
 
 impl RecorderModel {
@@ -89,7 +87,7 @@ impl RecorderModel {
 }
 
 impl Model for RecorderModel {
-    fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
             RecorderModelEvent::SetPreview(preview) => self.preview.set(*preview),
             RecorderModelEvent::SetInputLevel(level) => self.input_level.set(*level),
@@ -101,6 +99,11 @@ impl Model for RecorderModel {
             RecorderModelEvent::SetInputDevice(device) => {
                 crate::settings::save_input_device(device.as_deref());
                 self.selected_input_device.set(device.clone());
+                cx.emit(crate::app::AppEvent::SwitchInputDevice(device.clone()));
+            }
+            RecorderModelEvent::RefreshInputDevices => {
+                self.available_input_devices
+                    .set(engine::input::available_input_devices().into_iter().map(Arc::<str>::from).collect());
             }
         });
     }

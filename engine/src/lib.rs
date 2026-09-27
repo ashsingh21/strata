@@ -78,13 +78,52 @@ const CLICK_HZ_BEAT: f32 = 1000.0;
 const CLICK_DECAY_MS: f32 = 15.0;
 const CLICK_AMPLITUDE: f32 = 0.3;
 
-/// Owns the live cpal stream(s). Dropping it stops audio. `_input_stream`
+/// Owns the live cpal stream(s). Dropping it stops audio. `input_stream`
 /// is `None` when no usable input device was found - recording is then
 /// simply unavailable, not a startup failure (see `input::start`).
 pub struct EngineHandle {
     _stream: cpal::Stream,
-    _input_stream: Option<cpal::Stream>,
+    input_stream: Option<cpal::Stream>,
+    input: InputPath,
     pub sample_rate: u32,
+}
+
+/// What any input stream feeds: the buffers to the WAV writer and the
+/// input meter, and the rate the writer should stamp a take with. Kept
+/// here so a new input device can be plugged into the same path.
+struct InputPath {
+    capture: input::SharedProducer<f32>,
+    telemetry: input::SharedProducer<shared::recorder::InputTelemetry>,
+    record_params: Arc<shared::recorder::RecordParams>,
+    rate: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl EngineHandle {
+    /// Switches recording to `device` (a name from
+    /// `input::available_input_devices`, `None` for the OS default) while
+    /// running: closes the current input, opens the new one on the same
+    /// buffers. Returns whether an input is open afterwards. Don't call
+    /// mid-take - the take would change device (and maybe rate) halfway.
+    pub fn switch_input(&mut self, device: Option<&str>) -> bool {
+        // The old stream (and its callback's hold on the buffers) goes
+        // first, so the new one never contends with it.
+        self.input_stream = None;
+        let opened = input::start(
+            self.sample_rate,
+            device,
+            self.input.capture.clone(),
+            self.input.telemetry.clone(),
+            self.input.record_params.clone(),
+        );
+        match opened {
+            Some((stream, rate)) => {
+                self.input.rate.store(rate, std::sync::atomic::Ordering::Relaxed);
+                self.input_stream = Some(stream);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -183,15 +222,17 @@ pub fn start(
     stream.play()?;
 
     let (capture_tx, capture_rx) = rtrb::RingBuffer::<f32>::new(CAPTURE_CAPACITY);
-    let input_stream = match input::start(sample_rate, preferred_input_device, capture_tx, input_telemetry, record_params) {
-        Some((stream, input_sample_rate)) => {
-            spawn_writer_thread(capture_rx, record_commands, input_sample_rate);
-            Some(stream)
-        }
-        None => None,
+    let input = InputPath {
+        capture: Arc::new(std::sync::Mutex::new(capture_tx)),
+        telemetry: Arc::new(std::sync::Mutex::new(input_telemetry)),
+        record_params,
+        rate: Arc::new(std::sync::atomic::AtomicU32::new(sample_rate)),
     };
-
-    Ok(EngineHandle { _stream: stream, _input_stream: input_stream, sample_rate })
+    // Always running, even with no input yet: a device can be picked later.
+    spawn_writer_thread(capture_rx, record_commands, input.rate.clone());
+    let mut handle = EngineHandle { _stream: stream, input_stream: None, input, sample_rate };
+    handle.switch_input(preferred_input_device);
+    Ok(handle)
 }
 
 /// Runs for the lifetime of the process, off the audio thread: streams
@@ -201,7 +242,7 @@ pub fn start(
 fn spawn_writer_thread(
     mut capture_rx: rtrb::Consumer<f32>,
     mut command_rx: rtrb::Consumer<RecordCommand>,
-    sample_rate: u32,
+    input_rate: Arc<std::sync::atomic::AtomicU32>,
 ) {
     std::thread::spawn(move || {
         let mut writer: Option<hound::WavWriter<std::io::BufWriter<std::fs::File>>> = None;
@@ -212,9 +253,10 @@ fn spawn_writer_thread(
                         if let Some(w) = writer.take() {
                             let _ = w.finalize();
                         }
+                        // The rate of whichever input is open now.
                         let spec = hound::WavSpec {
                             channels: 1,
-                            sample_rate,
+                            sample_rate: input_rate.load(std::sync::atomic::Ordering::Relaxed),
                             bits_per_sample: 32,
                             sample_format: hound::SampleFormat::Float,
                         };

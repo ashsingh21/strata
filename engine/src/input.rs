@@ -7,7 +7,7 @@
 //! the rest of the app fine, so failures here are logged and degrade to
 //! "recording disabled", never a hard error.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Error as CpalError, FromSample, InputCallbackInfo, Sample, SampleFormat, SizedSample, StreamConfig};
@@ -71,11 +71,16 @@ pub fn available_input_devices() -> Vec<String> {
 /// `preferred_device` is `None`, or no longer matches anything.
 /// Returns the live stream plus the rate it actually opened at, or
 /// `None` if there's no usable input device.
+/// A ring buffer's producing end, shared so it outlives any one input
+/// stream: switching devices hands the same buffers to the new stream,
+/// and the writer thread / meter on the other ends never notice.
+pub type SharedProducer<T> = Arc<Mutex<rtrb::Producer<T>>>;
+
 pub fn start(
     desired_sample_rate: u32,
     preferred_device: Option<&str>,
-    capture_tx: rtrb::Producer<f32>,
-    telemetry: rtrb::Producer<InputTelemetry>,
+    capture_tx: SharedProducer<f32>,
+    telemetry: SharedProducer<InputTelemetry>,
     record_params: Arc<RecordParams>,
 ) -> Option<(cpal::Stream, u32)> {
     let host = cpal::default_host();
@@ -203,8 +208,8 @@ fn build_input_stream<T>(
     device: &cpal::Device,
     config: StreamConfig,
     channels: usize,
-    mut capture_tx: rtrb::Producer<f32>,
-    mut telemetry: rtrb::Producer<InputTelemetry>,
+    capture_tx: SharedProducer<f32>,
+    telemetry: SharedProducer<InputTelemetry>,
     record_params: Arc<RecordParams>,
 ) -> Result<cpal::Stream, CpalError>
 where
@@ -217,6 +222,11 @@ where
     device.build_input_stream(
         config,
         move |data: &[T], _info: &InputCallbackInfo| {
+            // Never blocks: the locks are only ever held by this stream's
+            // own callback (the old stream is gone before a new one starts),
+            // so try_lock only fails in a switch's brief overlap - and then
+            // dropping one block is harmless.
+            let (Ok(mut capture_tx), Ok(mut telemetry)) = (capture_tx.try_lock(), telemetry.try_lock()) else { return };
             let gain = db_to_gain(record_params.input_gain_db());
             let mut peak = 0.0f32;
             for frame in data.chunks(channels) {

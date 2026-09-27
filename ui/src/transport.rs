@@ -537,25 +537,28 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             // "default" is otherwise the only option, which silently
             // records from the wrong interface if that's not the one
             // really wired up (e.g. a laptop's webcam mic outranking a
-            // real audio interface). Takes effect on the next launch, not
-            // immediately - the engine's input stream is already open by
-            // the time this exists (see `RecorderModel::selected_input_device`).
+            // real audio interface). Switches immediately (see
+            // `EngineHandle::switch_input`).
             let device_label = Memo::new(move |_| {
                 props.selected_input_device.get().map(|d| d.to_string()).unwrap_or_else(|| "Default".to_string())
             });
-            // The tooltip says the part the menu doesn't: a new choice only
-            // applies after a restart.
             // Capped with an ellipsis: device names are arbitrary OS strings,
             // and an uncapped one widened the header past the window edge.
             with_tip(
                 Button::new(cx, move |cx| {
                     Label::new(cx, device_label).text_wrap(false).text_overflow(TextOverflow::Ellipsis).max_width(Pixels(140.0))
                 }),
-                "Recording input device - applies on next launch",
+                "Recording input device",
             )
                 .class("btn")
                 .class("quiet")
-                .on_press(move |_cx| menus.toggle(input_device_menu_open));
+                .on_press(move |cx| {
+                    // Opening: list again, so a just-plugged-in interface is there.
+                    if !input_device_menu_open.get() {
+                        cx.emit(crate::recorder::RecorderModelEvent::RefreshInputDevices);
+                    }
+                    menus.toggle(input_device_menu_open);
+                });
         })
         .gap(Pixels(SPACE_2))
         .alignment(Alignment::Center)

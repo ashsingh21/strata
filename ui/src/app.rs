@@ -56,12 +56,15 @@ pub struct AppData {
     params: Arc<Params>,
     telemetry: rtrb::Consumer<Telemetry>,
     last_tick: Instant,
-    _engine: EngineHandle,
+    engine: EngineHandle,
 }
 
 #[derive(Debug)]
 pub enum AppEvent {
     ToggleTheme,
+    /// Switch the recording input to this device now (`None`: the OS
+    /// default). Ignored while a take is recording.
+    SwitchInputDevice(Option<std::sync::Arc<str>>),
     ToggleSidebar,
     TogglePlay,
     Stop,
@@ -121,7 +124,7 @@ impl AppData {
             params,
             telemetry,
             last_tick: Instant::now(),
-            _engine: engine,
+            engine,
         }
     }
 }
@@ -200,6 +203,15 @@ impl Model for AppData {
             }
             AppEvent::ReleaseButtonFocus => cx.focus(),
             AppEvent::Tick => self.tick(cx),
+            AppEvent::SwitchInputDevice(device) => {
+                if self.record_armed.get() && self.playing.get() {
+                    eprintln!("input: not switching devices mid-take");
+                    return;
+                }
+                if !self.engine.switch_input(device.as_deref()) {
+                    eprintln!("input: couldn't open {}", device.as_deref().unwrap_or("the default input"));
+                }
+            }
         });
     }
 }
