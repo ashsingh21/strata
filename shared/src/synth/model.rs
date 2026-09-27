@@ -277,8 +277,18 @@ pub fn seed_synth() -> SynthState {
 }
 
 /// Carve's factory presets, as listed in the browser: (name, builder).
-pub const PRESETS: [(&str, fn() -> SynthState); 3] =
-    [("Warm Bass", seed_synth), ("Deep Rave Bass", deep_rave_bass), ("Soft Pad", soft_pad)];
+/// The last six are the recipe lessons' sounds (see `super::recipes`).
+pub const PRESETS: [(&str, fn() -> SynthState); 9] = [
+    ("Warm Bass", seed_synth),
+    ("Deep Rave Bass", deep_rave_bass),
+    ("Soft Pad", soft_pad),
+    ("Deep Bass", super::recipes::deep_bass),
+    ("Flute", super::recipes::flute),
+    ("Indian Harp", super::recipes::indian_harp),
+    ("Tanpura", super::recipes::tanpura),
+    ("Reed", super::recipes::reed),
+    ("Lead", super::recipes::lead),
+];
 
 /// A wide, slow pad: detuned saws in 3-voice unison, a slow amp swell and
 /// filter bloom, chorus and a big reverb - the opposite of a bass, so two

@@ -1786,6 +1786,30 @@ mod tests {
     }
 
     #[test]
+    fn each_recipe_preset_is_what_its_lesson_builds() {
+        // Loading the preset should satisfy every knob step of its recipe.
+        for (id, preset) in [
+            (RECIPE_BASS, "Deep Bass"),
+            (RECIPE_FLUTE, "Flute"),
+            (RECIPE_HARP, "Indian Harp"),
+            (RECIPE_TANPURA, "Tanpura"),
+            (RECIPE_REED, "Reed"),
+            (RECIPE_LEAD, "Lead"),
+        ] {
+            let build = shared::synth::PRESETS.iter().find(|p| p.0 == preset).unwrap_or_else(|| panic!("no preset {preset}")).1;
+            let mut s = start(id);
+            s.synth = build();
+            assert_eq!(s.synth.name, preset);
+            s.playing = true;
+            for step in lesson(id).steps {
+                if let Kind::Action { check, .. } = step.kind {
+                    assert!(check(&s), "{preset} doesn't satisfy {id}: {}", step.text);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn preset_names_the_checks_use_exist() {
         for name in ["Deep Rave Bass", "Soft Pad"] {
             assert!(shared::synth::PRESETS.iter().any(|p| p.0 == name && p.1().name == name), "{name}");

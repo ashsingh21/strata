@@ -209,18 +209,26 @@ fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
             .class("sm")
             .on_press(move |cx| step(cx, 1));
 
-        // The list, dropping down under the name.
+        // The list, dropping down under the name: a grid three rows high
+        // rather than a tall column, which the lower panel cut off.
+        const COLUMNS: usize = 3;
         VStack::new(cx, move |cx| {
-            for (preset, build) in PRESETS {
-                Button::new(cx, move |cx| Label::new(cx, preset).class("body").hoverable(false))
-                    .class("menu-item")
-                    .toggle_class("is-on", state.map(move |s| s.name == preset))
-                    .lesson_target(crate::lessons::Target::Preset(preset))
-                    .width(Stretch(1.0))
-                    .on_press(move |cx| {
-                        cx.emit(SynthEvent::LoadPreset(build));
-                        open.set(false);
-                    });
+            for row in PRESETS.chunks(COLUMNS) {
+                HStack::new(cx, move |cx| {
+                    for &(preset, build) in row {
+                        Button::new(cx, move |cx| Label::new(cx, preset).class("body").hoverable(false))
+                            .class("menu-item")
+                            .toggle_class("is-on", state.map(move |s| s.name == preset))
+                            .lesson_target(crate::lessons::Target::Preset(preset))
+                            .width(Stretch(1.0))
+                            .on_press(move |cx| {
+                                cx.emit(SynthEvent::LoadPreset(build));
+                                open.set(false);
+                            });
+                    }
+                })
+                .width(Stretch(1.0))
+                .height(Auto);
             }
         })
         .class("panel")
@@ -229,7 +237,7 @@ fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
         .position_type(PositionType::Absolute)
         .top(Pixels(tokens::SIZE_CONTROL + 4.0))
         .left(Pixels(0.0))
-        .width(Pixels(200.0))
+        .width(Pixels(420.0))
         .height(Auto);
     })
     .gap(Pixels(2.0))

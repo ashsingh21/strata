@@ -5,6 +5,7 @@ pub mod bridge;
 pub mod curves;
 pub mod model;
 pub mod params;
+pub mod recipes;
 
 pub use bridge::{
     lfo_rate_hz, synth_bridge, EffectUnitState, NoteEvent, ALL_NOTES_OFF, MAX_EFFECTS_PER_CHAIN, MAX_INSTRUMENTS,
