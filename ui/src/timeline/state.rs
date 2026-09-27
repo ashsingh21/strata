@@ -1457,7 +1457,9 @@ impl Model for TimelineState {
 
         event.map(|window_event, _| match window_event {
             WindowEvent::KeyDown(code, _) => {
-                if cx.modifiers().is_empty() && self.held_drum_pads.insert(*code) {
+                // Not while typing in a text box (search, a track or marker
+                // name): the digits there added drum hits to the project.
+                if cx.modifiers().is_empty() && !crate::text_input_focused(cx) && self.held_drum_pads.insert(*code) {
                     if let Some(index) = crate::timeline::drum_pads::DRUM_PADS.iter().position(|p| p.key == *code) {
                         cx.emit(TimelineEvent::TapDrumPad(index));
                     }
