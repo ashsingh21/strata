@@ -217,7 +217,6 @@ const PAGES: &[Page] = &[
               "Press an LFO pill (LFO 1 / LFO 2) and release it over any knob that lights up: Cutoff, Resonance, Tune (pitch) or Pulse width. \
                That LFO now moves that knob, and the knob grows a blue ring showing how far it swings. The target button under the LFO's knobs cycles through the same four.",
               "Pulse width at slow rate and medium depth is classic PWM: a square wave that shimmers and thickens."),
-            e("Sync (LFO)", "Meant to lock the LFO to the song tempo. Display only for now - the LFO always runs at the Rate shown.", ""),
             e("Unison: Voices, Detune, Width",
               "Plays up to 4 copies of both oscillators per note, spread in pitch by Detune (the cents between the outermost copies) and across the stereo field by Width. \
                This is the 'supersaw' effect: thick, wide and chorused. It costs CPU per copy.",

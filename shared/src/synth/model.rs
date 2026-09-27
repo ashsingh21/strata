@@ -152,6 +152,9 @@ pub struct Lfo {
     pub rate_label: &'static str,
     pub rate_norm: f32,
     pub depth: f32,
+    /// Tempo sync - not implemented by the engine (it always runs at
+    /// `rate_norm`'s Hz) and not exposed in the UI; kept so existing saved
+    /// projects/presets still deserialize.
     pub sync: bool,
     pub target: LfoTarget,
     pub target_count: u32,

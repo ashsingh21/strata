@@ -457,7 +457,6 @@ fn lfo_column(
     theme: Signal<ThemeId>,
     lfo: fn(&SynthState) -> &shared::synth::Lfo,
     lfo_mut: fn(&mut SynthState) -> &mut shared::synth::Lfo,
-    toggle_sync: fn() -> SynthEvent,
     set_target: fn(LfoTarget) -> SynthEvent,
     phase: Signal<f32>,
 ) {
@@ -476,12 +475,8 @@ fn lfo_column(
         .gap(Pixels(tokens::SPACE_1))
         .size(Auto);
         HStack::new(cx, move |cx| {
-            let sync = state.map(move |s| lfo(s).sync);
-            Button::new(cx, |cx| Label::new(cx, "Sync"))
-                .class("btn")
-                .class("sm")
-                .toggle_class("is-on", sync)
-                .on_press(move |cx| cx.emit(toggle_sync()));
+            // No tempo-sync button: the engine only ever runs the LFO at
+            // the Rate shown in Hz, so a Sync toggle here did nothing.
             let target_text = state.map(move |s| lfo(s).target.name());
             Button::new(cx, |cx| Label::new(cx, target_text))
                 .class("btn")
@@ -525,10 +520,10 @@ fn mod_section(
             // target - lined up under its own pill in the header.
             HStack::new(cx, move |cx| {
                 lfo_column(cx, state, theme, |s| &s.lfo1, |s| &mut s.lfo1,
-                    || SynthEvent::ToggleLfo1Sync, SynthEvent::SetLfo1Target, lfo_phases.0);
+                    SynthEvent::SetLfo1Target, lfo_phases.0);
                 Element::new(cx).class("hairline").width(Pixels(1.0)).height(Stretch(1.0));
                 lfo_column(cx, state, theme, |s| &s.lfo2, |s| &mut s.lfo2,
-                    || SynthEvent::ToggleLfo2Sync, SynthEvent::SetLfo2Target, lfo_phases.1);
+                    SynthEvent::SetLfo2Target, lfo_phases.1);
             })
             .gap(Stretch(1.0))
             .width(Stretch(1.0))
