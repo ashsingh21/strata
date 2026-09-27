@@ -5,7 +5,7 @@
 use vizia::prelude::*;
 use vizia::vg;
 
-use shared::arrangement::{snap, Arrangement, LoopRange, Ticks, TimeSignature, ViewTransform};
+use shared::arrangement::{snap, Arrangement, LoopRange, Ticks, ViewTransform};
 
 use crate::timeline::state::{ContextMenu, ContextMenuTarget, TimelineEvent};
 use crate::tokens::ThemeId;
@@ -192,7 +192,7 @@ impl View for Ruler {
         let palette = self.theme.get().palette();
         let arr = self.arrangement.get();
         let transform = self.transform.get();
-        let sig = TimeSignature::FOUR_FOUR;
+        let sig = arr.tempo_map.time_signature_at(0);
         let ticks_per_bar = sig.ticks_per_bar();
         let ticks_per_beat = sig.ticks_per_beat();
 

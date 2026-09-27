@@ -374,6 +374,7 @@ pub enum TimelineEvent {
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
     SetLoopRange(Option<LoopRange>),
     SetTempo(f64),
+    SetTimeSignature { numerator: u8, denominator: u8 },
     Undo,
     Redo,
     CycleSnap,
@@ -592,6 +593,9 @@ impl Model for TimelineState {
             }
             TimelineEvent::SetTempo(bpm) => {
                 self.do_command(Command::SetTempo { bpm: *bpm });
+            }
+            TimelineEvent::SetTimeSignature { numerator, denominator } => {
+                self.do_command(Command::SetTimeSignature { numerator: *numerator, denominator: *denominator });
             }
             TimelineEvent::Undo => {
                 self.with_arrangement(|arr, stack| {

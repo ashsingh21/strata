@@ -10,7 +10,7 @@ use vizia::vg;
 
 use shared::arrangement::{
     snap, Arrangement, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId, SnapGrid,
-    TimeSignature, Ticks, TrackId, TrackKind, ViewTransform,
+    Ticks, TrackId, TrackKind, ViewTransform,
 };
 
 use crate::recorder::RecordingPreview;
@@ -668,7 +668,7 @@ impl LaneArea {
         let selection = self.selection.get();
         let rows = build_rows(&arr);
         let scroll_y = transform.scroll_y as f32;
-        let sig = TimeSignature::FOUR_FOUR;
+        let sig = arr.tempo_map.time_signature_at(0);
         let ticks_per_bar = sig.ticks_per_bar();
         let ticks_per_beat = sig.ticks_per_beat();
 

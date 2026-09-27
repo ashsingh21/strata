@@ -629,6 +629,11 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".side-head", vec![("color", c("ink-muted"))]);
     rule(".count", vec![("color", c("ink-faint"))]);
     rule(".search", vec![("background-color", c("bg-000")), ("border-color", c("line-control")), ("color", c("ink"))]);
+    // A textbox that just became live/editable (e.g. the BPM readout's
+    // right-click-to-type field) needs a stronger cue than `.search`'s
+    // own quiet border - `focus` is the token's own purpose ("keyboard
+    // focus ring").
+    rule(".search.editing", vec![("background-color", c("bg-300")), ("border-color", c("focus"))]);
     rule(".device", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".synth-disp", vec![("background-color", c("bg-000"))]);
     rule(".synth-seg", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);

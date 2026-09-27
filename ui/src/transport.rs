@@ -27,6 +27,11 @@ use crate::tokens::{ThemeId, SPACE_1, SPACE_2, SPACE_3};
 /// token.
 const HEADER_HEIGHT: f32 = 48.0;
 
+/// The time signature picker's options - covers what anyone actually
+/// picks; free-form numerator/denominator fields aren't worth the extra
+/// UI for signatures this rare.
+const TIME_SIGNATURE_PRESETS: &[(u8, u8)] = &[(4, 4), (3, 4), (2, 4), (6, 8), (5, 4), (7, 8), (9, 8), (12, 8)];
+
 /// Everything the header shows or drives. All signals, so `Copy`.
 #[derive(Clone, Copy)]
 pub struct HeaderProps {
@@ -228,23 +233,136 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             .toggle_class("is-on", interval_open)
             .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
 
+        // Right-click for an exact typed value - drag/scroll (BpmField's
+        // own gesture) is great for coarse changes but painfully slow (or
+        // imprecise) for jumping to a specific number like 174.
+        let editing_bpm: Signal<bool> = Signal::new(false);
+        let bpm_draft: Signal<String> = Signal::new(String::new());
         HStack::new(cx, move |cx| {
-            BpmField::new(cx, bpm, theme, |cx, v| {
-                cx.emit(TimelineEvent::SetTempo(v));
-                cx.emit(AppEvent::SetBpm(v));
-            })
-            .width(Pixels(52.0))
-            .height(Pixels(18.0));
+            // Nudge by 1 BPM - a real click target, not a drag gesture,
+            // for the "just move it a couple BPM" case drag/scroll are
+            // fiddly for.
+            Button::new(cx, |cx| Label::new(cx, "\u{2212}").font_size(13.0))
+                .class("btn")
+                .class("quiet")
+                .width(Pixels(16.0))
+                .height(Pixels(18.0))
+                .on_press(move |cx| {
+                    let current = props.arrangement.get().tempo_map.bpm_at(0);
+                    let v = (current - 1.0).clamp(crate::bpm_field::MIN_BPM, crate::bpm_field::MAX_BPM);
+                    cx.emit(TimelineEvent::SetTempo(v));
+                    cx.emit(AppEvent::SetBpm(v));
+                });
+            Binding::new(cx, editing_bpm, move |cx| {
+                if editing_bpm.get() {
+                    Textbox::new(cx, bpm_draft)
+                        .class("search")
+                        .class("editing")
+                        .font_size(13.0)
+                        .on_edit(move |_cx, text| bpm_draft.set(text))
+                        .on_submit(move |cx, text, _from_key| {
+                            if let Ok(v) = text.trim().parse::<f64>() {
+                                let v = v.clamp(crate::bpm_field::MIN_BPM, crate::bpm_field::MAX_BPM);
+                                cx.emit(TimelineEvent::SetTempo(v));
+                                cx.emit(AppEvent::SetBpm(v));
+                            }
+                            editing_bpm.set(false);
+                        })
+                        .on_cancel(move |_cx| editing_bpm.set(false))
+                        .width(Pixels(52.0))
+                        .height(Pixels(18.0));
+                } else {
+                    BpmField::new(cx, bpm, theme, |cx, v| {
+                        cx.emit(TimelineEvent::SetTempo(v));
+                        cx.emit(AppEvent::SetBpm(v));
+                    })
+                    .width(Pixels(52.0))
+                    .height(Pixels(18.0))
+                    .on_mouse_down(move |_cx, button| {
+                        if button == MouseButton::Right {
+                            // Not `bpm.get()`: it's a generic
+                            // `impl SignalGet<f64>` with no `Send`/`Sync`
+                            // bound, which `on_mouse_down`'s callback
+                            // requires - `props.arrangement` is a
+                            // concrete `Signal<Arrangement>` (both), and
+                            // reads the identical value either way.
+                            let current = props.arrangement.get().tempo_map.bpm_at(0);
+                            bpm_draft.set(format!("{current:.0}"));
+                            editing_bpm.set(true);
+                        }
+                    });
+                }
+            });
+            Button::new(cx, |cx| Label::new(cx, "+").font_size(13.0))
+                .class("btn")
+                .class("quiet")
+                .width(Pixels(16.0))
+                .height(Pixels(18.0))
+                .on_press(move |cx| {
+                    let current = props.arrangement.get().tempo_map.bpm_at(0);
+                    let v = (current + 1.0).clamp(crate::bpm_field::MIN_BPM, crate::bpm_field::MAX_BPM);
+                    cx.emit(TimelineEvent::SetTempo(v));
+                    cx.emit(AppEvent::SetBpm(v));
+                });
         })
         .class("readout")
         .alignment(Alignment::Center)
-        .size(Auto);
+        .size(Auto)
+        .gap(Pixels(2.0));
         Label::new(cx, "BPM").class("value").font_size(12.0);
         Button::new(cx, |cx| Label::new(cx, "Tap").font_size(13.0))
             .class("btn")
             .class("quiet")
             .on_press(|cx| cx.emit(AppEvent::Tap));
-        Label::new(cx, "4/4").class("readout").font_size(13.0).size(Auto);
+
+        let time_sig_menu_open: Signal<bool> = Signal::new(false);
+        let time_sig_text = Memo::new(move |_| {
+            let sig = props.arrangement.get().tempo_map.time_signature_at(0);
+            format!("{}/{}", sig.numerator, sig.denominator)
+        });
+        Button::new(cx, move |cx| Label::new(cx, time_sig_text).font_size(13.0))
+            .class("readout")
+            .on_press(move |_cx| time_sig_menu_open.update(|o| *o = !*o));
+
+        // Same no-backdrop, toggle-to-close convention as the File menu
+        // and the input-device menu - just a common preset list rather
+        // than free-form numerator/denominator fields, since those are
+        // the overwhelming majority of what anyone actually picks.
+        VStack::new(cx, move |cx| {
+            for &(num, den) in TIME_SIGNATURE_PRESETS {
+                let label = format!("{num}/{den}");
+                let is_current = Memo::new(move |_| {
+                    let sig = props.arrangement.get().tempo_map.time_signature_at(0);
+                    sig.numerator == num && sig.denominator == den
+                });
+                HStack::new(cx, move |cx| {
+                    Label::new(cx, label.clone()).class("body");
+                })
+                .class("menu-item")
+                .toggle_class("is-on", is_current)
+                .on_press(move |cx| {
+                    cx.emit(TimelineEvent::SetTimeSignature { numerator: num, denominator: den });
+                    time_sig_menu_open.set(false);
+                })
+                .cursor(CursorIcon::Hand)
+                .alignment(Alignment::Left)
+                .width(Stretch(1.0))
+                .height(Pixels(28.0));
+            }
+        })
+        .class("panel")
+        .class("context-menu")
+        .toggle_class("hidden", time_sig_menu_open.map(|o| !*o))
+        .position_type(PositionType::Absolute)
+        .top(Pixels(HEADER_HEIGHT))
+        .left(Pixels(320.0))
+        .gap(Pixels(2.0))
+        .padding_top(Pixels(SPACE_2))
+        .padding_bottom(Pixels(SPACE_2))
+        .padding_left(Pixels(SPACE_1))
+        .padding_right(Pixels(SPACE_1))
+        .width(Pixels(100.0))
+        .height(Auto);
 
         // The transport, grouped.
         HStack::new(cx, move |cx| {

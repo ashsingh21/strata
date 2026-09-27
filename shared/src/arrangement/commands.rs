@@ -9,7 +9,7 @@ use super::model::{
 };
 #[cfg(test)]
 use super::model::DEFAULT_VELOCITY;
-use super::time::{TempoMap, Ticks};
+use super::time::{TempoMap, Ticks, TimeSignature};
 
 #[derive(Clone, Debug)]
 pub enum Command {
@@ -57,6 +57,11 @@ pub enum Command {
     /// tempo automation yet, so that's exactly what every caller today
     /// already has anyway.
     SetTempo { bpm: f64 },
+    /// Same "replace the whole tempo map, keeping the other half"
+    /// shape as `SetTempo` (and the same reasoning: no UI for
+    /// per-position time signature changes yet, so every caller already
+    /// treats it as one global value).
+    SetTimeSignature { numerator: u8, denominator: u8 },
 }
 
 impl Command {
@@ -336,6 +341,13 @@ impl Command {
                 let time_signature = arr.tempo_map.time_signature_at(0);
                 arr.tempo_map = TempoMap::constant(bpm, time_signature);
                 Command::SetTempo { bpm: old_bpm }
+            }
+
+            Command::SetTimeSignature { numerator, denominator } => {
+                let bpm = arr.tempo_map.bpm_at(0);
+                let old_sig = arr.tempo_map.time_signature_at(0);
+                arr.tempo_map = TempoMap::constant(bpm, TimeSignature { numerator, denominator });
+                Command::SetTimeSignature { numerator: old_sig.numerator, denominator: old_sig.denominator }
             }
         }
     }
