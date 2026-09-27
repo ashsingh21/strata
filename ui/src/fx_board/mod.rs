@@ -230,7 +230,8 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     let arr = p.arrangement.get();
                     let Some(graph) = arr.fx(p.track) else { return };
                     let source_meta = match p.track {
-                        Some(id) => arr.track(id).and_then(|t| t.instrument).map(|i| i.name()).unwrap_or("\u{2014}"),
+                        // An audio track has no instrument - its source is its clips.
+                        Some(id) => arr.track(id).and_then(|t| t.instrument).map(|i| i.name()).unwrap_or("Audio clips"),
                         None => "Mix",
                     };
 
@@ -240,7 +241,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                         let meta = if id == EffectGraph::SOURCE {
                             source_meta
                         } else if p.track.is_some() {
-                            "to mixer"
+                            "to master"
                         } else {
                             "Main out"
                         };
