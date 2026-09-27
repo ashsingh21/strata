@@ -45,6 +45,12 @@ pub enum Command {
     /// Cosmetic (canvas position only) but still undoable, same as any
     /// other edit here.
     SetEffectNodePosition { track: TrackId, node: EffectNodeId, position: (f32, f32) },
+    /// The board's port-drag rewire: moves `node` to just before
+    /// `before` in the chain (see `EffectGraph::move_before`'s own doc
+    /// comment for why that's the right primitive while the graph stays
+    /// linear). Inverse moves it back to just before its own
+    /// pre-rewire successor, which restores the exact prior adjacency.
+    RewireEffect { track: TrackId, node: EffectNodeId, before: EffectNodeId },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -299,6 +305,13 @@ impl Command {
                 let t = arr.track_mut(track).expect("SetEffectNodePosition: unknown track");
                 let previous = t.fx.set_position(node, position);
                 Command::SetEffectNodePosition { track, node, position: previous }
+            }
+
+            Command::RewireEffect { track, node, before } => {
+                let t = arr.track_mut(track).expect("RewireEffect: unknown track");
+                let old_before = t.fx.successor_of(node).expect("RewireEffect: node has no successor");
+                t.fx.move_before(node, before);
+                Command::RewireEffect { track, node, before: old_before }
             }
 
             Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity } => {

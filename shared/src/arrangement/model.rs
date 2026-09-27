@@ -122,7 +122,7 @@ pub struct EffectNode {
 /// A directed connection between two nodes - `from`/`to` are either a
 /// real `EffectNode.id` or `EffectGraph::SOURCE`/`EffectGraph::OUTPUT`,
 /// the two fixed marker ids every graph has that never appear in `nodes`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EffectEdge {
     pub from: EffectNodeId,
     pub to: EffectNodeId,
@@ -235,6 +235,47 @@ impl EffectGraph {
         self.nodes.push(node);
         self.edges.push(inbound);
         self.edges.push(outbound);
+    }
+
+    /// The id a node currently feeds - `None` only if `id` isn't in the
+    /// graph at all (every real node always has exactly one outbound
+    /// edge while the chain stays linear).
+    pub fn successor_of(&self, id: EffectNodeId) -> Option<EffectNodeId> {
+        self.edges.iter().find(|e| e.from == id).map(|e| e.to)
+    }
+
+    /// Moves `node` to a new position in the chain, right before
+    /// `before` - the port-drag rewire operation. Since the graph stays
+    /// a strict line until parallel branches exist, "wire node's output
+    /// into before's input" and "move node to just before before" are
+    /// the same edit: extract `node` from wherever it currently sits
+    /// (splicing its old neighbours together, same reconnect logic
+    /// `remove` uses), then splice it back in immediately ahead of
+    /// `before`. A no-op if `node == before` or either id isn't a real
+    /// edge endpoint.
+    pub fn move_before(&mut self, node: EffectNodeId, before: EffectNodeId) {
+        if node == before {
+            return;
+        }
+        let Some(in_idx) = self.edges.iter().position(|e| e.to == node) else { return };
+        let Some(out_idx) = self.edges.iter().position(|e| e.from == node) else { return };
+        let (first, second) = if in_idx > out_idx { (in_idx, out_idx) } else { (out_idx, in_idx) };
+        let edge_a = self.edges.remove(first);
+        let edge_b = self.edges.remove(second);
+        let (inbound, outbound) = if edge_a.to == node { (edge_a, edge_b) } else { (edge_b, edge_a) };
+        self.edges.push(EffectEdge { from: inbound.from, to: outbound.to });
+
+        let Some(before_in_idx) = self.edges.iter().position(|e| e.to == before) else {
+            // `before` isn't reachable (shouldn't happen for a valid id) -
+            // put `node` back exactly where it was rather than lose it.
+            self.edges.retain(|e| !(e.from == inbound.from && e.to == outbound.to));
+            self.edges.push(inbound);
+            self.edges.push(outbound);
+            return;
+        };
+        let before_in = self.edges.remove(before_in_idx);
+        self.edges.push(EffectEdge { from: before_in.from, to: node });
+        self.edges.push(EffectEdge { from: node, to: before });
     }
 
     /// Returns the previous value, for the caller's undo inverse.
@@ -519,6 +560,18 @@ mod effect_graph_tests {
         Effect::Compressor(CompressorState::default())
     }
 
+    /// `EffectGraph`'s derived `PartialEq` compares `edges` as an
+    /// ordered `Vec`, but `move_before`'s remove-then-push bookkeeping
+    /// doesn't preserve original edge order even when the resulting
+    /// *set* of edges (and so the real, observable chain) is identical -
+    /// compare edge sets instead for "these two graphs wire up the same
+    /// way" assertions.
+    fn same_wiring(a: &EffectGraph, b: &EffectGraph) -> bool {
+        let sa: std::collections::HashSet<_> = a.edges.iter().collect();
+        let sb: std::collections::HashSet<_> = b.edges.iter().collect();
+        sa == sb
+    }
+
     /// Every node has exactly one inbound and one outbound edge - the
     /// "still a strict line" invariant every phase before parallel
     /// branches relies on.
@@ -577,6 +630,50 @@ mod effect_graph_tests {
         let ids: Vec<_> = graph.ordered().iter().map(|n| n.id).collect();
         assert_eq!(ids, vec![a, b]);
         assert_still_linear(&graph);
+    }
+
+    #[test]
+    fn move_before_reorders_two_nodes() {
+        // Compressor -> EQ, drag EQ's output onto Compressor's input:
+        // matches the effects-board plan's own Phase 9 example exactly.
+        let mut graph = EffectGraph::new();
+        let comp = graph.push_at_end(compressor());
+        let eq = graph.push_at_end(compressor());
+        graph.move_before(eq, comp);
+        assert_still_linear(&graph);
+        let ids: Vec<_> = graph.ordered().iter().map(|n| n.id).collect();
+        assert_eq!(ids, vec![eq, comp]);
+    }
+
+    #[test]
+    fn move_before_to_own_successor_is_a_no_op() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        let before = graph.clone();
+        let successor = graph.successor_of(a).unwrap();
+        graph.move_before(a, successor);
+        assert!(same_wiring(&graph, &before));
+    }
+
+    #[test]
+    fn move_before_then_undo_by_moving_back_restores_exact_structure() {
+        let mut graph = EffectGraph::new();
+        let a = graph.push_at_end(compressor());
+        let b = graph.push_at_end(compressor());
+        let c = graph.push_at_end(compressor());
+        let before = graph.clone();
+        // Move `a` (the first node) to just before `c` (the last) -
+        // b, a, c - then move it back to just before its own old
+        // successor (`b`) and confirm that's a full round-trip, the
+        // same "move back to just before the old successor" inverse
+        // `Command::RewireEffect`'s apply() relies on.
+        let old_successor = graph.successor_of(a).unwrap();
+        graph.move_before(a, c);
+        assert!(!same_wiring(&graph, &before));
+        graph.move_before(a, old_successor);
+        assert!(same_wiring(&graph, &before));
+        let _ = b;
     }
 
     #[test]

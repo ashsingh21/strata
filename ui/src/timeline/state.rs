@@ -459,6 +459,8 @@ pub enum TimelineEvent {
     /// add (from the palette or the empty-canvas search popover).
     AddEffectNodeToBoard(TrackId, Effect, Option<(f32, f32)>),
     SetEffectNodePosition(TrackId, EffectNodeId, (f32, f32)),
+    /// The board's port-drag rewire: node, before.
+    RewireEffect(TrackId, EffectNodeId, EffectNodeId),
     /// Drag on a track header's resize handle: absolute new height in px
     /// (clamped by the handler), not undoable - a view preference, like
     /// mute or gain.
@@ -910,6 +912,9 @@ impl Model for TimelineState {
             }
             TimelineEvent::SetEffectNodePosition(track, node, position) => {
                 self.do_command(Command::SetEffectNodePosition { track: *track, node: *node, position: *position });
+            }
+            TimelineEvent::RewireEffect(track, node, before) => {
+                self.do_command(Command::RewireEffect { track: *track, node: *node, before: *before });
             }
             TimelineEvent::SetTrackHeight { track, height } => {
                 let height = height.clamp(shared::arrangement::MIN_TRACK_HEIGHT, shared::arrangement::MAX_TRACK_HEIGHT);

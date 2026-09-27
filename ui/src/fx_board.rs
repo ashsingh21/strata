@@ -67,6 +67,26 @@ fn port_in(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f3
     (x, y + h * 0.5)
 }
 
+/// The input port nearest `(x, y)` (canvas-local), within a generous
+/// grab radius - used on wire-drag release to figure out what the
+/// cursor actually landed on, since mouse capture routes the release
+/// event to the port that started the drag, not whatever's visually
+/// under the cursor.
+fn nearest_input_port(graph: &EffectGraph, x: f32, y: f32) -> Option<EffectNodeId> {
+    const RADIUS: f32 = 20.0;
+    let mut targets: Vec<EffectNodeId> = graph.nodes.iter().map(|n| n.id).collect();
+    targets.push(EffectGraph::OUTPUT);
+    targets
+        .into_iter()
+        .map(|id| {
+            let (px, py) = port_in(graph, id, None);
+            (id, ((px - x).powi(2) + (py - y).powi(2)).sqrt())
+        })
+        .filter(|(_, d)| *d <= RADIUS)
+        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+        .map(|(id, _)| id)
+}
+
 fn node_size(id: EffectNodeId) -> (f32, f32) {
     if id == EffectGraph::SOURCE || id == EffectGraph::OUTPUT {
         (IO_W, IO_H)
@@ -84,6 +104,7 @@ struct FxCables {
     theme: Signal<ThemeId>,
     selected: Signal<Option<EffectNodeId>>,
     drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
+    wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>,
 }
 
 impl FxCables {
@@ -94,13 +115,15 @@ impl FxCables {
         theme: Signal<ThemeId>,
         selected: Signal<Option<EffectNodeId>>,
         drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
+        wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, track, theme, selected, drag_state }
+        Self { arrangement, track, theme, selected, drag_state, wire_drag }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
             .bind(selected, |mut h| h.needs_redraw())
             .bind(drag_state, |mut h| h.needs_redraw())
+            .bind(wire_drag, |mut h| h.needs_redraw())
     }
 }
 
@@ -152,6 +175,23 @@ impl View for FxCables {
             draw_dot(ox, oy);
             draw_dot(ix, iy);
         }
+
+        // A live wire being dragged from a port to the cursor.
+        if let Some((from, mx, my)) = self.wire_drag.get() {
+            let (x0, y0) = port_out(graph, from, drag);
+            let (x0, y0) = (bounds.x + x0, bounds.y + y0);
+            let (x1, y1) = (bounds.x + mx, bounds.y + my);
+            let mid = (x0 + x1) * 0.5;
+            let mut path = vg::PathBuilder::new();
+            path.move_to(vg::Point::new(x0, y0));
+            path.cubic_to(vg::Point::new(mid, y0), vg::Point::new(mid, y1), vg::Point::new(x1, y1));
+            let mut paint = vg::Paint::default();
+            paint.set_color(palette.ink);
+            paint.set_style(vg::PaintStyle::Stroke);
+            paint.set_stroke_width(2.0);
+            paint.set_anti_alias(true);
+            canvas.draw_path(&path.detach(), &paint);
+        }
     }
 }
 
@@ -177,6 +217,54 @@ fn palette_row(cx: &mut Context, label: &'static str, effect: Effect, p: FxBoard
         });
 }
 
+/// A node's output port: drag from here to rewire - "wire this node's
+/// output into another node's input" and "move this node to just
+/// before that other node" are the same edit while the chain stays
+/// linear (see `EffectGraph::move_before`'s doc comment).
+fn output_port(cx: &mut Context, p: FxBoardProps, node: EffectNodeId, x: f32, y: f32, wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>) {
+    Element::new(cx)
+        .class("fx-pip")
+        .class("is-on")
+        .position_type(PositionType::Absolute)
+        .left(Pixels(x - 5.0))
+        .top(Pixels(y - 5.0))
+        .width(Pixels(10.0))
+        .height(Pixels(10.0))
+        .cursor(CursorIcon::Crosshair)
+        .on_mouse_down(move |cx, button| {
+            if button == MouseButton::Left {
+                cx.capture();
+                wire_drag.set(Some((node, x, y)));
+            }
+        })
+        .on_mouse_move(move |cx, mx, my| {
+            if wire_drag.get().is_some_and(|(id, ..)| id == node) {
+                let bounds = cx.bounds();
+                let origin_x = bounds.x - (x - 5.0);
+                let origin_y = bounds.y - (y - 5.0);
+                wire_drag.set(Some((node, mx - origin_x, my - origin_y)));
+            }
+        })
+        .on_mouse_up(move |cx, button| {
+            if button != MouseButton::Left {
+                return;
+            }
+            let Some((id, local_x, local_y)) = wire_drag.get() else { return };
+            if id != node {
+                return;
+            }
+            cx.release();
+            wire_drag.set(None);
+            let arr = p.arrangement.get();
+            let Some(track) = arr.track(p.track) else { return };
+            if let Some(target) = nearest_input_port(&track.fx, local_x, local_y) {
+                if target != node {
+                    cx.emit(TimelineEvent::RewireEffect(p.track, node, target));
+                }
+            }
+        });
+}
+
 pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
     let selected: Signal<Option<EffectNodeId>> = Signal::new(None);
     // Live drag preview: (node, x, y) while a node's being dragged, so
@@ -186,6 +274,9 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
     // (node, grab-x, grab-y, original-node-x, original-node-y) captured
     // on mouse-down, read on every subsequent move to compute the delta.
     let drag_anchor: Signal<Option<(EffectNodeId, f32, f32, f32, f32)>> = Signal::new(None);
+    // (source node, live cursor x, live cursor y - both canvas-local)
+    // while dragging a wire from that node's output port.
+    let wire_drag: Signal<Option<(EffectNodeId, f32, f32)>> = Signal::new(None);
     let track_name = p.arrangement.map(move |arr| arr.track(p.track).map(|t| t.name.clone()).unwrap_or_default());
     let track_color = p.arrangement.map(move |arr| arr.track(p.track).map(|t| t.color).unwrap_or(ClipColor::Violet));
     let all_bypassed = p.arrangement.map(move |arr| {
@@ -250,7 +341,9 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
             // Canvas.
             let search_popover: Signal<Option<(f32, f32)>> = Signal::new(None);
             ZStack::new(cx, move |cx| {
-                FxCables::new(cx, p.arrangement, p.track, p.theme, selected, drag_state).width(Stretch(1.0)).height(Stretch(1.0));
+                FxCables::new(cx, p.arrangement, p.track, p.theme, selected, drag_state, wire_drag)
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0));
 
                 Element::new(cx)
                     .width(Stretch(1.0))
@@ -384,6 +477,9 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                 }
                             }
                         });
+
+                        let (out_x, out_y) = port_out(graph, node.id, drag_state.get());
+                        output_port(cx, p, node.id, out_x, out_y, wire_drag);
                     }
                 });
 
