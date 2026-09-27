@@ -369,6 +369,7 @@ pub enum TimelineEvent {
     SplitAtPlayhead,
     DeleteSelected,
     DuplicateSelected,
+    RepeatToFillLoop,
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
@@ -569,6 +570,46 @@ impl Model for TimelineState {
                     });
                     self.selection.set(Selection { clips: new_selection, ..Default::default() });
                 }
+            }
+            TimelineEvent::RepeatToFillLoop => {
+                let selection = self.selection.get();
+                let arr = self.arrangement.get();
+                let Some(loop_range) = arr.loop_range else { return };
+                let clips: Vec<Clip> = selection.clips.iter().filter_map(|&id| arr.clip(id).cloned()).collect();
+                if clips.is_empty() {
+                    return;
+                }
+                // The whole selection's own span, not any one clip's
+                // length - a boom-chuck pattern is a kick clip and a
+                // snare clip together, and both need to repeat as one
+                // unit, staying lined up with each other.
+                let pattern_start = clips.iter().map(|c| c.start).min().unwrap();
+                let pattern_end = clips.iter().map(|c| c.start + c.length).max().unwrap();
+                let pattern_length = pattern_end - pattern_start;
+                if pattern_length <= 0 {
+                    return;
+                }
+                let repeats = (loop_range.end - pattern_end) / pattern_length;
+                if repeats < 1 {
+                    return;
+                }
+                let mut new_selection = HashSet::new();
+                self.with_arrangement(|arr, stack| {
+                    let mut commands = Vec::new();
+                    for i in 1..=repeats {
+                        for clip in &clips {
+                            let new_id = arr.alloc_id();
+                            new_selection.insert(new_id);
+                            commands.push(Command::DuplicateClip {
+                                clip: clip.id,
+                                new_id,
+                                offset: pattern_length * i,
+                            });
+                        }
+                    }
+                    stack.do_command(Command::Batch(commands), arr);
+                });
+                self.selection.set(Selection { clips: new_selection, ..Default::default() });
             }
             TimelineEvent::AddBreakpoint { lane, point } => {
                 self.do_command(Command::AddBreakpoint { lane: *lane, point: *point });

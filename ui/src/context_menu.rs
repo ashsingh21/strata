@@ -80,6 +80,9 @@ pub fn context_menu_view(
                 item_with_shortcut(cx, "Cut", "Ctrl+X", |cx| cx.emit(TimelineEvent::Cut));
                 item_with_shortcut(cx, "Copy", "Ctrl+C", |cx| cx.emit(TimelineEvent::Copy));
                 item_with_shortcut(cx, "Duplicate", "Ctrl+D", |cx| cx.emit(TimelineEvent::DuplicateSelected));
+                if arr.loop_range.is_some() {
+                    item(cx, "Repeat to fill loop", |cx| cx.emit(TimelineEvent::RepeatToFillLoop));
+                }
                 if is_midi {
                     separator(cx);
                     item(cx, "Open in piano roll", move |cx| cx.emit(PianoRollEvent::Open(clip_id)));
