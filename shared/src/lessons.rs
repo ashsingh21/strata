@@ -190,6 +190,13 @@ pub fn starting_project(lesson: &str) -> Project {
     Project { arrangement: arr, instruments, synth: None }
 }
 
+/// The house-track part before `lesson`, whose result it builds on.
+pub fn previous_part(lesson: &str) -> Option<&'static str> {
+    const PARTS: [&str; 5] = [PROJECT_GROOVE, PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH];
+    let i = PARTS.iter().position(|p| *p == lesson)?;
+    i.checked_sub(1).map(|j| PARTS[j])
+}
+
 /// The house-track project as it stands after `parts` parts - what the
 /// next part starts from, so any part can be taken on its own.
 pub fn project_after(parts: usize) -> Project {
@@ -346,6 +353,14 @@ fn add_loop(arr: &mut Arrangement, track: TrackId, name: &str, notes: Vec<MidiNo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn each_house_part_follows_the_one_before() {
+        assert_eq!(super::previous_part(super::PROJECT_GROOVE), None);
+        assert_eq!(super::previous_part(super::PROJECT_BASS), Some(super::PROJECT_GROOVE));
+        assert_eq!(super::previous_part(super::PROJECT_FINISH), Some(super::PROJECT_ARRANGE));
+        assert_eq!(super::previous_part(super::RECIPE_BASS), None);
+    }
+
     use super::*;
 
     #[test]

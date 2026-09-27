@@ -88,6 +88,7 @@ pub fn sidebar(
     open: Signal<bool>,
     lessons_active: Signal<Option<(usize, usize)>>,
     lessons_done: Signal<Vec<String>>,
+    my_tracks: Signal<Vec<std::path::PathBuf>>,
 ) {
     let query = Signal::new(String::new());
     let sample_categories = crate::timeline::drum_sample_categories();
@@ -132,6 +133,19 @@ pub fn sidebar(
                         lesson_row(cx, lesson.title.to_string(), finished, query)
                             .toggle_class("is-on", lessons_active.map(move |a| a.is_some_and(|(l, _)| l == i)))
                             .on_press(move |cx| cx.emit(crate::project::ProjectEvent::StartLesson(i)));
+                    }
+                });
+
+                // What you made in the lessons, saved as you went.
+                Binding::new(cx, my_tracks, move |cx| {
+                    let tracks = my_tracks.get();
+                    if tracks.is_empty() {
+                        return;
+                    }
+                    section_head(cx, "My tracks", tracks.len());
+                    for path in tracks {
+                        let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                        row(cx, name, query, false).on_press(move |cx| cx.emit(crate::project::ProjectEvent::OpenTrack(path.clone())));
                     }
                 });
 

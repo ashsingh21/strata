@@ -212,6 +212,7 @@ fn main() -> Result<(), ApplicationError> {
         let project_saved = project_model.saved;
         let project_name = project_model.display_name;
         let export_status = project_model.export_status;
+        let my_tracks = project_model.my_tracks;
         project_model.build(cx);
         let save_status = Memo::new(move |_| {
             let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
@@ -461,7 +462,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
             HStack::new(cx, move |cx| {
-                sidebar::sidebar(cx, tl_arrangement, selected_track, sidebar_open, lessons_active, lessons_done);
+                sidebar::sidebar(cx, tl_arrangement, selected_track, sidebar_open, lessons_active, lessons_done, my_tracks);
                 Element::new(cx)
                     .class("hairline")
                     .toggle_class("hidden", sidebar_open.map(|o| !*o))

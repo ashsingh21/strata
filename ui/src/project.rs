@@ -28,6 +28,56 @@ pub fn default_projects_dir() -> PathBuf {
     dir
 }
 
+/// Where lesson projects save themselves: "My tracks", in the projects
+/// folder. Created on first use.
+pub fn my_tracks_dir() -> PathBuf {
+    let dir = default_projects_dir().join("My tracks");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// The saved tracks, newest first.
+pub fn my_tracks() -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(my_tracks_dir()) else { return vec![] };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .map(|p| (std::fs::metadata(&p).and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), p))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.into_iter().map(|(_, p)| p).collect()
+}
+
+/// A file name in My tracks for a new try at `title` that no earlier
+/// try already has ("House track 1 - the groove 2.json").
+fn new_track_path(title: &str) -> PathBuf {
+    let stem: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { ' ' }).collect();
+    let stem = stem.split_whitespace().collect::<Vec<_>>().join(" ");
+    let dir = my_tracks_dir();
+    (1..)
+        .map(|n| dir.join(if n == 1 { format!("{stem}.json") } else { format!("{stem} {n}.json") }))
+        .find(|p| !p.exists())
+        .expect("some free name")
+}
+
+/// The learner's own finished previous part of the house track, with its
+/// tracks named as the next part's steps expect - or `None` to start from
+/// the stock version.
+fn carried_over(lesson: &str) -> Option<Project> {
+    let previous = shared::lessons::previous_part(lesson)?;
+    let mut project = load(&crate::settings::load_lesson_track(previous)?).ok()?;
+    project.migrate();
+    let arr = &mut project.arrangement;
+    let drums = arr.tracks.iter().position(|t| t.instrument == Some(shared::arrangement::Instrument::Drums));
+    let carve: Vec<usize> =
+        arr.tracks.iter().enumerate().filter(|(_, t)| t.instrument == Some(shared::arrangement::Instrument::Carve)).map(|(i, _)| i).collect();
+    for (index, name) in drums.into_iter().map(|i| (i, "Drums")).chain(carve.into_iter().zip(["Bass", "Chords"])) {
+        arr.tracks[index].name = name.into();
+    }
+    Some(project)
+}
+
 /// What to do with unsaved changes before a destructive action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiscardChoice {
@@ -80,10 +130,12 @@ pub struct ProjectModel {
     /// Set just before re-emitting `WindowClose` once the user has
     /// decided, so this model lets it through to the window.
     allow_close: bool,
+    /// The files in My tracks, newest first (the sidebar lists them).
+    pub my_tracks: Signal<Vec<PathBuf>>,
 }
 
 /// Actions that would throw away unsaved changes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GuardedAction {
     Close,
     New,
@@ -92,6 +144,8 @@ pub enum GuardedAction {
     Demo(shared::demo::DemoSong),
     /// Open lesson `n`'s starting project and begin it (`crate::lessons`).
     Lesson(usize),
+    /// Open a known file (one of My tracks).
+    OpenPath(PathBuf),
 }
 
 pub enum ProjectEvent {
@@ -102,6 +156,13 @@ pub enum ProjectEvent {
     OpenDemo(shared::demo::DemoSong),
     /// Start lesson `n` of `crate::lessons::course::LESSONS`.
     StartLesson(usize),
+    /// Open one of My tracks.
+    OpenTrack(PathBuf),
+    /// A lesson is running: save it to its My tracks file if it's changed.
+    AutoSave,
+    /// Lesson `id` just finished: save, and remember the file as that
+    /// part's result.
+    LessonFinished(&'static str),
     /// A new file stem, typed into the header's title field - moves the
     /// project's file on disk if it's been saved before, otherwise just
     /// updates the name a future Save As will suggest.
@@ -197,6 +258,27 @@ impl ProjectModel {
             pending: None,
             asking: false,
             allow_close: false,
+            my_tracks: Signal::new(my_tracks()),
+        }
+    }
+
+    /// Saves to the current file if it's a My tracks one and anything
+    /// changed, without renaming the project in the header.
+    fn auto_save(&mut self) {
+        let Some(path) = self.current_path.get().filter(|p| p.starts_with(my_tracks_dir())) else { return };
+        if !self.is_dirty() {
+            return;
+        }
+        let arrangement = self.arrangement.get();
+        let patches = self.patches.get();
+        match save(&project(&arrangement, &patches), &path) {
+            Ok(()) => {
+                self.saved.set(snapshot(&arrangement, &patches));
+                if !self.my_tracks.get().contains(&path) {
+                    self.my_tracks.set(my_tracks());
+                }
+            }
+            Err(e) => eprintln!("project: failed to save {}: {e}", path.display()),
         }
     }
 
@@ -289,6 +371,8 @@ impl ProjectModel {
         if self.asking {
             return;
         }
+        // A lesson's track saves itself: nothing to ask about.
+        self.auto_save();
         if !self.is_dirty() {
             self.perform(cx, action);
             return;
@@ -301,6 +385,7 @@ impl ProjectModel {
             GuardedAction::Open => "opening another project",
             GuardedAction::Demo(_) => "opening the demo",
             GuardedAction::Lesson(_) => "starting a lesson",
+            GuardedAction::OpenPath(_) => "opening another project",
         };
         cx.spawn(move |proxy| {
             let choice = crate::dialogs::ask_save(&name, verb);
@@ -326,12 +411,18 @@ impl ProjectModel {
             }
             GuardedAction::Lesson(n) => {
                 let Some(lesson) = crate::lessons::course::LESSONS.get(n) else { return };
-                self.replace_project(cx, shared::lessons::starting_project(lesson.id));
-                self.current_path.set(None);
+                let project = carried_over(lesson.id).unwrap_or_else(|| shared::lessons::starting_project(lesson.id));
+                self.replace_project(cx, project);
+                // Saved to My tracks as it goes (the file appears on the
+                // first change) - except the arrangement tours, which open
+                // finished songs to listen to.
+                let saves = lesson.group != crate::lessons::course::ARRANGEMENT;
+                self.current_path.set(saves.then(|| new_track_path(lesson.title)));
                 // Short: the header's name field is narrow (the bar shows the title).
                 self.display_name.set(format!("Lesson {}", n + 1));
                 cx.emit(crate::lessons::LessonEvent::Begin(n));
             }
+            GuardedAction::OpenPath(path) => self.open(cx, path),
             GuardedAction::Demo(song) => {
                 self.replace_project(cx, song.project());
                 self.current_path.set(None);
@@ -409,19 +500,27 @@ impl Model for ProjectModel {
             ProjectEvent::New => self.guard(cx, GuardedAction::New),
             ProjectEvent::OpenDemo(song) => self.guard(cx, GuardedAction::Demo(*song)),
             ProjectEvent::StartLesson(n) => self.guard(cx, GuardedAction::Lesson(*n)),
+            ProjectEvent::OpenTrack(path) => self.guard(cx, GuardedAction::OpenPath(path.clone())),
+            ProjectEvent::AutoSave => self.auto_save(),
+            ProjectEvent::LessonFinished(id) => {
+                self.auto_save();
+                if let Some(path) = self.current_path.get().filter(|p| p.exists()) {
+                    crate::settings::save_lesson_track(id, &path);
+                }
+            }
             ProjectEvent::DiscardDecided(action, choice) => {
                 self.asking = false;
                 match choice {
                     DiscardChoice::Cancel => {}
-                    DiscardChoice::DontSave => self.perform(cx, *action),
+                    DiscardChoice::DontSave => self.perform(cx, action.clone()),
                     DiscardChoice::Save => match self.current_path.get() {
                         Some(path) => {
                             if self.save_to(path) {
-                                self.perform(cx, *action);
+                                self.perform(cx, action.clone());
                             }
                         }
                         None => {
-                            self.pending = Some(*action);
+                            self.pending = Some(action.clone());
                             spawn_save_as_dialog(cx, self.display_name.get());
                         }
                     },

@@ -68,6 +68,18 @@ pub fn save_lessons_done(ids: &[String]) {
     save_key("lessons_done", serde_json::json!(ids));
 }
 
+/// The file holding each finished lesson's project (lesson id -> path),
+/// so the next part of the house track can carry on from it.
+pub fn load_lesson_track(id: &str) -> Option<std::path::PathBuf> {
+    load_all().get("lesson_tracks")?.get(id)?.as_str().map(std::path::PathBuf::from)
+}
+
+pub fn save_lesson_track(id: &str, path: &std::path::Path) {
+    let mut tracks = load_all().get("lesson_tracks").and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    tracks.insert(id.to_string(), serde_json::json!(path.to_string_lossy()));
+    save_key("lesson_tracks", serde_json::Value::Object(tracks));
+}
+
 /// The lower panel's height (see `crate::splitter`), logical pixels.
 pub fn load_lower_panel_height() -> Option<f32> {
     load_all().get("lower_panel_height")?.as_f64().map(|h| h as f32)

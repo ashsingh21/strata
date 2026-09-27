@@ -180,7 +180,15 @@ pub struct LessonModel {
     shown: Option<(usize, Option<SynthState>, bool)>,
     /// That step, for the bar's "Try it yourself".
     pub shown_step: Signal<Option<usize>>,
+    /// When the lesson's project was last auto-saved to My tracks.
+    last_save: Instant,
+    /// A lesson just reached its end (reported to the project on the
+    /// next tick).
+    finished: Option<&'static str>,
 }
+
+/// How often a running lesson saves the learner's track.
+const AUTO_SAVE_EVERY: Duration = Duration::from_secs(5);
 
 impl LessonModel {
     #[allow(clippy::too_many_arguments)]
@@ -225,6 +233,8 @@ impl LessonModel {
             release_keys: None,
             shown: None,
             shown_step: Signal::new(None),
+            last_save: Instant::now(),
+            finished: None,
         }
     }
 
@@ -264,6 +274,7 @@ impl LessonModel {
         // Reaching the closing step is finishing the lesson.
         if step == steps.len() - 1 {
             let id = course::LESSONS[lesson].id.to_string();
+            self.finished = Some(course::LESSONS[lesson].id);
             if !self.done.get().contains(&id) {
                 self.done.update(|d| d.push(id));
                 crate::settings::save_lessons_done(&self.done.get());
@@ -434,7 +445,14 @@ impl Model for LessonModel {
                 {
                     self.stop_preview();
                 }
+                if let Some(id) = self.finished.take() {
+                    cx.emit(crate::project::ProjectEvent::LessonFinished(id));
+                }
                 let Some((lesson, step)) = self.active.get() else { return };
+                if self.last_save.elapsed() >= AUTO_SAVE_EVERY {
+                    self.last_save = Instant::now();
+                    cx.emit(crate::project::ProjectEvent::AutoSave);
+                }
                 let course::Kind::Action { check, target } = course::LESSONS[lesson].steps[step].kind else { return };
                 let snap = self.snapshot();
                 if check(&snap) {
@@ -454,7 +472,10 @@ impl Model for LessonModel {
                     self.go_to(lesson, step + 1);
                 }
             }
-            LessonEvent::Exit => self.exit(),
+            LessonEvent::Exit => {
+                cx.emit(crate::project::ProjectEvent::AutoSave);
+                self.exit();
+            }
             LessonEvent::Hear(which) => self.hear(cx, *which),
             LessonEvent::ShowMe => self.show_me(cx),
             LessonEvent::TryYourself => self.try_yourself(cx),
