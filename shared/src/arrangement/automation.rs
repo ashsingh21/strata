@@ -19,6 +19,10 @@ pub enum AutomationTarget {
     TrackGain,
     /// One knob on one node of the track's effect chain.
     Effect { node: EffectNodeId, param: EffectParam },
+    /// One of the track's Carve knobs. Its value lives in the track's synth
+    /// patch (not the arrangement), so it's applied by the synth model via
+    /// `apply_synth_automation`, not by `with_automation_at`.
+    Synth(crate::synth::SynthParam),
 }
 
 pub fn lin_norm(min: f32, max: f32, value: f32) -> f32 {
@@ -147,7 +151,8 @@ impl Arrangement {
     /// untouched when no lane has a target - the common case costs nothing.
     /// Lanes whose target no longer exists (node deleted) are skipped.
     pub fn with_automation_at(&self, tick: Ticks) -> Cow<'_, Arrangement> {
-        if !self.automation.iter().any(|lane| lane.target.is_some() && !lane.breakpoints.is_empty()) {
+        let applies_here = |t: &Option<AutomationTarget>| matches!(t, Some(AutomationTarget::TrackGain | AutomationTarget::Effect { .. }));
+        if !self.automation.iter().any(|lane| applies_here(&lane.target) && !lane.breakpoints.is_empty()) {
             return Cow::Borrowed(self);
         }
         let mut arr = self.clone();
@@ -161,6 +166,7 @@ impl Arrangement {
                         param.apply_norm(&mut n.effect, norm);
                     }
                 }
+                AutomationTarget::Synth(_) => {}
             }
         }
         Cow::Owned(arr)
@@ -174,6 +180,8 @@ impl Arrangement {
         match target {
             AutomationTarget::TrackGain => Some(gain_db_to_fader_pos(t.gain_db)),
             AutomationTarget::Effect { node, param } => param.norm(&t.fx.node(node)?.effect),
+            // Lives in the synth patch - the caller supplies it.
+            AutomationTarget::Synth(_) => None,
         }
     }
 
@@ -186,6 +194,10 @@ impl Arrangement {
                 self.track(track)?.fx.node(node)?;
                 Some(format!("{} \u{b7} {}", param.effect_name(), param.name()))
             }
+            AutomationTarget::Synth(param) => {
+                self.track(track)?.instrument?;
+                Some(format!("Carve \u{b7} {}", param.long_name()))
+            }
         }
     }
 
@@ -197,6 +209,7 @@ impl Arrangement {
         match target {
             AutomationTarget::TrackGain => Some(format!("{:+.1} dB", t.gain_db)),
             AutomationTarget::Effect { node, param } => Some(param.format(&t.fx.node(node)?.effect)),
+            AutomationTarget::Synth(_) => None,
         }
     }
 }
@@ -216,7 +229,20 @@ impl Arrangement {
                 param.apply_norm(&mut effect, norm);
                 param.format(&effect)
             }
+            AutomationTarget::Synth(param) => param.format_norm(norm),
         })
+    }
+}
+
+impl Arrangement {
+    /// Applies `track`'s Carve-parameter lanes at `tick` to `patch` (a copy
+    /// about to be sent to the engine).
+    pub fn apply_synth_automation(&self, track: super::model::TrackId, tick: Ticks, patch: &mut crate::synth::SynthState) {
+        for lane in self.automation.iter().filter(|l| l.track == track) {
+            if let (Some(AutomationTarget::Synth(param)), Some(norm)) = (lane.target, lane.value_at(tick)) {
+                param.apply_norm(patch, norm);
+            }
+        }
     }
 }
 
@@ -324,6 +350,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn synth_lanes_apply_to_the_patch_not_the_arrangement() {
+        let (mut arr, _) = arrangement_with_compressor();
+        let cutoff = crate::synth::SynthParam::Cutoff;
+        arr.automation.push(lane(&[(0, 0.0), (100, 1.0)], Some(AutomationTarget::Synth(cutoff))));
+        // with_automation_at ignores Synth targets (nothing to borrow-break).
+        assert!(matches!(arr.with_automation_at(50), Cow::Borrowed(_)));
+        let mut patch = crate::synth::seed_synth();
+        arr.apply_synth_automation(1, 100, &mut patch);
+        assert!((cutoff.norm(&patch) - 1.0).abs() < 1e-4);
+        // Another track's lanes don't touch this patch.
+        let mut other = crate::synth::seed_synth();
+        let before = other.filter.cutoff_hz;
+        arr.apply_synth_automation(2, 100, &mut other);
+        assert_eq!(other.filter.cutoff_hz, before);
     }
 
     #[test]

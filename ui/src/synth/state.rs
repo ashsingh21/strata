@@ -29,6 +29,9 @@ pub enum SynthEvent {
     SetOsc1Waveform(Waveform),
     SetOsc2Waveform(Waveform),
     ToggleOsc2Sync,
+    /// Right-click on a Carve knob: offer "Automate Carve · <param>" for the
+    /// selected track (which is whose patch the panel shows).
+    OpenAutomateMenu { param: shared::synth::SynthParam, x: f32, y: f32 },
     SetFilterType(FilterType),
     SetLfo1Target(LfoTarget),
     SetLfo2Target(LfoTarget),
@@ -323,6 +326,23 @@ impl Model for SynthModel {
             SynthEvent::SetOsc1Waveform(w) => self.state.update(|s| s.osc1.waveform = *w),
             SynthEvent::SetOsc2Waveform(w) => self.state.update(|s| s.osc2.waveform = *w),
             SynthEvent::ToggleOsc2Sync => self.state.update(|s| s.osc2.sync = !s.osc2.sync),
+            SynthEvent::OpenAutomateMenu { param, x, y } => {
+                let track = self.selected_track.get().filter(|id| {
+                    self.arrangement.get().track(*id).is_some_and(|t| t.instrument.is_some())
+                });
+                if let Some(track) = track {
+                    let current = param.norm(&self.state.get());
+                    cx.emit(TimelineEvent::OpenContextMenu(crate::timeline::state::ContextMenu {
+                        target: crate::timeline::state::ContextMenuTarget::Param {
+                            track,
+                            target: shared::arrangement::AutomationTarget::Synth(*param),
+                            current: Some(current),
+                        },
+                        x: *x,
+                        y: *y,
+                    }));
+                }
+            }
             SynthEvent::SetFilterType(t) => self.state.update(|s| s.filter.filter_type = *t),
             SynthEvent::SetLfo1Target(t) => self.state.update(|s| s.lfo1.target = *t),
             SynthEvent::SetLfo2Target(t) => self.state.update(|s| s.lfo2.target = *t),
@@ -425,7 +445,12 @@ impl Model for SynthModel {
                 let arr = arrangement.with_automation_at(self.playhead.get());
                 for (slot, track) in self.slots.iter().enumerate() {
                     if let Some(patch) = track.and_then(|t| patches.get(&t)) {
-                        let mut snapshot = SynthParams::from_state(patch);
+                        // Carve-parameter automation, applied to a copy.
+                        let mut automated = patch.clone();
+                        if let Some(t) = *track {
+                            arrangement.apply_synth_automation(t, self.playhead.get(), &mut automated);
+                        }
+                        let mut snapshot = SynthParams::from_state(&automated);
                         snapshot.slot = slot as u8;
                         let owning_track = track.and_then(|t| arr.track(t));
                         snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
@@ -501,18 +526,8 @@ impl Model for SynthModel {
 }
 
 // --- Knob position <-> physical unit mappings, shared by every knob. -----
-
-pub fn lin(pos: f32, min: f32, max: f32) -> f32 {
-    min + pos.clamp(0.0, 1.0) * (max - min)
-}
-
 pub fn lin_inv(value: f32, min: f32, max: f32) -> f32 {
     ((value - min) / (max - min)).clamp(0.0, 1.0)
-}
-
-/// Exponential mapping for things that feel right on a log scale (Hz, ms).
-pub fn log(pos: f32, min: f32, max: f32) -> f32 {
-    (min.ln() + pos.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp()
 }
 
 pub fn log_inv(value: f32, min: f32, max: f32) -> f32 {

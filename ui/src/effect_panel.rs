@@ -110,7 +110,7 @@ fn param_knob(
         if let (MouseButton::Right, Some(track)) = (button, track) {
             let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
             cx.emit(TimelineEvent::OpenContextMenu(ContextMenu {
-                target: ContextMenuTarget::Param { track, target: AutomationTarget::Effect { node, param } },
+                target: ContextMenuTarget::Param { track, target: AutomationTarget::Effect { node, param }, current: None },
                 x,
                 y,
             }));

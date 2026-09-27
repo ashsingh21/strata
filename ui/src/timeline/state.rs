@@ -148,7 +148,7 @@ enum Clipboard {
 }
 
 /// What a right-click context menu is showing actions for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ContextMenuTarget {
     Clip(ClipId),
     Track(TrackId),
@@ -160,7 +160,9 @@ pub enum ContextMenuTarget {
     /// An existing marker's own tab.
     Marker { marker: MarkerId },
     /// A parameter's control (an effect knob): offers "Automate <param>".
-    Param { track: TrackId, target: AutomationTarget },
+    /// `current` is the parameter's value when the arrangement can't know
+    /// it (a Carve knob lives in the synth patch).
+    Param { track: TrackId, target: AutomationTarget, current: Option<f32> },
     /// An automation lane's header: offers "Remove automation lane".
     AutomationLane { lane: AutomationLaneId },
 }
@@ -497,7 +499,7 @@ pub enum TimelineEvent {
     /// Creates a lane for `target` on `track` (one breakpoint holding the
     /// parameter's current value, so the sound doesn't change) - or does
     /// nothing if that lane already exists.
-    AutomateParam { track: TrackId, target: AutomationTarget },
+    AutomateParam { track: TrackId, target: AutomationTarget, current: Option<f32> },
     RemoveAutomationLane(AutomationLaneId),
     CloseContextMenu,
     /// A structural marker, added at `tick` with a default name.
@@ -960,11 +962,11 @@ impl Model for TimelineState {
                     stack.do_command(Command::InsertMarker { marker: Marker { id, position: *tick, name } }, arr);
                 });
             }
-            TimelineEvent::AutomateParam { track, target } => {
+            TimelineEvent::AutomateParam { track, target, current } => {
                 let arr = self.arrangement.get();
                 let exists = arr.automation.iter().any(|l| l.track == *track && l.target == Some(*target));
                 if let (false, Some(norm), Some(label)) =
-                    (exists, arr.target_norm(*track, *target), arr.target_label(*track, *target))
+                    (exists, current.or_else(|| arr.target_norm(*track, *target)), arr.target_label(*track, *target))
                 {
                     let mut id = 0;
                     self.with_arrangement(|arr, _| id = arr.alloc_id());

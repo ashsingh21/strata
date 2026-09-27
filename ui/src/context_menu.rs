@@ -111,7 +111,7 @@ pub fn context_menu_view(
                     .any(|l| l.track == track_id && l.target == Some(AutomationTarget::TrackGain));
                 if !gain_automated {
                     item(cx, "Automate gain", move |cx| {
-                        cx.emit(TimelineEvent::AutomateParam { track: track_id, target: AutomationTarget::TrackGain })
+                        cx.emit(TimelineEvent::AutomateParam { track: track_id, target: AutomationTarget::TrackGain, current: None })
                     });
                 }
                 if is_midi {
@@ -148,11 +148,11 @@ pub fn context_menu_view(
                 separator(cx);
                 item(cx, "Delete", move |cx| cx.emit(TimelineEvent::DeleteMarker(marker)));
             }
-            ContextMenuTarget::Param { track, target } => {
+            ContextMenuTarget::Param { track, target, current } => {
                 let already = arr.automation.iter().any(|l| l.track == track && l.target == Some(target));
                 let name = arr.target_label(track, target).unwrap_or_default();
                 let label = if already { format!("{name} is automated") } else { format!("Automate {name}") };
-                item(cx, label, move |cx| cx.emit(TimelineEvent::AutomateParam { track, target }));
+                item(cx, label, move |cx| cx.emit(TimelineEvent::AutomateParam { track, target, current }));
             }
             ContextMenuTarget::AutomationLane { lane } => {
                 item(cx, "Remove automation lane", move |cx| cx.emit(TimelineEvent::RemoveAutomationLane(lane)));

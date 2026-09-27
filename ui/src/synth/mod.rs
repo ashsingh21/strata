@@ -13,7 +13,7 @@ use vizia::prelude::*;
 
 use std::cell::Cell;
 
-use shared::synth::{lfo_mod_depth, FilterType, LfoTarget, SynthState, VoiceMode, Waveform, MAX_UNISON};
+use shared::synth::{lfo_mod_depth, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
 use crate::glyph::{ink_when_on, Glyph, GlyphKind};
 use crate::knob::{Knob, KnobAccentExt};
@@ -24,7 +24,7 @@ use shared::arrangement::ClipColor;
 use display::{EnvelopeDisplay, FilterDisplay, LfoScope, WaveDisplay};
 use keyboard::Keyboard;
 use segmented::segmented;
-use state::{lin, lin_inv, log, log_inv, SynthEvent};
+use state::{lin_inv, log_inv, SynthEvent};
 
 fn update(f: impl Fn(&mut SynthState) + Send + 'static) -> SynthEvent {
     SynthEvent::Update(Box::new(f))
@@ -98,15 +98,17 @@ fn knob(
     theme: Signal<ThemeId>,
     size: KnobSize,
     slot: f32,
-    label: &'static str,
+    param: SynthParam,
     default_pos: f32,
-    to_pos: impl Fn(&SynthState) -> f32 + Copy + 'static,
-    format: impl Fn(&SynthState) -> String + Copy + 'static,
-    apply: impl Fn(&mut SynthState, f32) + Copy + Send + 'static,
     route: Option<LfoTarget>,
 ) {
+    // Name, position, readout and how a position applies all come from the
+    // shared SynthParam table - the same one automation lanes use.
+    let label = param.name();
+    let to_pos = move |s: &SynthState| param.norm(s);
+    let apply = move |s: &mut SynthState, p: f32| param.apply_norm(s, p);
     let pos = state.map(move |s| to_pos(s));
-    let text = state.map(move |s| true_minus(format(s)));
+    let text = state.map(move |s| true_minus(param.format(s)));
     let column = VStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
             let on_change = move |cx: &mut EventContext, p: f32| {
@@ -133,6 +135,13 @@ fn knob(
         Label::new(cx, text).class("value");
     })
     .class("knob-col")
+    // Right-click: "Automate Carve · <param>" on the selected track.
+    .on_mouse_down(move |cx, button| {
+        if button == MouseButton::Right {
+            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            cx.emit(SynthEvent::OpenAutomateMenu { param, x, y });
+        }
+    })
     .alignment(Alignment::Center)
     .gap(Pixels(2.0))
     .padding(Pixels(2.0))
@@ -225,11 +234,6 @@ const OCTAVE_RANGE: f32 = 3.0;
 fn octave_pos(octave: i8) -> f32 {
     lin_inv(octave as f32, -OCTAVE_RANGE, OCTAVE_RANGE)
 }
-
-fn octave_from_pos(p: f32) -> i8 {
-    lin(p, -OCTAVE_RANGE, OCTAVE_RANGE).round() as i8
-}
-
 const OSC_WIDTH: f32 = 256.0;
 
 // Fixed row heights (not `Auto`): sections stretch to fill their row so
@@ -245,22 +249,10 @@ fn osc1_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Theme
     section(cx, "Oscillator 1", move |cx| waveform_seg(cx, state, theme, true), move |cx| {
         WaveDisplay::new(cx, state, theme, |s| s.osc1).width(Stretch(1.0)).height(Pixels(44.0)).class("synth-disp");
         knob_row(cx, move |cx| {
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Octave", octave_pos(-1),
-                |s| octave_pos(s.osc1.octave),
-                |s| format!("{:+}", s.osc1.octave),
-                |s, p| s.osc1.octave = octave_from_pos(p), None);
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Tune", lin_inv(0.0, -100.0, 100.0),
-                |s| lin_inv(s.osc1.knob_a_cents, -100.0, 100.0),
-                |s| format!("{:.0} ct", s.osc1.knob_a_cents),
-                |s, p| s.osc1.knob_a_cents = lin(p, -100.0, 100.0), Some(LfoTarget::Pitch));
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Shape", 0.35,
-                |s| s.osc1.knob_b,
-                |s| format!("{:.0}%", s.osc1.knob_b * 100.0),
-                |s, p| s.osc1.knob_b = p, None);
-            knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, "Drift", 0.12,
-                |s| s.osc1.knob_c,
-                |s| format!("{:.0}%", s.osc1.knob_c * 100.0),
-                |s, p| s.osc1.knob_c = p, None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Octave, octave_pos(-1), None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Tune, lin_inv(0.0, -100.0, 100.0), Some(LfoTarget::Pitch));
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Shape, 0.35, None);
+            knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, SynthParam::Osc1Drift, 0.12, None);
         });
     })
     .width(Pixels(OSC_WIDTH));
@@ -282,22 +274,10 @@ fn osc2_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Theme
         move |cx| {
             WaveDisplay::new(cx, state, theme, |s| s.osc2).width(Stretch(1.0)).height(Pixels(44.0)).class("synth-disp");
             knob_row(cx, move |cx| {
-                knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, "Octave", octave_pos(0),
-                    |s| octave_pos(s.osc2.octave),
-                    |s| format!("{:+}", s.osc2.octave),
-                    |s, p| s.osc2.octave = octave_from_pos(p), None);
-                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Detune", lin_inv(0.0, -50.0, 50.0),
-                    |s| lin_inv(s.osc2.knob_a_cents, -50.0, 50.0),
-                    |s| format!("{:+.0} ct", s.osc2.knob_a_cents),
-                    |s, p| s.osc2.knob_a_cents = lin(p, -50.0, 50.0), None);
-                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Pulse width", 0.38,
-                    |s| s.osc2.knob_b,
-                    |s| format!("{:.0}%", s.osc2.knob_b * 100.0),
-                    |s, p| s.osc2.knob_b = p, Some(LfoTarget::PulseWidth));
-                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "FM", 0.0,
-                    |s| s.osc2.knob_c,
-                    |s| format!("{:.0}%", s.osc2.knob_c * 100.0),
-                    |s, p| s.osc2.knob_c = p, None);
+                knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, SynthParam::Osc2Octave, octave_pos(0), None);
+                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2Detune, lin_inv(0.0, -50.0, 50.0), None);
+                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2PulseWidth, 0.38, Some(LfoTarget::PulseWidth));
+                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2Fm, 0.0, None);
             });
         },
     )
@@ -306,21 +286,18 @@ fn osc2_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Theme
 
 fn mix_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Mixer", |_| {}, move |cx| {
-        let db_knob = |cx: &mut Context, label: &'static str, default_db: f32, get: fn(&SynthState) -> f32, set: fn(&mut SynthState, f32)| {
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, label, lin_inv(default_db, -60.0, 0.0),
-                move |s| lin_inv(get(s), -60.0, 0.0),
-                move |s| format!("{:.1} dB", get(s)),
-                move |s, p| set(s, lin(p, -60.0, 0.0)), None);
+        let db_knob = |cx: &mut Context, param: SynthParam, default_db: f32| {
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, param, lin_inv(default_db, -60.0, 0.0), None);
         };
         HStack::new(cx, move |cx| {
-            db_knob(cx, "Osc 1", -1.9, |s| s.mix.osc1_db, |s, v| s.mix.osc1_db = v);
-            db_knob(cx, "Osc 2", -5.2, |s| s.mix.osc2_db, |s, v| s.mix.osc2_db = v);
+            db_knob(cx, SynthParam::Osc1Level, -1.9);
+            db_knob(cx, SynthParam::Osc2Level, -5.2);
         })
         .gap(Pixels(tokens::SPACE_3))
         .size(Auto);
         HStack::new(cx, move |cx| {
-            db_knob(cx, "Sub", -10.0, |s| s.mix.sub_db, |s, v| s.mix.sub_db = v);
-            db_knob(cx, "Noise", -28.0, |s| s.mix.noise_db, |s, v| s.mix.noise_db = v);
+            db_knob(cx, SynthParam::SubLevel, -10.0);
+            db_knob(cx, SynthParam::NoiseLevel, -28.0);
         })
         .gap(Pixels(tokens::SPACE_3))
         .size(Auto);
@@ -347,69 +324,22 @@ fn filter_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<The
             FilterDisplay::new(cx, state, theme).width(Stretch(1.0)).height(Pixels(88.0)).class("synth-disp");
             let slot = tokens::SIZE_KNOB_LG;
             knob_row(cx, move |cx| {
-                knob(cx, state, theme, KnobSize::Lg, slot, "Cutoff", log_inv(1200.0, 20.0, 20_000.0),
-                    |s| log_inv(s.filter.cutoff_hz, 20.0, 20_000.0),
-                    |s| format_hz(s.filter.cutoff_hz),
-                    |s, p| s.filter.cutoff_hz = log(p, 20.0, 20_000.0),
-                    Some(LfoTarget::Cutoff));
-                knob(cx, state, theme, KnobSize::Md, slot, "Resonance", 0.62,
-                    |s| s.filter.resonance,
-                    |s| format!("{:.0}%", s.filter.resonance * 100.0),
-                    |s, p| s.filter.resonance = p, Some(LfoTarget::Resonance));
-                knob(cx, state, theme, KnobSize::Md, slot, "Drive", lin_inv(4.5, 0.0, 24.0),
-                    |s| lin_inv(s.filter.drive_db, 0.0, 24.0),
-                    |s| format!("{:+.1} dB", s.filter.drive_db),
-                    |s, p| s.filter.drive_db = lin(p, 0.0, 24.0), None);
-                knob(cx, state, theme, KnobSize::Md, slot, "Env amount", lin_inv(2.4, -4.0, 4.0),
-                    |s| lin_inv(s.filter.env_amount_oct, -4.0, 4.0),
-                    |s| format!("{:+.1} oct", s.filter.env_amount_oct),
-                    |s, p| s.filter.env_amount_oct = lin(p, -4.0, 4.0), None);
-                knob(cx, state, theme, KnobSize::Sm, slot, "Key track", 0.5,
-                    |s| s.filter.key_track,
-                    |s| format!("{:.0}%", s.filter.key_track * 100.0),
-                    |s, p| s.filter.key_track = p, None);
+                knob(cx, state, theme, KnobSize::Lg, slot, SynthParam::Cutoff, log_inv(1200.0, 20.0, 20_000.0), Some(LfoTarget::Cutoff));
+                knob(cx, state, theme, KnobSize::Md, slot, SynthParam::Resonance, 0.62, Some(LfoTarget::Resonance));
+                knob(cx, state, theme, KnobSize::Md, slot, SynthParam::Drive, lin_inv(4.5, 0.0, 24.0), None);
+                knob(cx, state, theme, KnobSize::Md, slot, SynthParam::EnvAmount, lin_inv(2.4, -4.0, 4.0), None);
+                knob(cx, state, theme, KnobSize::Sm, slot, SynthParam::KeyTrack, 0.5, None);
             });
         },
     )
     .width(Stretch(1.0));
 }
-
-fn format_hz(hz: f32) -> String {
-    if hz >= 1000.0 {
-        format!("{:.2} kHz", hz / 1000.0)
-    } else {
-        format!("{hz:.0} Hz")
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn adsr_knobs(
-    cx: &mut Context,
-    state: Signal<SynthState>,
-    theme: Signal<ThemeId>,
-    get: fn(&SynthState) -> shared::synth::Envelope,
-    set_a: fn(&mut SynthState, f32),
-    set_d: fn(&mut SynthState, f32),
-    set_s: fn(&mut SynthState, f32),
-    set_r: fn(&mut SynthState, f32),
-) {
+fn adsr_knobs(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>, params: [SynthParam; 4]) {
     knob_row(cx, move |cx| {
-        knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Attack", log_inv(get(&state.get()).attack_ms, 1.0, 2000.0),
-            move |s| log_inv(get(s).attack_ms, 1.0, 2000.0),
-            move |s| format!("{:.0} ms", get(s).attack_ms),
-            move |s, p| set_a(s, log(p, 1.0, 2000.0)), None);
-        knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Decay", log_inv(get(&state.get()).decay_ms, 1.0, 2000.0),
-            move |s| log_inv(get(s).decay_ms, 1.0, 2000.0),
-            move |s| format!("{:.0} ms", get(s).decay_ms),
-            move |s, p| set_d(s, log(p, 1.0, 2000.0)), None);
-        knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Sustain", get(&state.get()).sustain,
-            move |s| get(s).sustain,
-            move |s| format!("{:.0}%", get(s).sustain * 100.0),
-            set_s, None);
-        knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Release", log_inv(get(&state.get()).release_ms, 1.0, 2000.0),
-            move |s| log_inv(get(s).release_ms, 1.0, 2000.0),
-            move |s| format!("{:.0} ms", get(s).release_ms),
-            move |s, p| set_r(s, log(p, 1.0, 2000.0)), None);
+        for param in params {
+            // Default (double-click) = the value the section opened with.
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, param, param.norm(&state.get()), None);
+        }
     });
 }
 
@@ -421,11 +351,7 @@ fn filter_env_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal
             .class("synth-disp");
         adsr_knobs(
             cx, state, theme,
-            |s| s.filter_env,
-            |s, v| s.filter_env.attack_ms = v,
-            |s, v| s.filter_env.decay_ms = v,
-            |s, v| s.filter_env.sustain = v,
-            |s, v| s.filter_env.release_ms = v,
+            [SynthParam::FilterAttack, SynthParam::FilterDecay, SynthParam::FilterSustain, SynthParam::FilterRelease],
         );
     })
     .width(Stretch(1.0));
@@ -439,11 +365,7 @@ fn amp_env_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Th
             .class("synth-disp");
         adsr_knobs(
             cx, state, theme,
-            |s| s.amp_env,
-            |s, v| s.amp_env.attack_ms = v,
-            |s, v| s.amp_env.decay_ms = v,
-            |s, v| s.amp_env.sustain = v,
-            |s, v| s.amp_env.release_ms = v,
+            [SynthParam::AmpAttack, SynthParam::AmpDecay, SynthParam::AmpSustain, SynthParam::AmpRelease],
         );
     })
     .width(Stretch(1.0));
@@ -456,21 +378,15 @@ fn lfo_column(
     state: Signal<SynthState>,
     theme: Signal<ThemeId>,
     lfo: fn(&SynthState) -> &shared::synth::Lfo,
-    lfo_mut: fn(&mut SynthState) -> &mut shared::synth::Lfo,
+    params: (SynthParam, SynthParam),
     set_target: fn(LfoTarget) -> SynthEvent,
     phase: Signal<f32>,
 ) {
     VStack::new(cx, move |cx| {
         LfoScope::new(cx, state, theme, phase, lfo).width(Stretch(1.0)).height(Pixels(40.0)).class("synth-disp");
         HStack::new(cx, move |cx| {
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Rate", lfo(&state.get()).rate_norm,
-                move |s| lfo(s).rate_norm,
-                move |s| format!("{:.2} Hz", shared::synth::lfo_rate_hz(lfo(s).rate_norm)),
-                move |s, p| lfo_mut(s).rate_norm = p, None);
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Depth", lfo(&state.get()).depth,
-                move |s| lfo(s).depth,
-                move |s| format!("{:.0}%", lfo(s).depth * 100.0),
-                move |s, p| lfo_mut(s).depth = p, None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, params.0, lfo(&state.get()).rate_norm, None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, params.1, lfo(&state.get()).depth, None);
         })
         .gap(Pixels(tokens::SPACE_1))
         .size(Auto);
@@ -519,10 +435,10 @@ fn mod_section(
             // Each LFO is its own column - scope, knobs, then its Sync and
             // target - lined up under its own pill in the header.
             HStack::new(cx, move |cx| {
-                lfo_column(cx, state, theme, |s| &s.lfo1, |s| &mut s.lfo1,
+                lfo_column(cx, state, theme, |s| &s.lfo1, (SynthParam::Lfo1Rate, SynthParam::Lfo1Depth),
                     SynthEvent::SetLfo1Target, lfo_phases.0);
                 Element::new(cx).class("hairline").width(Pixels(1.0)).height(Stretch(1.0));
-                lfo_column(cx, state, theme, |s| &s.lfo2, |s| &mut s.lfo2,
+                lfo_column(cx, state, theme, |s| &s.lfo2, (SynthParam::Lfo2Rate, SynthParam::Lfo2Depth),
                     SynthEvent::SetLfo2Target, lfo_phases.1);
             })
             .gap(Stretch(1.0))
@@ -535,23 +451,13 @@ fn mod_section(
 
 fn unison_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Unison", |_| {}, move |cx| {
-        let max = MAX_UNISON as f32;
         HStack::new(cx, move |cx| {
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Voices", 0.0,
-                move |s| lin_inv(s.unison.voices as f32, 1.0, max),
-                |s| if s.unison.voices <= 1 { "Off".to_string() } else { format!("{}", s.unison.voices) },
-                move |s, p| s.unison.voices = lin(p, 1.0, max).round() as u8, None);
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Detune", lin_inv(14.0, 0.0, 50.0),
-                |s| lin_inv(s.unison.detune_cents, 0.0, 50.0),
-                |s| format!("{:.0} ct", s.unison.detune_cents),
-                |s, p| s.unison.detune_cents = lin(p, 0.0, 50.0), None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::UnisonVoices, 0.0, None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::UnisonDetune, lin_inv(14.0, 0.0, 50.0), None);
         })
         .gap(Pixels(tokens::SPACE_1))
         .size(Auto);
-        knob(cx, state, theme, KnobSize::Sm, tokens::SIZE_KNOB_SM, "Width", 0.7,
-            |s| s.unison.width,
-            |s| format!("{:.0}%", s.unison.width * 100.0),
-            |s, p| s.unison.width = p, None);
+        knob(cx, state, theme, KnobSize::Sm, tokens::SIZE_KNOB_SM, SynthParam::UnisonWidth, 0.7, None);
     })
     .alignment(Alignment::TopCenter)
     .width(Auto);
@@ -560,26 +466,14 @@ fn unison_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<The
 fn fx_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Effects", |_| {}, move |cx| {
         HStack::new(cx, move |cx| {
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Chorus", 0.0,
-                |s| s.fx.chorus_mix,
-                |s| format!("{:.0}%", s.fx.chorus_mix * 100.0),
-                |s, p| s.fx.chorus_mix = p, None);
-            knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, "Depth", 0.4,
-                |s| s.fx.chorus_depth,
-                |s| format!("{:.0}%", s.fx.chorus_depth * 100.0),
-                |s, p| s.fx.chorus_depth = p, None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::ChorusMix, 0.0, None);
+            knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, SynthParam::ChorusDepth, 0.4, None);
         })
         .gap(Pixels(tokens::SPACE_1))
         .size(Auto);
         HStack::new(cx, move |cx| {
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Reverb", 0.0,
-                |s| s.fx.reverb_mix,
-                |s| format!("{:.0}%", s.fx.reverb_mix * 100.0),
-                |s, p| s.fx.reverb_mix = p, None);
-            knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, "Size", 0.5,
-                |s| s.fx.reverb_size,
-                |s| format!("{:.0}%", s.fx.reverb_size * 100.0),
-                |s, p| s.fx.reverb_size = p, None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::ReverbMix, 0.0, None);
+            knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, SynthParam::ReverbSize, 0.5, None);
         })
         .gap(Pixels(tokens::SPACE_1))
         .size(Auto);
@@ -597,14 +491,8 @@ fn out_section(
     section(cx, "Output", |_| {}, move |cx| {
         HStack::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
-                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, "Volume", lin_inv(-3.0, -60.0, 6.0),
-                    |s| lin_inv(s.output.volume_db, -60.0, 6.0),
-                    |s| format!("{:.1} dB", s.output.volume_db),
-                    |s, p| s.output.volume_db = lin(p, -60.0, 6.0), None);
-                knob(cx, state, theme, KnobSize::Sm, tokens::SIZE_KNOB_SM, "Glide", log_inv(40.0, 1.0, 500.0),
-                    |s| log_inv(s.output.glide_ms, 1.0, 500.0),
-                    |s| format!("{:.0} ms", s.output.glide_ms),
-                    |s, p| s.output.glide_ms = log(p, 1.0, 500.0), None);
+                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Volume, lin_inv(-3.0, -60.0, 6.0), None);
+                knob(cx, state, theme, KnobSize::Sm, tokens::SIZE_KNOB_SM, SynthParam::Glide, log_inv(40.0, 1.0, 500.0), None);
             })
             .gap(Pixels(tokens::SPACE_2))
             .size(Auto);
