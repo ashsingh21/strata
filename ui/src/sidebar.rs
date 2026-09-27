@@ -49,6 +49,37 @@ fn row<'a>(cx: &'a mut Context, name: String, query: Signal<String>, nested: boo
         .height(Pixels(24.0))
 }
 
+/// A lesson in the Learn list: its title, and “Done” on the right once
+/// it's been finished.
+fn lesson_row<'a>(cx: &'a mut Context, title: &'static str, finished: bool, query: Signal<String>) -> Handle<'a, Button> {
+    let needle = title.to_lowercase();
+    Button::new(cx, move |cx| {
+        HStack::new(cx, move |cx| {
+            Label::new(cx, title)
+                .class("body")
+                .text_wrap(false)
+                .text_overflow(TextOverflow::Ellipsis)
+                .hoverable(false)
+                .width(Stretch(1.0));
+            if finished {
+                Label::new(cx, "Done").class("value").hoverable(false).width(Auto);
+            }
+        })
+        .alignment(Alignment::Left)
+        .hoverable(false)
+        .width(Stretch(1.0))
+        .height(Auto)
+    })
+    .class("side-row")
+    .class("nested")
+    .toggle_class("hidden", query.map(move |q| !q.is_empty() && !needle.contains(&q.to_lowercase())))
+    .alignment(Alignment::Left)
+    .padding_left(Pixels(24.0))
+    .padding_right(Pixels(crate::tokens::SPACE_3))
+    .width(Stretch(1.0))
+    .height(Pixels(24.0))
+}
+
 pub fn sidebar(
     cx: &mut Context,
     arrangement: Signal<Arrangement>,
@@ -70,14 +101,25 @@ pub fn sidebar(
 
         ScrollView::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
-                // The course: each lesson opens its own starting project.
+                // The course, grouped: each lesson opens its own starting
+                // project. A finished one says so on the right.
                 let lessons = crate::lessons::course::LESSONS;
                 section_head(cx, "Learn", lessons.len());
                 Binding::new(cx, lessons_done, move |cx| {
                     let done = lessons_done.get();
+                    let mut group = "";
                     for (i, lesson) in lessons.iter().enumerate() {
-                        let mark = if done.iter().any(|d| d == lesson.id) { "\u{2713} " } else { "" };
-                        row(cx, format!("{mark}{}. {}", i + 1, lesson.title), query, true)
+                        if lesson.group != group {
+                            group = lesson.group;
+                            Label::new(cx, group)
+                                .class("value")
+                                .class("side-subhead")
+                                .padding_left(Pixels(crate::tokens::SPACE_3))
+                                .padding_top(Pixels(crate::tokens::SPACE_1))
+                                .height(Pixels(20.0));
+                        }
+                        let finished = done.iter().any(|d| d == lesson.id);
+                        lesson_row(cx, lesson.title, finished, query)
                             .toggle_class("is-on", lessons_active.map(move |a| a.is_some_and(|(l, _)| l == i)))
                             .on_press(move |cx| cx.emit(crate::project::ProjectEvent::StartLesson(i)));
                     }

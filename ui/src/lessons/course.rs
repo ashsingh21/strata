@@ -29,9 +29,15 @@ pub struct Step {
 pub struct Lesson {
     /// Matches `shared::lessons` (starting project) and the saved "done" list.
     pub id: &'static str,
+    /// The sidebar heading it's listed under.
+    pub group: &'static str,
     pub title: &'static str,
     pub steps: &'static [Step],
 }
+
+pub const BASICS: &str = "Basics";
+pub const CARVE: &str = "Carve synth";
+pub const RECIPES: &str = "Recipes";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, hint, kind: Kind::Action { check, target } }
@@ -44,6 +50,7 @@ const fn info(text: &'static str) -> Step {
 pub const LESSONS: &[Lesson] = &[
     Lesson {
         id: FIRST_BEAT,
+        group: BASICS,
         title: "Your first beat",
         steps: &[
             act(
@@ -96,6 +103,7 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: BASSLINE,
+        group: BASICS,
         title: "A bassline",
         steps: &[
             act(
@@ -143,6 +151,7 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: CHORDS,
+        group: BASICS,
         title: "Chords",
         steps: &[
             act(
@@ -190,7 +199,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: CARVE_WAVES,
-        title: "Carve: waves",
+        group: CARVE,
+        title: "Waves",
         steps: &[
             act(
                 "Press Space. This is Oscillator 1 playing a saw wave: bright and buzzy, because it holds every harmonic.",
@@ -227,7 +237,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: CARVE_MIX,
-        title: "Carve: mixing oscillators",
+        group: CARVE,
+        title: "Mixing oscillators",
         steps: &[
             act("Press Space: one saw, held.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(
@@ -268,7 +279,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: CARVE_FILTER,
-        title: "Carve: the filter",
+        group: CARVE,
+        title: "The filter",
         steps: &[
             act("Press Space: a bright saw riff.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(
@@ -309,7 +321,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: CARVE_ENVELOPES,
-        title: "Carve: envelopes",
+        group: CARVE,
+        title: "Envelopes",
         steps: &[
             act("Press Space.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(
@@ -356,7 +369,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: CARVE_MOVEMENT,
-        title: "Carve: movement",
+        group: CARVE,
+        title: "Movement",
         steps: &[
             act("Press Space: two held chords.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(
@@ -409,7 +423,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: RECIPE_BASS,
-        title: "Recipe: deep bass",
+        group: RECIPES,
+        title: "Deep bass",
         steps: &[
             act("Press Space: a beat and a plain saw bass.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(
@@ -468,7 +483,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: RECIPE_FLUTE,
-        title: "Recipe: flute",
+        group: RECIPES,
+        title: "Flute",
         steps: &[
             act("Press Space: a slow melody, on a buzzy saw for now.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(
@@ -521,7 +537,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: RECIPE_HARP,
-        title: "Recipe: Indian harp",
+        group: RECIPES,
+        title: "Indian harp",
         steps: &[
             act(
                 "Press Space. This cascade uses the notes of raga Malkauns (A, C, D, F, G), a late-night raga.",
@@ -606,7 +623,8 @@ pub const LESSONS: &[Lesson] = &[
     },
     Lesson {
         id: RECIPE_LEAD,
-        title: "Recipe: lead melody",
+        group: RECIPES,
+        title: "Lead melody",
         steps: &[
             act("Press Space: a beat and a hook on a plain saw.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             act(

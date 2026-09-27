@@ -83,6 +83,7 @@ pub fn timeline_view(
                 );
             })
             .class("tl-corner")
+            .padding_left(Pixels(tokens::SPACE_3))
             .alignment(Alignment::Left)
             .gap(Pixels(tokens::SPACE_2))
             .width(Pixels(HEAD_WIDTH))

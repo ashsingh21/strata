@@ -341,7 +341,7 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
     })
     .gap(Pixels(tokens::SPACE_2))
-    .padding_left(Pixels(tokens::SPACE_1))
+    .padding_left(Pixels(tokens::SPACE_3))
     .alignment(Alignment::Left)
     .width(Stretch(1.0))
     .height(Pixels(tokens::SIZE_CONTROL + 6.0));

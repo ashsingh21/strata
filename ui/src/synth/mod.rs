@@ -650,6 +650,8 @@ pub fn synth_view(
         .class("synth-devhead")
         .gap(Pixels(tokens::SPACE_2))
         .alignment(Alignment::Left)
+        .padding_left(Pixels(tokens::SPACE_3))
+        .padding_right(Pixels(tokens::SPACE_3))
         .width(Stretch(1.0))
         .height(Pixels(tokens::SIZE_TOOLBAR));
         hrule(cx);

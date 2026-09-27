@@ -205,6 +205,8 @@ pub fn piano_roll_view(
         .class("synth-devhead")
         .gap(Pixels(tokens::SPACE_2))
         .alignment(Alignment::Left)
+        .padding_left(Pixels(tokens::SPACE_3))
+        .padding_right(Pixels(tokens::SPACE_3))
         .width(Stretch(1.0))
         .height(Pixels(tokens::SIZE_TOOLBAR));
         Element::new(cx).class("hairline").width(Stretch(1.0)).height(Pixels(1.0));
@@ -247,6 +249,9 @@ pub fn piano_roll_view(
         .height(Pixels(26.0));
     })
     .class("device")
+    // Breathing room so the grid's row labels don't sit on the edge.
+    .padding_left(Pixels(tokens::SPACE_2))
+    .padding_right(Pixels(tokens::SPACE_2))
     .width(Stretch(1.0))
     .height(Auto);
 }

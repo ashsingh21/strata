@@ -28,7 +28,7 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
         let s = &l.steps[step];
         HStack::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
-                Label::new(cx, format!("Lesson {} \u{b7} {}", lesson + 1, l.title)).class("label");
+                Label::new(cx, format!("{} \u{b7} {}", l.group, l.title)).class("label");
                 // Progress: a filled square per step done, the current one
                 // outlined.
                 let dots: String = (0..l.steps.len())
