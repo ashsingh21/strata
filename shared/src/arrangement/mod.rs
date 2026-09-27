@@ -3,6 +3,7 @@
 //! logic only - no Vizia, no audio I/O - so `cargo test -p shared` covers
 //! all of it without pulling in the GUI or engine stack.
 
+pub mod automation;
 pub mod commands;
 pub mod model;
 pub mod peaks;
@@ -12,6 +13,7 @@ pub mod step_entry;
 pub mod time;
 pub mod transform;
 
+pub use automation::{fader_pos_to_gain_db, gain_db_to_fader_pos, AutomationTarget};
 pub use commands::{Command, CommandStack};
 pub use model::{
     DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT,

@@ -606,6 +606,7 @@ mod tests {
             parameter_name: "Cutoff".into(),
             display_value: "2.4 kHz".into(),
             breakpoints: vec![],
+            target: None,
         });
         let mut stack = CommandStack::new();
 
@@ -733,6 +734,7 @@ mod tests {
             parameter_name: "Gain".into(),
             display_value: "0 dB".into(),
             breakpoints: vec![Breakpoint { tick: 0, value: 0.5 }],
+            target: None,
         });
         // An untouched clip on the other track shouldn't be affected.
         arr.clips.push(audio_clip(2, 1, 0, PPQ * 4));

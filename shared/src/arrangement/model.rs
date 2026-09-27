@@ -575,6 +575,10 @@ pub struct AutomationLane {
     pub display_value: String,
     /// Sorted by tick.
     pub breakpoints: Vec<Breakpoint>,
+    /// What this lane controls. `None` for lanes from before automation was
+    /// audible (and the demo seed lane) - those only draw.
+    #[serde(default)]
+    pub target: Option<super::automation::AutomationTarget>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -179,6 +179,9 @@ pub fn seed_arrangement() -> Arrangement {
             Breakpoint { tick: BAR * 12, value: 0.35 },
             Breakpoint { tick: BAR * 16, value: 0.35 },
         ],
+        // Carve's cutoff isn't an automation target yet (synth params
+        // come in a later phase), so this demo lane only draws.
+        target: None,
     });
 
     // -- Pad: one long MIDI clip spanning the whole arrangement. -------
