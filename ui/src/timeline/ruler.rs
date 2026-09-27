@@ -243,6 +243,9 @@ impl View for Ruler {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let _hidpi = crate::hidpi::scale(cx, canvas);
         let bounds = cx.lbounds();
+        // Markers and bar numbers scrolled off the left edge were drawn
+        // over the Snap / Select / Draw corner.
+        crate::hidpi::clip(canvas, bounds);
         let palette = self.theme.get().palette();
         let arr = self.arrangement.get();
         let transform = self.transform.get();

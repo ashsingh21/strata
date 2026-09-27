@@ -240,6 +240,7 @@ impl View for LaneArea {
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let _hidpi = crate::hidpi::scale(cx, canvas);
+        crate::hidpi::clip(canvas, cx.lbounds());
         self.draw_impl(cx, canvas);
         self.draw_scrollbars(cx, canvas);
     }
@@ -1496,6 +1497,7 @@ impl View for PlayheadOverlay {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let _hidpi = crate::hidpi::scale(cx, canvas);
         let bounds = cx.lbounds();
+        crate::hidpi::clip(canvas, bounds);
         let palette = self.theme.get().palette();
         let transform = self.transform.get();
         let playhead_x = bounds.x + transform.tick_to_x(self.playhead.get()) as f32;

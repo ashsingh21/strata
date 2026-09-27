@@ -302,6 +302,7 @@ impl View for Grid {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let _hidpi = crate::hidpi::scale(cx, canvas);
         let bounds = cx.lbounds();
+        crate::hidpi::clip(canvas, bounds);
         let p: Palette = self.theme.get().palette();
         let Some((_clip_id, clip_start, clip_length, notes)) = self.clip_info() else { return };
         if clip_length <= 0 {

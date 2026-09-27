@@ -22,6 +22,15 @@ pub fn scale<'a>(cx: &DrawContext, canvas: &'a Canvas) -> ScaledCanvas<'a> {
     ScaledCanvas(canvas)
 }
 
+/// Clips drawing to `bounds` (logical, from `lbounds`) until the scale
+/// guard drops. For canvases whose content scrolls past their edges (the
+/// ruler, the timeline, the piano roll): Skia doesn't clip to a view's
+/// layout bounds, so off-screen markers, clips and lines painted over
+/// the panels beside them.
+pub fn clip(canvas: &Canvas, bounds: BoundingBox) {
+    canvas.clip_rect(vizia::vg::Rect::new(bounds.x, bounds.y, bounds.x + bounds.w, bounds.y + bounds.h), None, true);
+}
+
 pub struct ScaledCanvas<'a>(&'a Canvas);
 
 impl Drop for ScaledCanvas<'_> {
