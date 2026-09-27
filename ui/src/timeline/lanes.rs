@@ -133,6 +133,11 @@ pub struct LaneArea {
     recording_preview: Signal<Option<RecordingPreview>>,
     live_peaks: Signal<Arc<[f32]>>,
     tool: Signal<TimelineTool>,
+    /// Set from `on_mouse_move` whenever the cursor is over a clip's
+    /// trim edge (and back to `Default` when it isn't) - purely a visual
+    /// hint before any drag starts; the actual edge hit-test at drag time
+    /// (`on_mouse_down`) is separate and authoritative.
+    hover_cursor: Signal<CursorIcon>,
     drag: Option<Drag>,
     last_click: Option<(Instant, f32, f32)>,
 }
@@ -164,6 +169,7 @@ impl LaneArea {
         // path this file otherwise guards so carefully), and it's what
         // makes the in-progress clip draw a live waveform instead of
         // sitting flat until the take is decoded.
+        let hover_cursor: Signal<CursorIcon> = Signal::new(CursorIcon::Default);
         Self {
             arrangement,
             transform,
@@ -173,6 +179,7 @@ impl LaneArea {
             recording_preview,
             live_peaks,
             tool,
+            hover_cursor,
             drag: None,
             last_click: None,
         }
@@ -184,6 +191,7 @@ impl LaneArea {
         .bind(theme, |mut h| h.needs_redraw())
         .bind(recording_preview, |mut h| h.needs_redraw())
         .bind(live_peaks, |mut h| h.needs_redraw())
+        .cursor(hover_cursor)
     }
 }
 
@@ -431,7 +439,48 @@ impl LaneArea {
         cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target, x: window_x, y: window_y }));
     }
 
+    /// Whether (lx, ly) (local, unscrolled) sits over a clip's trim edge -
+    /// a read-only query shared by the hover cursor and (via its own
+    /// independent copy of this hit-test) `on_mouse_down`'s decision to
+    /// start a `Drag::TrimClip`.
+    fn edge_hover_at(&self, lx: f32, ly: f32) -> bool {
+        let transform = self.transform.get();
+        let arr = self.arrangement.get();
+        let rows = build_rows(&arr);
+        let y_scrolled = ly + transform.scroll_y as f32;
+        let tick = transform.x_to_tick(lx as f64);
+        let Some(row_index) = row_at_y(&rows, y_scrolled) else { return false };
+        let RowKind::Track(track_id) = rows[row_index].kind else { return false };
+        let Some(clip) =
+            arr.clips.iter().filter(|c| c.track == track_id).rev().find(|c| tick >= c.start && tick < c.end())
+        else {
+            return false;
+        };
+        let start_x = transform.tick_to_x(clip.start) as f32;
+        let end_x = transform.tick_to_x(clip.end()) as f32;
+        let grab_px = EDGE_GRAB_PX.min((end_x - start_x) / 4.0).max(1.0);
+        (lx - start_x).abs() <= grab_px || (lx - end_x).abs() <= grab_px
+    }
+
     fn on_mouse_move(&mut self, cx: &mut EventContext, x: f32, y: f32) {
+        if self.drag.is_none() {
+            let bounds = cx.bounds();
+            let (lx, ly) = (x - bounds.x, y - bounds.y);
+            let icon = if self.edge_hover_at(lx, ly) { CursorIcon::EwResize } else { CursorIcon::Default };
+            if self.hover_cursor.get() != icon {
+                self.hover_cursor.set(icon);
+                // The reactive `.cursor(hover_cursor)` binding alone
+                // doesn't repaint the OS cursor here: Vizia only re-reads
+                // an entity's `cursor` style (`hover.rs::hover_system`)
+                // when the *hovered entity itself* changes, never on a
+                // style value changing while the same (one large canvas)
+                // entity stays hovered - unlike `TrackResizeHandle`,
+                // which is its own small entity, so simply entering it
+                // triggers that same check. Applying it directly here is
+                // the actual fix, not just belt-and-suspenders.
+                cx.emit(WindowEvent::SetCursor(icon));
+            }
+        }
         if let Some(Drag::ScrollThumb { .. }) = self.drag {
             let b = cx.bounds();
             let (cw, ch) = self.content_size();
@@ -741,6 +790,18 @@ impl LaneArea {
                         length = playhead - clip.start;
                     }
                 }
+                // While a clip is being trimmed, only `start`/`length` (and
+                // so the box's own on-screen position) live-preview here -
+                // `clip` itself stays the original, uncommitted-drag data
+                // until mouse-up actually applies `Command::TrimClip`. If
+                // the waveform below queried `clip` directly it'd keep
+                // asking for the *original* sample range and squeeze it
+                // into the shrinking/growing box - looking squished
+                // rather than trimmed until release. So build a real
+                // preview `Clip` (mirroring `Command::TrimClip`'s own
+                // `source_offset_samples` adjustment) and draw *that*
+                // instead, whenever this is the clip being trimmed.
+                let mut trimmed_preview = None;
                 if let Some((trim_clip, edge, orig_start, orig_length, delta_ticks)) = drag_trim {
                     if trim_clip == clip.id {
                         match edge {
@@ -752,8 +813,21 @@ impl LaneArea {
                                 length = (orig_length + delta_ticks).max(1);
                             }
                         }
+                        let mut preview = clip.clone();
+                        preview.start = start;
+                        preview.length = length;
+                        if let (Edge::Start, ClipContent::Audio { source_offset_samples, .. }) =
+                            (edge, &mut preview.content)
+                        {
+                            let bpm = arr.tempo_map.bpm_at(start);
+                            let seconds = ((start - orig_start) as f64 / shared::arrangement::PPQ as f64) * (60.0 / bpm);
+                            let delta_samples = (seconds * 48_000.0).round() as i64;
+                            *source_offset_samples = (*source_offset_samples as i64 + delta_samples).max(0) as u64;
+                        }
+                        trimmed_preview = Some(preview);
                     }
                 }
+                let clip = trimmed_preview.as_ref().unwrap_or(clip);
 
                 let x0_raw = bounds.x + transform.tick_to_x(start) as f32;
                 let x1_raw = bounds.x + transform.tick_to_x(start + length) as f32;
