@@ -39,6 +39,8 @@ pub struct Ruler {
     /// Live loop-range preview while dragging; committed as one command on
     /// mouse-up so a drag is a single undo step.
     loop_preview: Option<LoopRange>,
+    /// The cursor last set, so it's only sent when it changes.
+    cursor: Option<CursorIcon>,
 }
 
 impl Ruler {
@@ -50,13 +52,34 @@ impl Ruler {
         theme: Signal<ThemeId>,
         loop_on: Signal<bool>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, transform, playhead, theme, loop_on, drag: None, loop_preview: None }
+        Self { arrangement, transform, playhead, theme, loop_on, drag: None, loop_preview: None, cursor: None }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(transform, |mut h| h.needs_redraw())
             .bind(playhead, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
             .bind(loop_on, |mut h| h.needs_redraw())
+    }
+
+    /// The cursor for the pointer at local `x`, showing what a press there
+    /// would do: resize a loop edge, move the loop, or draw a new range.
+    fn cursor_at(&self, x: f64) -> CursorIcon {
+        let transform = self.transform.get();
+        let tick = transform.x_to_tick(x);
+        match self.arrangement.get().loop_range {
+            Some(r) if (transform.tick_to_x(r.start) - x).abs() <= EDGE_HIT_PX => CursorIcon::EwResize,
+            Some(r) if (transform.tick_to_x(r.end) - x).abs() <= EDGE_HIT_PX => CursorIcon::EwResize,
+            Some(r) if tick > r.start && tick < r.end => CursorIcon::Grab,
+            _ => CursorIcon::Text,
+        }
+    }
+
+    /// Sets the window cursor, only when it changes.
+    fn set_cursor(&mut self, cx: &mut EventContext, icon: CursorIcon) {
+        if self.cursor != Some(icon) {
+            self.cursor = Some(icon);
+            cx.emit(WindowEvent::SetCursor(icon));
+        }
     }
 
     fn loop_range(&self) -> Option<LoopRange> {
@@ -98,6 +121,9 @@ impl View for Ruler {
                 if matches!(self.drag, Some(Drag::CreateLoop { .. })) {
                     cx.emit(TimelineEvent::ScrubPlayhead(tick.max(0)));
                 }
+                if matches!(self.drag, Some(Drag::LoopMiddle { .. })) {
+                    self.set_cursor(cx, CursorIcon::Grabbing);
+                }
                 cx.capture();
             }
 
@@ -125,6 +151,11 @@ impl View for Ruler {
             }
 
             WindowEvent::MouseMove(x, _) => {
+                if self.drag.is_none() {
+                    let local_x = *x as f64 - cx.bounds().x as f64;
+                    let icon = self.cursor_at(local_x);
+                    self.set_cursor(cx, icon);
+                }
                 if let Some(drag) = self.drag {
                     let bounds = cx.bounds();
                     let local_x = *x as f64 - bounds.x as f64;
@@ -195,7 +226,13 @@ impl View for Ruler {
                 self.drag = None;
                 self.loop_preview = None;
                 cx.release();
+                let local_x = cx.mouse().cursor_x as f64 - cx.bounds().x as f64;
+                let icon = self.cursor_at(local_x);
+                self.set_cursor(cx, icon);
             }
+
+            // Leaving hands the cursor back to whatever's hovered next.
+            WindowEvent::MouseLeave => self.cursor = None,
 
             _ => {}
         });
