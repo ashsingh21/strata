@@ -37,6 +37,7 @@ fn row<'a>(cx: &'a mut Context, name: String, query: Signal<String>, nested: boo
             .class("body")
             .text_wrap(false)
             .text_overflow(TextOverflow::Ellipsis)
+            .alignment(Alignment::Left)
             .width(Stretch(1.0))
     })
         .class("side-row")
