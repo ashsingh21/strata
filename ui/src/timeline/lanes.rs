@@ -1096,7 +1096,11 @@ impl LaneArea {
         text_paint.set_color(tokens::ON_CLIP);
         text_paint.set_anti_alias(true);
         let font = crate::canvas_text::canvas_font(11.0);
-        canvas.draw_str(&clip.name, vg::Point::new(x0 + 4.0, y0 + 10.0), &font, &text_paint);
+        // Ellipsized to the clip's own width - short one-shot clips used to
+        // spill their names across their neighbours ("Kic Kic Kic Kick").
+        if let Some(label) = crate::canvas_text::fit_text(&clip.name, &font, x1 - x0 - 8.0) {
+            canvas.draw_str(&label, vg::Point::new(x0 + 4.0, y0 + 10.0), &font, &text_paint);
+        }
 
         if y1 > header_bottom {
             self.draw_clip_body(canvas, clip, x0, header_bottom, x1, y1);

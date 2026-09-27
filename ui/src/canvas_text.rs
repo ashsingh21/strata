@@ -28,3 +28,22 @@ pub fn canvas_font(size: f32) -> vg::Font {
     font.set_size(size);
     font
 }
+
+/// `text` shortened with a trailing "…" so it fits in `max_width` px at
+/// `font` - for canvas labels that must stay inside a box (clip names on
+/// narrow clips). Returns `None` when not even "…" fits.
+pub fn fit_text(text: &str, font: &vg::Font, max_width: f32) -> Option<String> {
+    let width = |s: &str| font.measure_str(s, None).0;
+    if width(text) <= max_width {
+        return Some(text.to_string());
+    }
+    let mut end = text.len();
+    while end > 0 {
+        end = text[..end].char_indices().next_back().map(|(i, _)| i).unwrap_or(0);
+        let candidate = format!("{}\u{2026}", text[..end].trim_end());
+        if width(&candidate) <= max_width {
+            return Some(candidate);
+        }
+    }
+    (width("\u{2026}") <= max_width).then(|| "\u{2026}".to_string())
+}
