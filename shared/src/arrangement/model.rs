@@ -676,6 +676,75 @@ impl Arrangement {
     }
 }
 
+// --- Modulation targets (Phase 12 design spike) -------------------------
+//
+// Neither existing "point at a parameter" system reaches "any parameter on
+// any effect node": `synth::model::LfoTarget` is a closed 4-variant enum
+// entirely internal to one Carve instance (no track/node concept at all),
+// and `AutomationLane.parameter_name` is a freeform display `String`, not
+// a structured address, and is track-only (no master, per `TrackId` not
+// `Option<TrackId>`). `ModTarget` is the generalized address the
+// effects-board plan's own Phase 12 called for - added here as a data-only
+// foundation (not yet wired into the engine's per-sample modulation math
+// or a board UI for dragging a modulator onto a knob), matching the same
+// "model layer now, engine/UI execution later" split Phase 11 used for
+// parallel branches.
+
+/// One effect type's own knobs, addressable individually - the
+/// parameter half of a `ModTarget`. A new effect type needs its own
+/// variants added here, same as `Effect`/`EffectUnitState` themselves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EffectParam {
+    CompressorThreshold,
+    CompressorRatio,
+    CompressorAttack,
+    CompressorRelease,
+    CompressorMakeup,
+    EqFreq,
+    EqGain,
+    EqQ,
+}
+
+impl EffectParam {
+    pub fn name(self) -> &'static str {
+        match self {
+            EffectParam::CompressorThreshold => "Threshold",
+            EffectParam::CompressorRatio => "Ratio",
+            EffectParam::CompressorAttack => "Attack",
+            EffectParam::CompressorRelease => "Release",
+            EffectParam::CompressorMakeup => "Makeup",
+            EffectParam::EqFreq => "Freq",
+            EffectParam::EqGain => "Gain",
+            EffectParam::EqQ => "Q",
+        }
+    }
+
+    /// Every param a modulator could target on `effect` - what a future
+    /// "drop a modulator on this node" UI would list.
+    pub fn for_effect(effect: Effect) -> &'static [EffectParam] {
+        match effect {
+            Effect::Compressor(_) => &[
+                EffectParam::CompressorThreshold,
+                EffectParam::CompressorRatio,
+                EffectParam::CompressorAttack,
+                EffectParam::CompressorRelease,
+                EffectParam::CompressorMakeup,
+            ],
+            Effect::Eq(_) => &[EffectParam::EqFreq, EffectParam::EqGain, EffectParam::EqQ],
+        }
+    }
+}
+
+/// A specific knob on a specific effect node on a specific chain -
+/// `owner: None` is the master bus, same convention as `Arrangement::fx`.
+/// What a modulator (an LFO, or anything else later) would point at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModTarget {
+    pub owner: Option<TrackId>,
+    pub node: EffectNodeId,
+    pub param: EffectParam,
+}
+
 #[cfg(test)]
 mod effect_graph_tests {
     use super::*;
@@ -922,5 +991,27 @@ mod effect_graph_tests {
         assert_eq!(arr.fx(None).unwrap().ordered().len(), 1);
         assert_eq!(arr.master_effects.ordered().len(), 1, "None should target the real master_effects field");
         assert!(arr.fx(Some(track_id + 100)).is_none(), "an unknown track id should be None, not master");
+    }
+
+    #[test]
+    fn mod_target_addresses_track_and_master_nodes_distinctly() {
+        let track_target = ModTarget { owner: Some(1), node: 2, param: EffectParam::EqFreq };
+        let master_target = ModTarget { owner: None, node: 2, param: EffectParam::EqFreq };
+        assert_ne!(track_target, master_target, "same node/param on a track vs master must be distinct targets");
+
+        let same_again = ModTarget { owner: Some(1), node: 2, param: EffectParam::EqFreq };
+        assert_eq!(track_target, same_again);
+    }
+
+    #[test]
+    fn effect_param_for_effect_matches_each_effects_own_knobs() {
+        let compressor_params = EffectParam::for_effect(compressor());
+        assert_eq!(compressor_params.len(), 5);
+        assert!(compressor_params.contains(&EffectParam::CompressorThreshold));
+
+        let eq_params = EffectParam::for_effect(Effect::Eq(EqState::default()));
+        assert_eq!(eq_params.len(), 3);
+        assert!(eq_params.contains(&EffectParam::EqFreq));
+        assert!(!eq_params.contains(&EffectParam::CompressorThreshold), "an EQ node shouldn't offer Compressor knobs");
     }
 }

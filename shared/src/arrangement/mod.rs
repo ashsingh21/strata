@@ -18,6 +18,7 @@ pub use model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent,
     ClipId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
     Effect, EffectSlot, EffectNode, EffectNodeId, EffectEdge, EffectGraph, CompressorState, EqState,
+    EffectParam, ModTarget,
 };
 pub use peaks::{PeakLevel, PeakPyramid};
 pub use schedule::{notes_in_range, ScheduledNotes};
