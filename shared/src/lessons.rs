@@ -39,6 +39,9 @@ pub const RECIPE_LEAD: &str = "recipe-lead";
 pub const RECIPE_PAD: &str = "recipe-pad";
 pub const RECIPE_TANPURA: &str = "recipe-tanpura";
 pub const RECIPE_REED: &str = "recipe-reed";
+/// The arrangement lessons open a finished demo song.
+pub const ARRANGE_HOUSE: &str = "arrange-house";
+pub const ARRANGE_BHAIRAV: &str = "arrange-bhairav";
 
 /// Carve lessons loop their riff this long, so there's time to turn knobs.
 const CARVE_BARS: i64 = 64;
@@ -147,6 +150,11 @@ fn carve_lesson(lesson: &str) -> Project {
 
 /// The project `lesson` starts from (a blank one for an unknown id).
 pub fn starting_project(lesson: &str) -> Project {
+    match lesson {
+        ARRANGE_HOUSE => return crate::demo::house_demo(),
+        ARRANGE_BHAIRAV => return crate::demo::bhairav_demo(),
+        _ => {}
+    }
     if lesson.starts_with("carve-") || lesson.starts_with("recipe-") {
         return carve_lesson(lesson);
     }

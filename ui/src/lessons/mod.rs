@@ -36,6 +36,8 @@ pub struct Snapshot {
     pub synth: SynthState,
     /// The clip open in the editor, if any.
     pub open_clip: Option<shared::arrangement::ClipId>,
+    /// Where the playhead is.
+    pub playhead: shared::arrangement::Ticks,
 }
 
 /// A control a step can make glow.
@@ -63,6 +65,11 @@ pub enum Target {
     FilterType,
     /// LFO 1 or 2's pill (drag it onto a knob).
     LfoPill(u8),
+    /// A track's Mute / Solo button.
+    Mute(TrackId),
+    Solo(TrackId),
+    /// A bar on the ruler (0-based) - where to click.
+    RulerBar(i64),
 }
 
 thread_local! {
@@ -131,6 +138,7 @@ pub struct LessonModel {
     synth: Signal<SynthState>,
     sidebar_open: Signal<bool>,
     open_clip: Signal<Option<shared::arrangement::ClipId>>,
+    playhead: Signal<shared::arrangement::Ticks>,
 }
 
 impl LessonModel {
@@ -142,6 +150,7 @@ impl LessonModel {
         synth: Signal<SynthState>,
         sidebar_open: Signal<bool>,
         open_clip: Signal<Option<shared::arrangement::ClipId>>,
+        playhead: Signal<shared::arrangement::Ticks>,
     ) -> Self {
         let highlight = Signal::new(None);
         HIGHLIGHT.set(Some(highlight));
@@ -157,6 +166,7 @@ impl LessonModel {
             synth,
             sidebar_open,
             open_clip,
+            playhead,
         }
     }
 
@@ -169,6 +179,7 @@ impl LessonModel {
             // Only a clip that still exists counts as open (the editor
             // closes itself otherwise).
             open_clip: self.open_clip.get().filter(|id| self.arrangement.get().clip(*id).is_some()),
+            playhead: self.playhead.get(),
         }
     }
 

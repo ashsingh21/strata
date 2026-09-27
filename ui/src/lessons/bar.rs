@@ -43,7 +43,8 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(28.0));
 
             VStack::new(cx, move |cx| {
-                Label::new(cx, s.text).class("body").class("lesson-text");
+                // Wrapped to the space between the title and the buttons.
+                Label::new(cx, s.text).class("body").class("lesson-text").width(Stretch(1.0)).text_wrap(true);
                 // Under it: why the step just done sounds the way it does
                 // (while the change is still in your ears) - until a hint
                 // for this step is due, which takes the line instead.
@@ -52,11 +53,15 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
                     Label::new(cx, format!("Just now: {why}"))
                         .class("value")
                         .class("lesson-why")
+                        .width(Stretch(1.0))
+                        .text_wrap(true)
                         .toggle_class("hidden", p.hint_visible.map(move |v| *v && !s.hint.is_empty()));
                 }
                 if !s.hint.is_empty() {
                     Label::new(cx, s.hint)
                         .class("value")
+                        .width(Stretch(1.0))
+                        .text_wrap(true)
                         .toggle_class("hidden", p.hint_visible.map(|v| !*v));
                 }
             })

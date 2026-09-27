@@ -6,7 +6,7 @@ use shared::arrangement::{Clip, ClipContent, Instrument, Ticks, PPQ};
 use shared::drums::{CLAP, KICK, OPEN_HAT};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
-    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED,
+    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
 };
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
@@ -41,6 +41,7 @@ pub struct Lesson {
 pub const BASICS: &str = "Basics";
 pub const CARVE: &str = "Carve synth";
 pub const RECIPES: &str = "Recipes";
+pub const ARRANGEMENT: &str = "Arrangement";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -1042,6 +1043,128 @@ pub const LESSONS: &[Lesson] = &[
             ),
         ],
     },
+    Lesson {
+        id: ARRANGE_HOUSE,
+        group: ARRANGEMENT,
+        title: "House: how a track is built",
+        steps: &[
+            info(
+                "This is the House demo, laid out the way most house and techno is: in blocks of 8 bars. The markers on the ruler \
+                 name each section - Intro, Build, Groove, Breakdown, Drop, Outro.",
+            ),
+            act(
+                "Press Space and listen to the Intro: a kick and a quiet pad, little else. Intros are sparse on purpose - DJs mix a new track in over the old one here.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Keep listening until bar 9, the Build: the clap and the bass arrive. Every 8 bars something comes in or drops out - that's what keeps a loop feeling like a journey.",
+                "The glowing bar on the ruler is bar 9. Or click it to jump there.",
+                |s| s.playhead >= bars(8),
+                |_| Some(Target::RulerBar(8)),
+            ),
+            act(
+                "Jump to the Breakdown: click the ruler at bar 33. The kick stops and the chords take over - the tension comes from waiting for the kick to return.",
+                "Click the glowing bar near the Breakdown marker.",
+                |s| in_bars(s, 32, 40),
+                |_| Some(Target::RulerBar(32)),
+            ),
+            act(
+                "Feel how much the kick does: mute the Drums track (its M button) for a moment.",
+                "M is on the Drums track's header, bottom left.",
+                |s| track_named(s, "Drums").is_some_and(|t| t.mute),
+                |s| track_named(s, "Drums").map(|t| Target::Mute(t.id)),
+            ),
+            act(
+                "Bring it back: click M again.",
+                "The same M button.",
+                |s| track_named(s, "Drums").is_some_and(|t| !t.mute),
+                |s| track_named(s, "Drums").map(|t| Target::Mute(t.id)),
+            ),
+            act(
+                "Now jump to the Drop at bar 41: kick, bass, stabs and the lead hook all at once - the payoff the breakdown made you wait for.",
+                "Click the glowing bar near the Drop marker.",
+                |s| in_bars(s, 40, 56),
+                |_| Some(Target::RulerBar(40)),
+            ),
+            act(
+                "Mark a spot of your own: right-click the ruler at bar 25 and choose Add marker. Markers are how you plan a song before it's written.",
+                "Right-click the glowing bar, then \u{201c}Add marker here\u{201d}.",
+                |s| s.arrangement.markers.len() > 6,
+                |_| Some(Target::RulerBar(24)),
+            ),
+            info(
+                "The shape: Intro 8, Build 8, Groove 16, Breakdown 8, Drop 16, Outro 8 bars - 64 bars, two minutes at 128 BPM. \
+                 Club versions double every section (5 to 7 minutes) so DJs have room to mix. Rave, techno and hardcore use the \
+                 same bones, faster (130 to 175 BPM), with snare rolls and risers for the build and a harder drop.",
+            ),
+        ],
+    },
+    Lesson {
+        id: ARRANGE_BHAIRAV,
+        group: ARRANGEMENT,
+        title: "Bhairav: a raag as a rave",
+        steps: &[
+            info(
+                "A raag performance starts slowly: the alap, just the drone and a voice finding Sa, before any rhythm. \
+                 The Bhairav rave borrows that shape and dresses it as a dance track.",
+            ),
+            act(
+                "Press Space. First the tanpura alone, then hats: Sa is established before anything else, the way a raag begins.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Solo the Tanpura (its S button): Sa and Pa, held for the whole song. Every other part is heard against this.",
+                "S is on the Tanpura track's header.",
+                |s| track_named(s, "Tanpura").is_some_and(|t| t.solo),
+                |s| track_named(s, "Tanpura").map(|t| Target::Solo(t.id)),
+            ),
+            act(
+                "Un-solo it: click S again.",
+                "The same S button.",
+                |s| track_named(s, "Tanpura").is_some_and(|t| !t.solo),
+                |s| track_named(s, "Tanpura").map(|t| Target::Solo(t.id)),
+            ),
+            act(
+                "Jump to the Build at bar 9: the bass arrives, pulling from komal re back to Sa on every beat - Bhairav's gravity, as a groove.",
+                "Click the glowing bar near the Build marker.",
+                |s| in_bars(s, 8, 16),
+                |_| Some(Target::RulerBar(8)),
+            ),
+            act(
+                "Jump to the Break at bar 33: the beat stops and the reed sings Bhairav's phrase over the drone - the melodic heart, like a vocal breakdown in house.",
+                "Click the glowing bar near the Break marker.",
+                |s| in_bars(s, 32, 40),
+                |_| Some(Target::RulerBar(32)),
+            ),
+            act(
+                "Mute the Tanpura and listen to the reed: without Sa underneath, the melody loses its home.",
+                "M on the Tanpura track's header.",
+                |s| track_named(s, "Tanpura").is_some_and(|t| t.mute),
+                |s| track_named(s, "Tanpura").map(|t| Target::Mute(t.id)),
+            ),
+            act(
+                "Bring the drone back: click M again.",
+                "The same M button.",
+                |s| track_named(s, "Tanpura").is_some_and(|t| !t.mute),
+                |s| track_named(s, "Tanpura").map(|t| Target::Mute(t.id)),
+            ),
+            act(
+                "Jump to the Drop at bar 41: beat, bass, drone and reed together.",
+                "Click the glowing bar near the Drop marker.",
+                |s| in_bars(s, 40, 56),
+                |_| Some(Target::RulerBar(40)),
+            ),
+            info(
+                "Drone first, then rhythm, the melody alone in the break, everything in the drop - and back to the drone at the \
+                 end, finishing on Sa where it began, as a raag does. Try the shape with another raag: change the Key to its \
+                 scale and rewrite the bass and reed in its notes.",
+            ),
+        ],
+    },
 ];
 
 /// The on-screen Carve patch - only while a Carve track is selected (the
@@ -1058,6 +1181,20 @@ fn first_unmet(controls: &[(bool, Target)]) -> Option<Target> {
 /// LFO 2 on pitch at a vibrato rate and depth.
 fn vibrato(p: &SynthState) -> bool {
     p.lfo2.target == LfoTarget::Pitch && (4.0..=7.0).contains(&lfo_rate_hz(p.lfo2.rate_norm)) && (0.1..=0.35).contains(&p.lfo2.depth)
+}
+
+/// `n` bars in ticks (4/4 throughout the course).
+const fn bars(n: i64) -> Ticks {
+    n * BAR
+}
+
+/// The playhead is somewhere in bars `from..to` (0-based).
+fn in_bars(s: &Snapshot, from: i64, to: i64) -> bool {
+    (bars(from)..bars(to)).contains(&s.playhead)
+}
+
+fn track_named<'a>(s: &'a Snapshot, name: &str) -> Option<&'a shared::arrangement::Track> {
+    s.arrangement.tracks.iter().find(|t| t.name == name)
 }
 
 /// Clips on tracks playing `instrument`.
@@ -1125,7 +1262,7 @@ mod tests {
         let synth = selected
             .and_then(|id| p.instruments.iter().find(|(t, _)| *t == id).map(|(_, patch)| patch.clone()))
             .unwrap_or_else(shared::synth::seed_synth);
-        Snapshot { arrangement: p.arrangement, selected_track: selected, playing: false, synth, open_clip: None }
+        Snapshot { arrangement: p.arrangement, selected_track: selected, playing: false, synth, open_clip: None, playhead: 0 }
     }
 
     fn lesson(id: &str) -> &'static Lesson {
@@ -1589,6 +1726,63 @@ mod tests {
         s.selected_track = None;
         let Kind::Action { check, .. } = lesson(CARVE_FILTER).steps[1].kind else { panic!() };
         assert!(!check(&s));
+    }
+
+    /// Like `walk`, for lessons with info steps between the actions:
+    /// `do_step` has one entry per action step, in order.
+    fn walk_actions(id: &str, do_step: &[&dyn Fn(&mut Snapshot)]) {
+        let l = lesson(id);
+        let mut s = start(id);
+        let actions: Vec<&Step> = l.steps.iter().filter(|st| matches!(st.kind, Kind::Action { .. })).collect();
+        assert_eq!(do_step.len(), actions.len(), "{id}: one action per step");
+        for (i, (step, act)) in actions.iter().zip(do_step).enumerate() {
+            let Kind::Action { check, target } = step.kind else { unreachable!() };
+            assert!(!check(&s), "{id} action {} already passes: {}", i + 1, step.text);
+            let _ = target(&s);
+            act(&mut s);
+            assert!(check(&s), "{id} action {} doesn't pass after doing it: {}", i + 1, step.text);
+        }
+    }
+
+    fn set_track(s: &mut Snapshot, name: &str, f: fn(&mut Track)) {
+        let id = s.arrangement.tracks.iter().find(|t| t.name == name).unwrap().id;
+        f(s.arrangement.track_mut(id).unwrap());
+    }
+
+    #[test]
+    fn arrange_house_can_be_done_step_by_step() {
+        walk_actions(
+            ARRANGE_HOUSE,
+            &[
+                &play,
+                &|s| s.playhead = bars(9),
+                &|s| s.playhead = bars(33),
+                &|s| set_track(s, "Drums", |t| t.mute = true),
+                &|s| set_track(s, "Drums", |t| t.mute = false),
+                &|s| s.playhead = bars(41),
+                &|s| {
+                    let id = s.arrangement.alloc_id();
+                    s.arrangement.markers.push(shared::arrangement::Marker { id, position: bars(24), name: "Mine".into() });
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn arrange_bhairav_can_be_done_step_by_step() {
+        walk_actions(
+            ARRANGE_BHAIRAV,
+            &[
+                &play,
+                &|s| set_track(s, "Tanpura", |t| t.solo = true),
+                &|s| set_track(s, "Tanpura", |t| t.solo = false),
+                &|s| s.playhead = bars(9),
+                &|s| s.playhead = bars(33),
+                &|s| set_track(s, "Tanpura", |t| t.mute = true),
+                &|s| set_track(s, "Tanpura", |t| t.mute = false),
+                &|s| s.playhead = bars(41),
+            ],
+        );
     }
 
     #[test]

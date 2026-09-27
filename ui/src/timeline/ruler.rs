@@ -60,6 +60,7 @@ impl Ruler {
             .bind(playhead, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
             .bind(loop_on, |mut h| h.needs_redraw())
+            .bind(crate::lessons::highlight_signal().unwrap_or_else(|| Signal::new(None)), |mut h| h.needs_redraw())
     }
 
     /// The cursor for the pointer at local `x`, showing what a press there
@@ -266,6 +267,18 @@ impl View for Ruler {
             wash.set_color(if self.loop_on.get() { palette.mod_soft } else { palette.bg_200 });
             wash.set_anti_alias(true);
             canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, bounds.y, x1, bounds.y + bounds.h), None), &wash);
+        }
+        // A lesson pointing at a bar: that bar glows.
+        if let Some(crate::lessons::Target::RulerBar(bar)) = crate::lessons::highlighted() {
+            let bar_ticks = arr.tempo_map.time_signature_at(0).ticks_per_bar();
+            let x0 = (bounds.x as f64 + transform.tick_to_x(bar * bar_ticks)) as f32;
+            let x1 = (bounds.x as f64 + transform.tick_to_x((bar + 1) * bar_ticks)) as f32;
+            let mut glow = vg::Paint::default();
+            glow.set_color(palette.signal_soft);
+            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, bounds.y, x1, bounds.y + bounds.h), None), &glow);
+            let mut edge = vg::Paint::default();
+            edge.set_color(palette.signal);
+            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, bounds.y, x0 + 2.0, bounds.y + bounds.h), None), &edge);
         }
 
         let start_tick = transform.x_to_tick(0.0).max(0);

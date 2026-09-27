@@ -242,6 +242,7 @@ fn main() -> Result<(), ApplicationError> {
             synth_state,
             sidebar_open,
             piano_roll_open_clip,
+            tl_playhead,
         );
         let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model);
         let lower_panel_height =

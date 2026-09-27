@@ -2,6 +2,7 @@
 //! stylesheet, reusing the milestone-1 M/S/Arm buttons and colour swatch.
 
 use vizia::prelude::*;
+use crate::lessons::LessonTargetExt;
 use crate::hidpi::Logical;
 use vizia::vg;
 
@@ -298,12 +299,14 @@ pub fn track_header<'a>(
                     .class("btn")
                     .class("sm")
                     .toggle_class("is-mute", mute)
+                    .lesson_target(crate::lessons::Target::Mute(track_id))
                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleMute(track_id)));
 
                 Button::new(cx, |cx| Label::new(cx, "S"))
                     .class("btn")
                     .class("sm")
                     .toggle_class("is-solo", solo)
+                    .lesson_target(crate::lessons::Target::Solo(track_id))
                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleSolo(track_id)));
 
                 Button::new(cx, |cx| Label::new(cx, "\u{25CF}"))
