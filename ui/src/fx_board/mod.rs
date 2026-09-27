@@ -167,9 +167,13 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
             Label::new(cx, track_name).class("title");
             Label::new(cx, if p.track.is_some() { "Effects" } else { "Main out" }).class("meta");
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
-            Button::new(cx, |cx| Label::new(cx, "Bypass all")).class("btn").class("sm").on_press(move |cx| {
-                cx.emit(TimelineEvent::SetChainBypassed(p.track, !all_bypassed.get()));
-            });
+            // Lit while every effect is bypassed, so it reads as the state
+            // toggle it is rather than a one-shot action.
+            Button::new(cx, |cx| Label::new(cx, "Bypass all"))
+                .class("btn")
+                .class("sm")
+                .toggle_class("is-on", all_bypassed)
+                .on_press(move |cx| cx.emit(TimelineEvent::SetChainBypassed(p.track, !all_bypassed.get())));
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
             Label::new(cx, latency_ms.map(|ms| format!("Latency {ms:.1} ms"))).class("meta");
             Button::new(cx, |cx| Label::new(cx, "\u{2715}")).class("btn").class("sm").class("quiet").on_press(move |_cx| {
@@ -318,6 +322,9 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                         })
                         .class("fx-node")
                         .toggle_class("is-sel", is_selected)
+                        // Bypassed nodes dim, so the chain's state reads at
+                        // a glance, not just from the 6px pip.
+                        .toggle_class("is-off", !node.enabled)
                         .position_type(PositionType::Absolute)
                         .left(x.map(|v| Pixels(*v)))
                         .top(y.map(|v| Pixels(*v)))

@@ -373,6 +373,9 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 .fx-node.is-sel {{
   border-width: 2px;
 }}
+.fx-node.is-off {{
+  opacity: 0.5;
+}}
 .synth-devhead {{
   padding: 0px {space3}px;
 }}
