@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use vizia::prelude::*;
 use vizia::vg;
 
-use shared::arrangement::{snap, Arrangement, ClipId, MidiNote, SnapGrid, Ticks, DEFAULT_VELOCITY, PPQ};
+use shared::arrangement::{Arrangement, ClipId, MidiNote, SnapGrid, Ticks, DEFAULT_VELOCITY, PPQ};
 use shared::theory::{degree_name, degrees_in_mask, note_name};
 
 use crate::piano_roll::state::{EditMode, LabelMode, NoteKey, PianoRollEvent};
@@ -46,16 +46,16 @@ pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, drums: bool) -> Vec<u
         rows.dedup();
         return rows;
     }
-    const MIN_SPAN: i32 = 18;
-    let (mut lo, mut hi) = match (notes.iter().map(|n| n.pitch).min(), notes.iter().map(|n| n.pitch).max()) {
-        (Some(min), Some(max)) => (min as i32 - 3, max as i32 + 3),
-        _ => (48 + key as i32, 72 + key as i32),
-    };
-    if hi - lo < MIN_SPAN {
-        let grow = MIN_SPAN - (hi - lo);
-        lo -= grow / 2;
-        hi += grow - grow / 2;
-    }
+    // Two octaves of the key - moved down by whole octaves if a note sits
+    // below them, and grown upward to reach the highest note. Clicking a
+    // visible row never moves the rows (a range fitted tightly round the
+    // notes re-centred with every new note, so the grid slid under the
+    // pointer); an empty clip shows the octave from the key's third.
+    let base = 48 + key as i32;
+    // Only ever moved down (so the top row's note can't push it up).
+    let octave = notes.iter().map(|n| n.pitch as i32).min().map(|min| (min - base).div_euclid(12).min(0)).unwrap_or(0);
+    let mut lo = base + 12 * octave;
+    let mut hi = (lo + 24).max(notes.iter().map(|n| n.pitch as i32).max().unwrap_or(0));
     lo = lo.max(0);
     hi = hi.min(127);
 
@@ -241,8 +241,16 @@ impl View for Grid {
 
                 match self.mode.get() {
                     EditMode::Draw => {
+                        // The grid square under the pointer, not the nearest
+                        // line: clicking inside a square puts the note in it
+                        // (rounding sent anything past the middle one square
+                        // late). Alt places it freely.
                         let bypass = cx.modifiers().alt();
-                        let snapped = snap(raw_tick, self.snap.get(), bypass).clamp(0, clip_length - 1);
+                        let snapped = match self.snap.get().ticks() {
+                            Some(step) if !bypass => raw_tick.div_euclid(step) * step,
+                            _ => raw_tick,
+                        }
+                        .clamp(0, clip_length - 1);
                         if let Some(hit) = Self::note_at(&notes, snapped, pitch) {
                             cx.emit(TimelineEvent::RemoveMidiNoteAt { clip: clip_id, start: hit.start, pitch: hit.pitch });
                         } else {
@@ -487,5 +495,46 @@ impl View for Grid {
             paint.set_anti_alias(true);
             canvas.draw_path(&head.detach(), &paint);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const A: u8 = 9;
+    const MINOR_PENTATONIC: u16 = 0b0100_1010_1001;
+
+    fn note(pitch: u8) -> MidiNote {
+        MidiNote { start: 0, length: PPQ / 4, pitch, velocity: 100 }
+    }
+
+    #[test]
+    fn an_empty_clip_starts_on_the_keys_third_octave() {
+        let rows = row_pitches(&[], A, MINOR_PENTATONIC, false);
+        assert_eq!(*rows.last().unwrap(), 57, "A3 at the bottom");
+    }
+
+    #[test]
+    fn adding_a_note_on_a_visible_row_never_moves_the_rows() {
+        let empty = row_pitches(&[], A, MINOR_PENTATONIC, false);
+        for &pitch in &empty {
+            assert_eq!(row_pitches(&[note(pitch)], A, MINOR_PENTATONIC, false), empty, "after adding {pitch}");
+        }
+        // The same from a clip that already has low notes.
+        let low = [note(33), note(45)];
+        let rows = row_pitches(&low, A, MINOR_PENTATONIC, false);
+        for &pitch in &rows {
+            let mut more = low.to_vec();
+            more.push(note(pitch));
+            assert_eq!(row_pitches(&more, A, MINOR_PENTATONIC, false), rows, "after adding {pitch}");
+        }
+    }
+
+    #[test]
+    fn low_notes_get_a_compact_grid_round_them() {
+        let rows = row_pitches(&[note(29), note(43)], A, MINOR_PENTATONIC, false);
+        assert!(rows.contains(&29) && rows.contains(&43));
+        assert!(rows.len() <= 12, "{} rows", rows.len());
     }
 }
