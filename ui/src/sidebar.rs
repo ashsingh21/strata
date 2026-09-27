@@ -51,11 +51,12 @@ fn row<'a>(cx: &'a mut Context, name: String, query: Signal<String>, nested: boo
 
 /// A lesson in the Learn list: its title, and “Done” on the right once
 /// it's been finished.
-fn lesson_row<'a>(cx: &'a mut Context, title: &'static str, finished: bool, query: Signal<String>) -> Handle<'a, Button> {
+fn lesson_row<'a>(cx: &'a mut Context, title: String, finished: bool, query: Signal<String>) -> Handle<'a, Button> {
     let needle = title.to_lowercase();
     Button::new(cx, move |cx| {
+        let title = title.clone();
         HStack::new(cx, move |cx| {
-            Label::new(cx, title)
+            Label::new(cx, title.clone())
                 .class("body")
                 .text_wrap(false)
                 .text_overflow(TextOverflow::Ellipsis)
@@ -107,6 +108,15 @@ pub fn sidebar(
                 section_head(cx, "Learn", lessons.len());
                 Binding::new(cx, lessons_done, move |cx| {
                     let done = lessons_done.get();
+                    // Where to go next, so a newcomer needn't choose from
+                    // 23 lessons: the first on the suggested path.
+                    if let Some(next) = crate::lessons::course::next_lesson(&done) {
+                        let label = if done.is_empty() { "Start here" } else { "Up next" };
+                        lesson_row(cx, format!("\u{25b8} {label}: {}", lessons[next].title), false, query)
+                            .class("side-next")
+                            .padding_left(Pixels(crate::tokens::SPACE_3))
+                            .on_press(move |cx| cx.emit(crate::project::ProjectEvent::StartLesson(next)));
+                    }
                     let mut group = "";
                     for (i, lesson) in lessons.iter().enumerate() {
                         if lesson.group != group {
@@ -119,7 +129,7 @@ pub fn sidebar(
                                 .height(Pixels(20.0));
                         }
                         let finished = done.iter().any(|d| d == lesson.id);
-                        lesson_row(cx, lesson.title, finished, query)
+                        lesson_row(cx, lesson.title.to_string(), finished, query)
                             .toggle_class("is-on", lessons_active.map(move |a| a.is_some_and(|(l, _)| l == i)))
                             .on_press(move |cx| cx.emit(crate::project::ProjectEvent::StartLesson(i)));
                     }

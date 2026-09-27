@@ -1469,6 +1469,98 @@ const OFFBEATS: [Ticks; 4] = [PPQ / 2, PPQ + PPQ / 2, 2 * PPQ + PPQ / 2, 3 * PPQ
 /// Where the arrangement's markers go (0-based bars).
 pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 
+
+/// The suggested order for someone new: a beat first, then the notes on
+/// top of it, a first look at sound, then a whole track; the rest after.
+pub const PATH: &[&str] = &[
+    FIRST_BEAT, BASSLINE, CHORDS, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
+    PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, ARRANGE_HOUSE,
+];
+
+/// The lesson to take next: the first unfinished one on the path, then
+/// any other unfinished one. `None` once everything's done.
+pub fn next_lesson(done: &[String]) -> Option<usize> {
+    let open = |id: &str| !done.iter().any(|d| d == id);
+    let id = PATH.iter().copied().find(|id| open(id)).or_else(|| LESSONS.iter().map(|l| l.id).find(|id| open(id)))?;
+    LESSONS.iter().position(|l| l.id == id)
+}
+
+/// Music words the steps use, in plain language - shown under a step the
+/// first time its lesson uses one. Matched as whole words (a trailing "s"
+/// too), ignoring case.
+pub const GLOSSARY: &[(&str, &str)] = &[
+    ("off-beat", "halfway between two beats: the \u{201c}and\u{201d} when you count 1-and-2-and"),
+    ("downbeat", "the first beat of a bar"),
+    ("clip", "a block on the timeline holding notes (or recorded sound)"),
+    ("pattern", "the notes inside a clip that repeat as it loops"),
+    ("kick", "the deep drum, the heartbeat"),
+    ("clap", "the sharp hit that answers the kick"),
+    ("snare", "a sharp drum, like the clap but with a rattle"),
+    ("hat", "hi-hat, the ticking cymbal: closed is short, open rings"),
+    ("tempo", "speed, in beats per minute (BPM)"),
+    ("chord", "three or more notes played together"),
+    ("root", "the note a chord is named after: A in A minor"),
+    ("minor", "a darker, sadder-sounding chord or scale"),
+    ("major", "a brighter, happier-sounding chord or scale"),
+    ("suspended", "a chord without its middle note, so it floats"),
+    ("octave", "the same note, higher or lower (12 semitones apart)"),
+    ("oscillator", "the part of a synth that makes the raw tone"),
+    ("wave", "the shape of a tone: sine is pure, saw is buzzy"),
+    ("harmonic", "the quieter, higher tones inside every note: more of them sounds brighter"),
+    ("filter", "takes some of a sound's brightness away"),
+    ("cutoff", "where the filter starts cutting: lower is darker"),
+    ("resonance", "a ring at the cutoff that makes the filter sing"),
+    ("envelope", "how a sound changes during one note: its start, fade and end"),
+    ("attack", "how long a note takes to reach full volume"),
+    ("decay", "how quickly a note falls after it starts"),
+    ("sustain", "the level a note holds while the key is down"),
+    ("release", "how long a note rings after the key lets go"),
+    ("drive", "pushes the sound harder until it turns gritty"),
+    ("sub", "an extra, deeper copy of each note, an octave down"),
+    ("noise", "a hiss, like breath or wind"),
+    ("lfo", "a slow, automatic wobble that turns a knob for you"),
+    ("vibrato", "a quick, gentle wobble in pitch, like a singer's"),
+    ("unison", "several slightly out-of-tune copies of each note, for a wide sound"),
+    ("detune", "putting copies slightly out of tune with each other, for width"),
+    ("glide", "sliding from one note to the next instead of jumping"),
+    ("mono", "one note at a time, like a voice"),
+    ("chorus", "a shimmer from slightly delayed copies of the sound"),
+    ("reverb", "the echo of a room or a hall"),
+    ("drone", "one note held under everything"),
+    ("raag", "a set of notes and rules for a melody, from Indian classical music"),
+    ("fader", "the slider that sets a track's volume"),
+    ("db", "decibels, how loud: -6 dB is about half as loud"),
+    ("mute", "silences a track"),
+    ("solo", "plays only this track"),
+    ("marker", "a named flag on the ruler, marking a section of the song"),
+    ("breakdown", "a quieter section where the drums and bass drop out"),
+    ("automate", "let a knob move by itself as the song plays"),
+];
+
+/// The glossary words step `step` of `lesson` uses that no earlier step
+/// of that lesson did.
+pub fn new_words(lesson: &Lesson, step: usize) -> Vec<(&'static str, &'static str)> {
+    let words = |text: &str| -> Vec<String> {
+        text.to_lowercase()
+            .split(|c: char| !(c.is_alphanumeric() || c == '-'))
+            .map(|w| w.trim_matches('-').to_string())
+            .filter(|w| !w.is_empty())
+            .collect()
+    };
+    let uses = |text: &str, term: &str| {
+        let plural = format!("{term}s");
+        words(text).iter().any(|w| w == term || *w == plural || (term == "automate" && w == "automation"))
+    };
+    let text_of = |s: &Step| format!("{} {}", s.text, s.why);
+    GLOSSARY
+        .iter()
+        .filter(|(term, _)| uses(&text_of(&lesson.steps[step]), term))
+        .filter(|(term, _)| !lesson.steps[..step].iter().any(|s| uses(&text_of(s), term)))
+        .copied()
+        .take(3)
+        .collect()
+}
+
 fn clips_of(s: &Snapshot, track: shared::arrangement::TrackId) -> impl Iterator<Item = &Clip> {
     s.arrangement.clips.iter().filter(move |c| c.track == track)
 }
@@ -1840,6 +1932,39 @@ mod tests {
         for l in LESSONS {
             assert!(matches!(l.steps.last().unwrap().kind, Kind::Info), "{}", l.id);
             let _ = starting_project(l.id);
+        }
+    }
+
+    #[test]
+    fn the_path_starts_at_the_first_beat_and_moves_on() {
+        assert_eq!(LESSONS[next_lesson(&[]).unwrap()].id, FIRST_BEAT);
+        let done = vec![FIRST_BEAT.to_string()];
+        assert_eq!(LESSONS[next_lesson(&done).unwrap()].id, BASSLINE);
+        for id in PATH {
+            assert!(LESSONS.iter().any(|l| l.id == *id), "{id} isn't a lesson");
+        }
+        let all: Vec<String> = LESSONS.iter().map(|l| l.id.to_string()).collect();
+        assert_eq!(next_lesson(&all), None);
+        // Off the path, the rest still come up.
+        let path_done: Vec<String> = PATH.iter().map(|s| s.to_string()).collect();
+        assert!(next_lesson(&path_done).is_some());
+    }
+
+    #[test]
+    fn words_are_explained_once_per_lesson() {
+        let bass = LESSONS.iter().find(|l| l.id == PROJECT_BASS).unwrap();
+        let first = bass.steps.iter().position(|s| s.text.contains("off-beats")).unwrap();
+        assert!(new_words(bass, first).iter().any(|(t, _)| *t == "off-beat"));
+        let later = (first + 1..bass.steps.len()).find(|&i| bass.steps[i].text.contains("off-beat"));
+        if let Some(later) = later {
+            assert!(!new_words(bass, later).iter().any(|(t, _)| *t == "off-beat"));
+        }
+        // No false matches inside other words ("sub" in "subtle").
+        let l = &LESSONS[0];
+        for i in 0..l.steps.len() {
+            for (term, _) in new_words(l, i) {
+                assert!(format!("{} {}", l.steps[i].text, l.steps[i].why).to_lowercase().contains(term));
+            }
         }
     }
 }

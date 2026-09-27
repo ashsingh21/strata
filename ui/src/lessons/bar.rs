@@ -57,6 +57,12 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
             VStack::new(cx, move |cx| {
                 // Wrapped to the space between the title and the buttons.
                 Label::new(cx, s.text).class("body").class("lesson-text").width(Stretch(1.0)).text_wrap(true);
+                // New music words in this step, in plain language.
+                let words = super::course::new_words(l, step);
+                if !words.is_empty() {
+                    let line = words.iter().map(|(term, meaning)| format!("{term}: {meaning}")).collect::<Vec<_>>().join("   \u{b7}   ");
+                    Label::new(cx, line).class("value").class("lesson-words").width(Stretch(1.0)).text_wrap(true);
+                }
                 // Under it: why the step just done sounds the way it does
                 // (while the change is still in your ears) - until a hint
                 // for this step is due, which takes the line instead.
