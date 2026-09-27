@@ -483,8 +483,12 @@ impl SynthEngine {
         let velocity_gain = velocity_to_gain(velocity);
         if self.params.voice_mode == VoiceMode::Mono {
             self.mono_stack.retain(|n| *n != note);
+            // Legato (glide, no retrigger) only while another key is still
+            // held. A released note keeps the voice active through its
+            // release tail; treating that as legato let a note played in
+            // the tail inherit the dying envelope and come out ~30 dB down.
+            let legato = !self.mono_stack.is_empty() && self.voices[0].active;
             self.mono_stack.push(note);
-            let legato = self.voices[0].active;
             self.voices[0].note = note;
             self.voices[0].velocity_gain = velocity_gain;
             self.voices[0].target_note = note as f32;
@@ -766,6 +770,43 @@ mod tests {
         s.lfo2.depth = 0.0;
         s.output.volume_db = 0.0;
         s
+    }
+
+    fn peak(engine: &mut SynthEngine, seconds: f32) -> f32 {
+        (0..(SR * seconds) as usize).map(|_| engine.process().0.abs()).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn a_mono_note_in_the_last_ones_release_tail_retriggers() {
+        // Deep Rave Bass style: Mono, a release long enough that the voice
+        // is still fading when the next note starts. Both notes must hit
+        // equally hard.
+        let mut s = raw_osc(Waveform::Saw, 0.0);
+        s.amp_env = EnvParams { attack_ms: 2.0, decay_ms: 400.0, sustain: 0.85, release_ms: 300.0 };
+        let mut engine = SynthEngine::new(SR);
+        engine.set_params(SynthParams::from_state(&s));
+        let hit = |e: &mut SynthEngine, on: bool| e.handle_note_event(NoteEvent { slot: 0, note: 45, on, velocity: 110 });
+        hit(&mut engine, true);
+        let first = peak(&mut engine, 0.1);
+        hit(&mut engine, false);
+        peak(&mut engine, 0.25); // into the release tail, voice still active
+        hit(&mut engine, true);
+        let second = peak(&mut engine, 0.1);
+        assert!(second > first * 0.8, "second note {second} vs first {first}");
+    }
+
+    #[test]
+    fn mono_legato_still_glides_while_a_key_is_held() {
+        let mut s = raw_osc(Waveform::Saw, 0.0);
+        s.output.glide_ms = 100.0;
+        let mut engine = SynthEngine::new(SR);
+        engine.set_params(SynthParams::from_state(&s));
+        engine.handle_note_event(NoteEvent { slot: 0, note: 45, on: true, velocity: 110 });
+        peak(&mut engine, 0.05);
+        engine.handle_note_event(NoteEvent { slot: 0, note: 57, on: true, velocity: 110 });
+        // Held-over: gliding from 45 toward 57, not jumped there.
+        engine.process();
+        assert!(engine.voices[0].current_note < 50.0, "{}", engine.voices[0].current_note);
     }
 
     fn render(state: &SynthState, note: u8, seconds: f32) -> Vec<f32> {
