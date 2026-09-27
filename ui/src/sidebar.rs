@@ -30,7 +30,15 @@ fn section_head(cx: &mut Context, title: &'static str, count: usize) {
 /// A clickable row, hidden while the search text doesn't match its name.
 fn row<'a>(cx: &'a mut Context, name: String, query: Signal<String>, nested: bool) -> Handle<'a, Button> {
     let needle = name.to_lowercase();
-    Button::new(cx, move |cx| Label::new(cx, name.clone()).class("body"))
+    Button::new(cx, move |cx| {
+        // Long sample names end in "…" instead of being cut off mid-word
+        // at the sidebar's edge.
+        Label::new(cx, name.clone())
+            .class("body")
+            .text_wrap(false)
+            .text_overflow(TextOverflow::Ellipsis)
+            .width(Stretch(1.0))
+    })
         .class("side-row")
         .toggle_class("nested", nested)
         .toggle_class("hidden", query.map(move |q| !q.is_empty() && !needle.contains(&q.to_lowercase())))

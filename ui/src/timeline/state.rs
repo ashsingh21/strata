@@ -50,6 +50,14 @@ pub(crate) fn display_name_from_stem(stem: &str) -> String {
     stem.split(['_', '-'])
         .filter(|w| !w.is_empty())
         .map(|w| {
+            // Fix-ups for words the bundled sample packs spell or case
+            // badly - the files keep their names (saved projects reference
+            // them by path), only what's shown changes.
+            match w.to_ascii_lowercase().as_str() {
+                "efect" => return "Effect".to_string(),
+                "bpm" => return "BPM".to_string(),
+                _ => {}
+            }
             let mut chars = w.chars();
             match chars.next() {
                 Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
