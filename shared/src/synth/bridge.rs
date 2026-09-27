@@ -9,6 +9,21 @@ use crate::arrangement::CompressorState;
 
 use super::{seed_synth, Envelope, Filter, Fx, LfoTarget, Mix, Oscillator, SynthState, Unison, VoiceMode};
 
+/// How many effect units a single chain (one track's, or master's) can
+/// carry across the UI -> engine bridge - generous relative to how many
+/// effects a chain is likely to have, matching `MAX_INSTRUMENTS`'s own
+/// "generous, not exact" sizing, and the `TrackHeaderFx` pip control's
+/// own "up to 8, then +n" convention.
+pub const MAX_EFFECTS_PER_CHAIN: usize = 8;
+
+/// One effect unit's config, in the shape the engine actually runs -
+/// single-variant today (only `Compressor` exists), same convention as
+/// `Effect`/`Instrument`, so a second effect type is additive here too.
+#[derive(Clone, Copy, Debug)]
+pub enum EffectUnitState {
+    Compressor(CompressorState),
+}
+
 /// A DSP-relevant snapshot of `SynthState`: everything the audio thread
 /// needs to render a block, with the UI-only fields (name, held notes,
 /// display labels, target counts) stripped out. Plain, `Copy`, allocation
@@ -45,11 +60,14 @@ pub struct SynthParams {
     /// Set by the caller after `from_state`, same as `slot`: this is
     /// arrangement state, not something a saved patch carries.
     pub gain_db: f32,
-    /// The owning track's Compressor insert effect, if any - set by the
-    /// caller same as `gain_db`. `CompressorState::bypass()` (ratio 1.0,
-    /// a true DSP no-op) when the track has none, so the engine always
-    /// runs the same unit rather than branching on `Option`.
-    pub compressor: CompressorState,
+    /// The owning track's effect chain, in order - set by the caller
+    /// same as `gain_db`. Only `effects[..effect_count]` is meaningful;
+    /// the rest of the fixed array is unused padding (same "producer
+    /// assigns a slot, consumer trusts it" convention `bus_slot` already
+    /// uses elsewhere) - a plain fixed array, not a `Vec`, so this stays
+    /// `Copy` and allocation-free across the ring buffer.
+    pub effect_count: u8,
+    pub effects: [EffectUnitState; MAX_EFFECTS_PER_CHAIN],
 }
 
 impl SynthParams {
@@ -75,7 +93,8 @@ impl SynthParams {
             unison: s.unison,
             fx: s.fx,
             gain_db: 0.0,
-            compressor: CompressorState::bypass(),
+            effect_count: 0,
+            effects: [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN],
         }
     }
 }

@@ -426,14 +426,11 @@ impl Model for SynthModel {
                         snapshot.slot = slot as u8;
                         let owning_track = track.and_then(|t| arr.track(t));
                         snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
-                        snapshot.compressor = owning_track
-                            .and_then(|t| {
-                                t.fx.ordered().into_iter().find_map(|n| match (n.enabled, n.effect) {
-                                    (true, shared::arrangement::Effect::Compressor(c)) => Some(c),
-                                    (false, shared::arrangement::Effect::Compressor(_)) => None,
-                                })
-                            })
-                            .unwrap_or_else(shared::arrangement::CompressorState::bypass);
+                        if let Some(t) = owning_track {
+                            let (count, effects) = shared::playback::build_effect_units(t);
+                            snapshot.effect_count = count;
+                            snapshot.effects = effects;
+                        }
                         let _ = self.params_tx.push(snapshot);
                     }
                 }

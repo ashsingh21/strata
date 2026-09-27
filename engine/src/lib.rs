@@ -11,6 +11,7 @@
 pub mod input;
 mod compressor;
 mod dsp;
+mod effects;
 mod fx;
 mod synth;
 
@@ -23,7 +24,7 @@ use shared::playback::{DecodedSource, PlaybackPlan, DECODED_SOURCE_CAPACITY, MAX
 use shared::recorder::RecordCommand;
 use shared::synth::{NoteEvent, SynthParams, SynthTelemetry, MAX_INSTRUMENTS};
 use shared::{Params, Position, Telemetry};
-use compressor::Compressor;
+use effects::EffectChain;
 use synth::SynthEngine;
 
 fn db_to_gain(db: f32) -> f32 {
@@ -241,14 +242,15 @@ where
     // until the first `SynthParams` snapshot for that slot arrives, so a
     // freshly added track isn't silent before the UI's first tick.
     let mut slot_gain = [1.0f32; MAX_INSTRUMENTS];
-    // One persistent Compressor per Carve slot - persistent (not rebuilt
-    // per block) because its envelope follower needs continuity across
-    // blocks to sound like a compressor rather than clicking per block.
-    let mut slot_compressor: Vec<Compressor> = (0..MAX_INSTRUMENTS).map(|_| Compressor::new(sample_rate)).collect();
+    // One persistent effect chain per Carve slot - persistent (not
+    // rebuilt per block) because e.g. a compressor's envelope follower
+    // needs continuity across blocks to sound like one rather than
+    // clicking per block.
+    let mut slot_effects: Vec<EffectChain> = (0..MAX_INSTRUMENTS).map(|_| EffectChain::new(sample_rate)).collect();
     // Same, but per audio track (`PlaybackClip::bus_slot`) rather than
     // per Carve slot - audio clips have no engine "slot" of their own
     // otherwise.
-    let mut bus_compressor: Vec<Compressor> = (0..MAX_BUS_TRACKS).map(|_| Compressor::new(sample_rate)).collect();
+    let mut bus_effects: Vec<EffectChain> = (0..MAX_BUS_TRACKS).map(|_| EffectChain::new(sample_rate)).collect();
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -268,8 +270,8 @@ where
                     if let Some(gain) = slot_gain.get_mut(next.slot as usize) {
                         *gain = db_to_gain(next.gain_db);
                     }
-                    if let Some(compressor) = slot_compressor.get_mut(next.slot as usize) {
-                        compressor.set_state(next.compressor);
+                    if let Some(chain) = slot_effects.get_mut(next.slot as usize) {
+                        chain.set_state(next.effect_count, &next.effects);
                     }
                     if let Some(engine) = synth_engines.get_mut(next.slot as usize) {
                         engine.set_params(next);
@@ -287,8 +289,8 @@ where
                     // Config only - not per-sample - since it only needs
                     // to catch up whenever the plan itself changes.
                     for clip in &current_plan.clips {
-                        if let Some(compressor) = bus_compressor.get_mut(clip.bus_slot as usize) {
-                            compressor.set_state(clip.compressor);
+                        if let Some(chain) = bus_effects.get_mut(clip.bus_slot as usize) {
+                            chain.set_state(clip.effect_count, &clip.effects);
                         }
                     }
                 }
@@ -310,8 +312,8 @@ where
                     sample_rate,
                     &mut synth_engines,
                     &slot_gain,
-                    &mut slot_compressor,
-                    &mut bus_compressor,
+                    &mut slot_effects,
+                    &mut bus_effects,
                     &mut synth_telemetry,
                     &mut click_phase,
                     &mut click_env,
@@ -338,8 +340,8 @@ fn write_block<T>(
     sample_rate: f32,
     synth_engines: &mut [SynthEngine],
     slot_gain: &[f32],
-    slot_compressor: &mut [Compressor],
-    bus_compressor: &mut [Compressor],
+    slot_effects: &mut [EffectChain],
+    bus_effects: &mut [EffectChain],
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
     click_phase: &mut f32,
     click_env: &mut f32,
@@ -377,9 +379,9 @@ fn write_block<T>(
             // Chain order: instrument -> Compressor insert -> track fader,
             // same as a real device chain (the fader is the last thing
             // before the master sum, not part of the chain itself).
-            let (comp_l, comp_r) = slot_compressor[i].process(raw_l, raw_r);
+            let (fx_l, fx_r) = slot_effects[i].process(raw_l, raw_r);
             let gain = slot_gain[i];
-            let (l, r) = (comp_l * gain, comp_r * gain);
+            let (l, r) = (fx_l * gain, fx_r * gain);
             synth_l += l;
             synth_r += r;
             let peak = &mut synth_peaks[i];
@@ -405,7 +407,7 @@ fn write_block<T>(
         *click_env *= click_decay_coeff;
 
         let (clip_l, clip_r) = if playing {
-            mix_audio_clips(plan, sources, *sample_counter as i64, bus_compressor)
+            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects)
         } else {
             (0.0, 0.0)
         };
@@ -464,7 +466,7 @@ fn mix_audio_clips(
     plan: &PlaybackPlan,
     sources: &[DecodedSource],
     pos: i64,
-    bus_compressor: &mut [Compressor],
+    bus_effects: &mut [EffectChain],
 ) -> (f32, f32) {
     let mut bus_raw = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut bus_gain_db = [0.0f32; MAX_BUS_TRACKS];
@@ -505,10 +507,10 @@ fn mix_audio_clips(
             continue;
         }
         let (raw_l, raw_r) = bus_raw[slot];
-        let (comp_l, comp_r) = bus_compressor[slot].process(raw_l, raw_r);
+        let (fx_l, fx_r) = bus_effects[slot].process(raw_l, raw_r);
         let gain = db_to_gain(bus_gain_db[slot]);
-        out_l += comp_l * gain;
-        out_r += comp_r * gain;
+        out_l += fx_l * gain;
+        out_r += fx_r * gain;
     }
     (out_l, out_r)
 }

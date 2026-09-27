@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use crate::arrangement::{Arrangement, ClipContent, CompressorState, Effect, TrackId};
+use crate::synth::{EffectUnitState, MAX_EFFECTS_PER_CHAIN};
 
 /// How many distinct audio tracks can have their own persistent
 /// per-track Compressor state at once - generous relative to how many
@@ -36,11 +37,12 @@ pub struct PlaybackClip {
     /// before they're summed into the track bus, separately from the
     /// track-wide `gain_db` above.
     pub clip_gain_db: f32,
-    /// The owning track's Compressor insert effect, if any -
-    /// `CompressorState::bypass()` when it has none. See `SynthParams`'s
-    /// own `compressor` field for why this is always concrete, never
-    /// `Option`.
-    pub compressor: CompressorState,
+    /// The owning track's effect chain, in order - only
+    /// `effects[..effect_count]` is meaningful. See `SynthParams`'s own
+    /// `effects`/`effect_count` fields for the same "fixed array, not a
+    /// Vec" reasoning.
+    pub effect_count: u8,
+    pub effects: [EffectUnitState; MAX_EFFECTS_PER_CHAIN],
     /// A stable small index for the owning track (its position in
     /// `Arrangement::tracks` at the moment this plan was built, clamped
     /// to `MAX_BUS_TRACKS`), so the engine can keep one persistent
@@ -63,6 +65,30 @@ pub struct PlaybackClip {
 #[derive(Clone, Debug, Default)]
 pub struct PlaybackPlan {
     pub clips: Vec<PlaybackClip>,
+}
+
+/// Converts a track's `EffectGraph` (ordered, source-to-output) into the
+/// fixed-array wire shape both `PlaybackClip` and `SynthParams` carry
+/// across the UI -> engine bridge. A disabled node still occupies a slot
+/// (as its own effect's bypass state) rather than being skipped, so
+/// toggling it on/off later doesn't shift every other slot's index -
+/// same "always run the same unit, never branch on enabled at the DSP
+/// level" reasoning the old always-concrete `CompressorState` had.
+pub fn build_effect_units(track: &crate::arrangement::Track) -> (u8, [EffectUnitState; MAX_EFFECTS_PER_CHAIN]) {
+    let mut effects = [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN];
+    let mut count = 0usize;
+    for node in track.fx.ordered() {
+        if count >= MAX_EFFECTS_PER_CHAIN {
+            break;
+        }
+        effects[count] = match node.effect {
+            Effect::Compressor(c) => {
+                EffectUnitState::Compressor(if node.enabled { c } else { CompressorState::bypass() })
+            }
+        };
+        count += 1;
+    }
+    (count as u8, effects)
 }
 
 impl PlaybackPlan {
@@ -91,15 +117,7 @@ impl PlaybackPlan {
                     .position(|t| t.id == clip.track)
                     .unwrap_or(0)
                     .min(MAX_BUS_TRACKS - 1) as u8;
-                let compressor = track
-                    .fx
-                    .ordered()
-                    .into_iter()
-                    .find_map(|n| match (n.enabled, n.effect) {
-                        (true, Effect::Compressor(c)) => Some(c),
-                        (false, Effect::Compressor(_)) => None,
-                    })
-                    .unwrap_or_else(CompressorState::bypass);
+                let (effect_count, effects) = build_effect_units(track);
                 Some(PlaybackClip {
                     track: clip.track,
                     source: source.clone(),
@@ -108,7 +126,8 @@ impl PlaybackPlan {
                     source_offset_samples: *source_offset_samples,
                     gain_db: track.gain_db,
                     clip_gain_db: clip.gain_db,
-                    compressor,
+                    effect_count,
+                    effects,
                     bus_slot,
                 })
             })
