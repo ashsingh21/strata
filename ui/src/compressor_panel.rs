@@ -53,12 +53,32 @@ pub fn compressor_panel(
     let state = arrangement.map(move |arr| {
         arr.track(track_id)
             .and_then(|t| {
-                t.effects.iter().find_map(|e| match e {
-                    Effect::Compressor(c) => Some(*c),
+                t.effect_slots.iter().find_map(|s| match s.effect {
+                    Effect::Compressor(c) => Some(c),
                 })
             })
             .unwrap_or_default()
     });
+    let slot_index = arrangement.map(move |arr| {
+        arr.track(track_id)
+            .and_then(|t| t.effect_slots.iter().position(|s| matches!(s.effect, Effect::Compressor(_))))
+    });
+    let enabled = arrangement.map(move |arr| {
+        arr.track(track_id)
+            .and_then(|t| t.effect_slots.iter().find(|s| matches!(s.effect, Effect::Compressor(_))))
+            .map(|s| s.enabled)
+            .unwrap_or(true)
+    });
+
+    Button::new(cx, |cx| Label::new(cx, "Enabled"))
+        .class("btn")
+        .class("sm")
+        .toggle_class("is-on", enabled)
+        .on_press(move |cx| {
+            if let Some(index) = slot_index.get() {
+                cx.emit(TimelineEvent::ToggleEffectEnabled(track_id, index));
+            }
+        });
 
     HStack::new(cx, move |cx| {
         knob_col(cx, theme, state, track_id, "Threshold", lin(-60.0, 0.0, -18.0), |s| lin(-60.0, 0.0, s.threshold_db), |s, p| {

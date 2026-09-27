@@ -25,7 +25,10 @@ pub struct Project {
 
 impl Project {
     /// Brings an older project up to date: MIDI tracks saved before tracks
-    /// had instruments get Carve, playing the old shared patch.
+    /// had instruments get Carve, playing the old shared patch; tracks
+    /// saved before per-effect enable bits existed get their old bare
+    /// `Effect`s converted into `EffectSlot`s (enabled by default, so a
+    /// project that already had a Compressor sounds the same on reload).
     pub fn migrate(&mut self) {
         let legacy = self.synth.take();
         for track in &mut self.arrangement.tracks {
@@ -36,6 +39,9 @@ impl Project {
             if track.instrument.is_some() && !has_patch {
                 let patch = legacy.clone().unwrap_or_else(crate::synth::seed_synth);
                 self.instruments.push((track.id, patch));
+            }
+            if track.effect_slots.is_empty() && !track.effects.is_empty() {
+                track.effect_slots = track.effects.drain(..).map(crate::arrangement::EffectSlot::new).collect();
             }
         }
     }
@@ -137,5 +143,26 @@ mod tests {
         }
         assert!(project.instruments.iter().all(|(_, p)| p.filter.cutoff_hz == 444.0));
         assert_eq!(project.instruments.len(), 2);
+    }
+
+    #[test]
+    fn migrates_old_shape_effects_to_effect_slots() {
+        use crate::arrangement::{CompressorState, Effect};
+
+        let mut arrangement = seed_arrangement();
+        let track = &mut arrangement.tracks[0];
+        track.effects = vec![Effect::Compressor(CompressorState { threshold_db: -12.0, ..CompressorState::default() })];
+        track.effect_slots = vec![];
+        let mut project = Project { arrangement, instruments: vec![], synth: None };
+
+        project.migrate();
+
+        let track = &project.arrangement.tracks[0];
+        assert!(track.effects.is_empty(), "old-shape data should be drained, not left duplicated");
+        assert_eq!(track.effect_slots.len(), 1);
+        assert!(track.effect_slots[0].enabled, "an effect that was already on should stay on after migrating");
+        match track.effect_slots[0].effect {
+            Effect::Compressor(c) => assert_eq!(c.threshold_db, -12.0),
+        }
     }
 }

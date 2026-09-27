@@ -334,6 +334,12 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   height: {ruler}px;
   padding: 0px {space2}px;
 }}
+.fx-pip {{
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  border-width: 1px;
+}}
 .readout.snap {{
   height: 20px;
   font-size: 12px;
@@ -535,6 +541,10 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
         ],
     );
     rule(".btn:hover", vec![("background-color", c("bg-300"))]);
+    // TrackHeaderFx's pips: hollow (border only) when an effect is
+    // bypassed, filled solid when it's on.
+    rule(".fx-pip", vec![("background-color", "transparent".to_string()), ("border-color", c("ink-faint"))]);
+    rule(".fx-pip.is-on", vec![("background-color", c("ink")), ("border-color", c("ink"))]);
     rule(".menu-item:hover", vec![("background-color", c("bg-300"))]);
     // `line` (the faint hairline .panel uses against its own bg-100) is
     // nearly invisible on the menu's bg-200: line-control (ink-faint) is

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    CompressorState, Effect, Instrument,
+    CompressorState, Effect, EffectSlot, Instrument,
     empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, Marker, MarkerId, MidiNote,
     PeakPyramid, SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
@@ -442,6 +442,11 @@ pub enum TimelineEvent {
     /// (like `SetTrackHeight`/gain, a knob-drag preference, not an edit
     /// worth a history entry), and a no-op if the track has none.
     SetCompressorState(TrackId, CompressorState),
+    /// Flips one effect slot's own enabled bit (the `TrackHeaderFx` pip).
+    ToggleEffectEnabled(TrackId, usize),
+    /// Bypasses (`true`) or restores (`false`) every effect on the
+    /// track at once - the header's Alt-click "bypass all".
+    SetChainBypassed(TrackId, bool),
     /// Drag on a track header's resize handle: absolute new height in px
     /// (clamped by the handler), not undoable - a view preference, like
     /// mute or gain.
@@ -593,10 +598,18 @@ impl Model for TimelineState {
                 // unit, staying lined up with each other.
                 let pattern_start = clips.iter().map(|c| c.start).min().unwrap();
                 let pattern_end = clips.iter().map(|c| c.start + c.length).max().unwrap();
-                let pattern_length = pattern_end - pattern_start;
-                if pattern_length <= 0 {
+                let raw_length = pattern_end - pattern_start;
+                if raw_length <= 0 {
                     return;
                 }
+                // Round up to a whole number of bars: a repeated group is
+                // a per-bar unit, not a beat-filling one - a burst of hits
+                // clustered near the start of a bar should repeat once
+                // per bar, not once per beat right on the burst's own
+                // (much shorter) raw span.
+                let ticks_per_bar = arr.tempo_map.time_signature_at(pattern_start).ticks_per_bar();
+                let bars = (raw_length + ticks_per_bar - 1) / ticks_per_bar;
+                let pattern_length = bars * ticks_per_bar;
                 let repeats = (loop_range.end - pattern_end) / pattern_length;
                 if repeats < 1 {
                     return;
@@ -608,11 +621,18 @@ impl Model for TimelineState {
                         for clip in &clips {
                             let new_id = arr.alloc_id();
                             new_selection.insert(new_id);
-                            commands.push(Command::DuplicateClip {
-                                clip: clip.id,
-                                new_id,
-                                offset: pattern_length * i,
-                            });
+                            // Not `DuplicateClip`: that clones the source
+                            // verbatim, gain_db included, so every repeat
+                            // of a drum-pad-tapped pattern would replay
+                            // the exact same handful of gain values over
+                            // and over - reads as mechanical/looped even
+                            // though each hit *within* one repeat still
+                            // varies. Each copy gets its own fresh nudge.
+                            let mut new_clip = clip.clone();
+                            new_clip.id = new_id;
+                            new_clip.start = clip.start + pattern_length * i;
+                            new_clip.gain_db = random_gain_variation_db();
+                            commands.push(Command::InsertClip { clip: Box::new(new_clip) });
                         }
                     }
                     stack.do_command(Command::Batch(commands), arr);
@@ -795,9 +815,9 @@ impl Model for TimelineState {
             TimelineEvent::AddCompressorEffect(track) => {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
-                    if !t.effects.iter().any(|e| matches!(e, Effect::Compressor(_))) {
-                        let mut effects = t.effects.clone();
-                        effects.push(Effect::Compressor(CompressorState::default()));
+                    if !t.effect_slots.iter().any(|s| matches!(s.effect, Effect::Compressor(_))) {
+                        let mut effects = t.effect_slots.clone();
+                        effects.push(EffectSlot::new(Effect::Compressor(CompressorState::default())));
                         self.do_command(Command::SetTrackEffects { track: *track, effects });
                     }
                 }
@@ -805,21 +825,41 @@ impl Model for TimelineState {
             TimelineEvent::RemoveCompressorEffect(track) => {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
-                    let effects: Vec<Effect> =
-                        t.effects.iter().filter(|e| !matches!(e, Effect::Compressor(_))).cloned().collect();
+                    let effects: Vec<EffectSlot> =
+                        t.effect_slots.iter().filter(|s| !matches!(s.effect, Effect::Compressor(_))).cloned().collect();
                     self.do_command(Command::SetTrackEffects { track: *track, effects });
                 }
             }
             TimelineEvent::SetCompressorState(track, state) => {
                 self.with_arrangement(|arr, _| {
                     if let Some(t) = arr.track_mut(*track) {
-                        if let Some(Effect::Compressor(c)) =
-                            t.effects.iter_mut().find(|e| matches!(e, Effect::Compressor(_)))
+                        if let Some(slot) =
+                            t.effect_slots.iter_mut().find(|s| matches!(s.effect, Effect::Compressor(_)))
                         {
-                            *c = *state;
+                            slot.effect = Effect::Compressor(*state);
                         }
                     }
                 });
+            }
+            TimelineEvent::ToggleEffectEnabled(track, index) => {
+                let arr = self.arrangement.get();
+                if let Some(t) = arr.track(*track) {
+                    let mut effects = t.effect_slots.clone();
+                    if let Some(slot) = effects.get_mut(*index) {
+                        slot.enabled = !slot.enabled;
+                        self.do_command(Command::SetTrackEffects { track: *track, effects });
+                    }
+                }
+            }
+            TimelineEvent::SetChainBypassed(track, bypassed) => {
+                let arr = self.arrangement.get();
+                if let Some(t) = arr.track(*track) {
+                    let mut effects = t.effect_slots.clone();
+                    for slot in &mut effects {
+                        slot.enabled = !bypassed;
+                    }
+                    self.do_command(Command::SetTrackEffects { track: *track, effects });
+                }
             }
             TimelineEvent::SetTrackHeight { track, height } => {
                 let height = height.clamp(shared::arrangement::MIN_TRACK_HEIGHT, shared::arrangement::MAX_TRACK_HEIGHT);
@@ -920,6 +960,7 @@ impl Model for TimelineState {
                         height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
                         instrument: Instrument::default_for(*kind),
                         effects: vec![],
+                        effect_slots: vec![],
                     };
                     stack.do_command(
                         Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] },
@@ -971,6 +1012,7 @@ impl Model for TimelineState {
                         height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
                         instrument: None,
                         effects: vec![],
+                        effect_slots: vec![],
                     };
                     let clip = Clip {
                         id: clip_id,
@@ -1060,6 +1102,7 @@ impl Model for TimelineState {
                             height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
                             instrument: None,
                             effects: vec![],
+                            effect_slots: vec![],
                         };
                         commands.push(Command::InsertTrack {
                             track: Box::new(track),
@@ -1188,6 +1231,7 @@ impl Model for TimelineState {
                             height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
                             instrument: None,
                             effects: vec![],
+                            effect_slots: vec![],
                         };
                         stack.do_command(
                             Command::InsertTrack {

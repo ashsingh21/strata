@@ -81,6 +81,7 @@ mod tests {
             height: 56.0,
             instrument: None,
         effects: vec![],
+        effect_slots: vec![],
         });
         arr
     }

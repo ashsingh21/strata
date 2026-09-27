@@ -428,8 +428,9 @@ impl Model for SynthModel {
                         snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
                         snapshot.compressor = owning_track
                             .and_then(|t| {
-                                t.effects.iter().find_map(|e| match e {
-                                    shared::arrangement::Effect::Compressor(c) => Some(*c),
+                                t.effect_slots.iter().find_map(|s| match (s.enabled, s.effect) {
+                                    (true, shared::arrangement::Effect::Compressor(c)) => Some(c),
+                                    (false, shared::arrangement::Effect::Compressor(_)) => None,
                                 })
                             })
                             .unwrap_or_else(shared::arrangement::CompressorState::bypass);

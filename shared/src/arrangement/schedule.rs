@@ -67,6 +67,7 @@ mod tests {
             height: 56.0,
             instrument: None,
         effects: vec![],
+        effect_slots: vec![],
         });
         arr.clips.push(Clip {
             id: 1,
@@ -126,6 +127,7 @@ mod tests {
             height: 56.0,
             instrument: None,
         effects: vec![],
+        effect_slots: vec![],
         });
         let scheduled = notes_in_range(&arr, PPQ - 10, PPQ + 10);
         assert!(scheduled.note_on.is_empty());

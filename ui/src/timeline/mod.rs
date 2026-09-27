@@ -54,6 +54,7 @@ pub fn timeline_view(
     loop_on: Signal<bool>,
     renaming_marker: Signal<Option<shared::arrangement::MarkerId>>,
     renaming_track: Signal<Option<shared::arrangement::TrackId>>,
+    viewing_effect: Signal<bool>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -99,7 +100,7 @@ pub fn timeline_view(
                 Binding::new(cx, arrangement, move |cx| {
                     let arr = arrangement.get();
                     for track in arr.tracks.clone() {
-                        track_header(cx, arrangement, theme, selected_track, renaming_track, track.id);
+                        track_header(cx, arrangement, theme, selected_track, renaming_track, track.id, viewing_effect);
                         for lane in arr.automation.iter().filter(|a| a.track == track.id) {
                             automation_header(cx, arrangement, lane.id);
                         }

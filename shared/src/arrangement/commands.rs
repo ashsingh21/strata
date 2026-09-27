@@ -5,7 +5,7 @@
 
 use super::model::{
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipContent, ClipId,
-    Effect, Instrument, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId,
+    EffectSlot, Instrument, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId,
 };
 #[cfg(test)]
 use super::model::DEFAULT_VELOCITY;
@@ -32,7 +32,7 @@ pub enum Command {
     /// inverse carries the old one" shape as `SetInstrument`, rather than
     /// index-based add/remove, since there's only ever one effect type to
     /// toggle so far.
-    SetTrackEffects { track: TrackId, effects: Vec<Effect> },
+    SetTrackEffects { track: TrackId, effects: Vec<EffectSlot> },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -257,7 +257,7 @@ impl Command {
 
             Command::SetTrackEffects { track, effects } => {
                 let t = arr.track_mut(track).expect("SetTrackEffects: unknown track");
-                let previous = std::mem::replace(&mut t.effects, effects);
+                let previous = std::mem::replace(&mut t.effect_slots, effects);
                 Command::SetTrackEffects { track, effects: previous }
             }
 
@@ -434,6 +434,7 @@ mod tests {
             height: 56.0,
             instrument: None,
             effects: vec![],
+            effect_slots: vec![],
         });
         arr
     }
@@ -626,6 +627,7 @@ mod tests {
             height: 56.0,
             instrument: None,
             effects: vec![],
+            effect_slots: vec![],
         }
     }
 

@@ -380,6 +380,7 @@ fn main() -> Result<(), ApplicationError> {
                         loop_on,
                         tl_renaming_marker,
                         tl_renaming_track,
+                        viewing_effect,
                     );
 
                     Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));

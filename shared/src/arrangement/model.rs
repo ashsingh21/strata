@@ -58,9 +58,43 @@ pub struct Track {
     /// The track's insert effect chain - separate from `instrument`
     /// (an audio track has effects but no instrument; a MIDI track can
     /// have both). `default` so projects saved before effects existed
-    /// still load.
+    /// still load. What all app code reads/writes now; `Project::migrate`
+    /// fills this in from `effects` (below) for a project saved before
+    /// per-effect enable bits existed.
     #[serde(default)]
+    pub effect_slots: Vec<EffectSlot>,
+    /// Old shape (a bare `Effect`, no enable bit) - read-only, kept only
+    /// so `Project::migrate` can convert it into `effect_slots` once.
+    /// Never written to a new save (`skip_serializing`), same convention
+    /// as `Project`'s own `synth` legacy field.
+    #[serde(default, skip_serializing)]
     pub effects: Vec<Effect>,
+}
+
+/// One effect in a track's chain, plus whether it's actually running -
+/// added so the `TrackHeaderFx` pip control (filled = on, hollow = off)
+/// has a real bit to read instead of existence-only state.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EffectSlot {
+    pub effect: Effect,
+    #[serde(default = "default_effect_enabled")]
+    pub enabled: bool,
+}
+
+fn default_effect_enabled() -> bool {
+    true
+}
+
+impl EffectSlot {
+    pub fn new(effect: Effect) -> Self {
+        Self { effect, enabled: true }
+    }
+}
+
+impl From<Effect> for EffectSlot {
+    fn from(effect: Effect) -> Self {
+        Self::new(effect)
+    }
 }
 
 /// A track's instrument. Only Carve so far.

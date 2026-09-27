@@ -64,7 +64,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
     let panel = Memo::new(move |_| {
         let arr = p.arrangement.get();
         match p.selected_track.get().and_then(|id| arr.track(id).cloned()) {
-            Some(t) if p.viewing_effect.get() && t.effects.iter().any(|e| matches!(e, Effect::Compressor(_))) => {
+            Some(t) if p.viewing_effect.get() && t.effect_slots.iter().any(|s| matches!(s.effect, Effect::Compressor(_))) => {
                 Panel::Compressor(t.id)
             }
             Some(t) if t.kind == TrackKind::Audio => Panel::Audio,
@@ -208,7 +208,7 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
         let has_compressor = Memo::new(move |_| {
             p.selected_track
                 .get()
-                .and_then(|id| p.arrangement.get().track(id).map(|t| t.effects.iter().any(|e| matches!(e, Effect::Compressor(_)))))
+                .and_then(|id| p.arrangement.get().track(id).map(|t| t.effect_slots.iter().any(|s| matches!(s.effect, Effect::Compressor(_)))))
                 .unwrap_or(false)
         });
         Button::new(cx, |cx| Label::new(cx, "Compressor"))

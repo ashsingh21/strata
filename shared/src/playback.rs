@@ -92,10 +92,11 @@ impl PlaybackPlan {
                     .unwrap_or(0)
                     .min(MAX_BUS_TRACKS - 1) as u8;
                 let compressor = track
-                    .effects
+                    .effect_slots
                     .iter()
-                    .find_map(|e| match e {
-                        Effect::Compressor(c) => Some(*c),
+                    .find_map(|s| match (s.enabled, s.effect) {
+                        (true, Effect::Compressor(c)) => Some(c),
+                        (false, Effect::Compressor(_)) => None,
                     })
                     .unwrap_or_else(CompressorState::bypass);
                 Some(PlaybackClip {
@@ -161,6 +162,7 @@ mod tests {
             height: 56.0,
             instrument: None,
         effects: vec![],
+        effect_slots: vec![],
         }
     }
 

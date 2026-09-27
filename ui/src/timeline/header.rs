@@ -5,8 +5,8 @@ use vizia::prelude::*;
 use vizia::vg;
 
 use shared::arrangement::{
-    Arrangement, AutomationLaneId, ClipColor, Effect, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
-    MIN_TRACK_HEIGHT,
+    Arrangement, AutomationLaneId, ClipColor, EffectSlot, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT,
+    MAX_TRACK_HEIGHT, MIN_TRACK_HEIGHT,
 };
 
 use crate::fader::{Fader, FaderModifiers};
@@ -147,6 +147,7 @@ pub fn track_header<'a>(
     selected_track: Signal<Option<TrackId>>,
     renaming_track: Signal<Option<TrackId>>,
     track_id: TrackId,
+    viewing_effect: Signal<bool>,
 ) -> Handle<'a, impl View> {
     let name = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.name.clone()).unwrap_or_default()
@@ -163,9 +164,15 @@ pub fn track_header<'a>(
     let mute = arrangement.map(move |arr| arr.track(track_id).map(|t| t.mute).unwrap_or(false));
     let solo = arrangement.map(move |arr| arr.track(track_id).map(|t| t.solo).unwrap_or(false));
     let arm = arrangement.map(move |arr| arr.track(track_id).map(|t| t.arm).unwrap_or(false));
-    let has_compressor = arrangement.map(move |arr| {
-        arr.track(track_id).is_some_and(|t| t.effects.iter().any(|e| matches!(e, Effect::Compressor(_))))
+    let effect_slots: Memo<Vec<EffectSlot>> = arrangement.map(move |arr| {
+        arr.track(track_id).map(|t| t.effect_slots.clone()).unwrap_or_default()
     });
+    let has_effects = effect_slots.map(|slots| !slots.is_empty());
+    let all_bypassed = effect_slots.map(|slots| !slots.is_empty() && slots.iter().all(|s| !s.enabled));
+    // Phase 1 of the effects-board plan: there's no real board to open
+    // yet, so "open" degrades to the existing device-panel toggle - this
+    // becomes a real board-open flag once `fx_board` exists.
+    let board_open = Memo::new(move |_| viewing_effect.get() && selected_track.get() == Some(track_id));
     // The fader's own drag position is committed to the arrangement only
     // on release (see the `Fader::on_release` wiring below - committing on
     // every intermediate move would rebuild this whole header list mid-
@@ -228,23 +235,46 @@ pub fn track_header<'a>(
                     }
                 });
 
-                // Compressor indicator: only visible with one on this
-                // track (an at-a-glance "this track has a Compressor on
-                // it", without opening the device panel to find out) -
-                // click to remove it, same no-confirmation-dialog
-                // convention as every other destructive edit here. Named
-                // for the effect itself, not generic "FX" - there's only
-                // one effect type so far, and a vague label would just
-                // raise "an effect? which one?" for no reason. Lives in
-                // the title row (not down with M/S/Rec) so it reads as
-                // "what's on this track" alongside its name, not as a
-                // fourth transport-style toggle.
-                Button::new(cx, |cx| Label::new(cx, "Comp \u{2715}"))
-                    .class("btn")
-                    .class("sm")
-                    .class("is-on")
-                    .toggle_class("hidden", has_compressor.map(|c| !*c))
-                    .on_press(move |cx| cx.emit(TimelineEvent::RemoveCompressorEffect(track_id)));
+                // TrackHeaderFx: "FX" plus one pip per effect (filled =
+                // on, hollow = bypassed), an at-a-glance "what's on this
+                // track" without opening the panel. Click opens the
+                // device panel and selects the track (stands in for a
+                // real board, which a later phase adds); Alt-click
+                // toggles the whole chain's bypass without opening
+                // anything. Lives in the title row, not down with
+                // M/S/Rec, so it reads as part of "what's on this track"
+                // alongside its name.
+                Button::new(cx, move |cx| {
+                    HStack::new(cx, move |cx| {
+                        Label::new(cx, "FX")
+                            .class("meta")
+                            .color(all_bypassed.map(move |b| if *b { theme.get().palette().ink_muted } else { theme.get().palette().ink }));
+                        Binding::new(cx, effect_slots, move |cx| {
+                            let slots = effect_slots.get();
+                            for slot in slots.iter().take(8) {
+                                Element::new(cx).class("fx-pip").toggle_class("is-on", slot.enabled);
+                            }
+                            if slots.len() > 8 {
+                                Label::new(cx, format!("+{}", slots.len() - 8)).class("meta");
+                            }
+                        });
+                    })
+                    .gap(Pixels(2.0))
+                    .alignment(Alignment::Center)
+                    .size(Auto)
+                })
+                .class("btn")
+                .class("sm")
+                .toggle_class("quiet", has_effects.map(|h| !*h))
+                .toggle_class("is-on", board_open)
+                .on_press(move |cx| {
+                    if cx.modifiers().alt() {
+                        cx.emit(TimelineEvent::SetChainBypassed(track_id, !all_bypassed.get()));
+                    } else {
+                        cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
+                        viewing_effect.set(true);
+                    }
+                });
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, kind_label).class("meta");
