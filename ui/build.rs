@@ -677,7 +677,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     // visibly float on top of it instead of every surface in the board
     // being the same flat bg-100.
     rule(".fx-canvas", vec![("background-color", c("bg-000"))]);
-    rule(".fx-node", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
+    rule(".fx-node", vec![("background-color", c("bg-raised")), ("border-color", c("line-control"))]);
     // Draggable effect nodes (not the fixed Source/Out pills) and output
     // ports brighten on hover, so what can be grabbed reads as grabbable.
     // Before `.is-sel` so a selected node keeps its focus border.
