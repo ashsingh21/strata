@@ -186,6 +186,18 @@ fn file_menu_sep(cx: &mut Context) {
 }
 
 /// One transport button: a drawn glyph, its colour following its state.
+/// A short hover label below `handle` - for icon-only or otherwise
+/// unlabelled header controls.
+fn with_tip<'a, V: View>(handle: Handle<'a, V>, text: &'static str) -> Handle<'a, V> {
+    handle.tooltip(move |cx| {
+        Tooltip::new(cx, move |cx| {
+            Label::new(cx, text);
+        })
+        .placement(Placement::Bottom)
+        .arrow(false)
+    })
+}
+
 fn transport_button<'a>(
     cx: &'a mut Context,
     theme: Signal<ThemeId>,
@@ -427,12 +439,13 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         HStack::new(cx, move |cx| {
             let never = Signal::new(false);
             let ink = |p: &crate::tokens::Palette, _on: bool| p.ink;
-            transport_button(cx, theme, GlyphKind::Rewind, never, ink).on_press(|cx| cx.emit(AppEvent::Rewind));
-            transport_button(cx, theme, GlyphKind::Stop, never, ink).on_press(|cx| cx.emit(AppEvent::Stop));
-            transport_button(cx, theme, GlyphKind::Play, playing, |p, on| if on { p.on_signal } else { p.ink })
+            with_tip(transport_button(cx, theme, GlyphKind::Rewind, never, ink), "Return to start (Home)")
+                .on_press(|cx| cx.emit(AppEvent::Rewind));
+            with_tip(transport_button(cx, theme, GlyphKind::Stop, never, ink), "Stop").on_press(|cx| cx.emit(AppEvent::Stop));
+            with_tip(transport_button(cx, theme, GlyphKind::Play, playing, |p, on| if on { p.on_signal } else { p.ink }), "Play / stop (Space)")
                 .toggle_class("is-play", playing)
                 .on_press(|cx| cx.emit(AppEvent::TogglePlay));
-            transport_button(cx, theme, GlyphKind::Record, record_armed, |p, on| if on { p.on_record } else { p.ink })
+            with_tip(transport_button(cx, theme, GlyphKind::Record, record_armed, |p, on| if on { p.on_record } else { p.ink }), "Arm recording")
                 .toggle_class("is-rec", record_armed)
                 .on_press(|cx| cx.emit(AppEvent::ToggleArm));
         })
@@ -458,10 +471,10 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .alignment(Alignment::Left)
         .size(Auto);
 
-        transport_button(cx, theme, GlyphKind::Loop, loop_on, |p, on| if on { p.md } else { p.ink })
+        with_tip(transport_button(cx, theme, GlyphKind::Loop, loop_on, |p, on| if on { p.md } else { p.ink }), "Loop")
             .toggle_class("is-mod", loop_on)
             .on_press(|cx| cx.emit(AppEvent::ToggleLoop));
-        transport_button(cx, theme, GlyphKind::Metronome, click_on, |p, _| p.ink)
+        with_tip(transport_button(cx, theme, GlyphKind::Metronome, click_on, |p, _| p.ink), "Metronome")
             .toggle_class("is-on", click_on)
             .on_press(|cx| cx.emit(AppEvent::ToggleClick));
 
@@ -477,8 +490,11 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             Meter::new(cx, props.input_level, props.input_level, Signal::new(false), Signal::new(false), theme, |_cx| {})
                 .width(Pixels(10.0))
                 .height(Pixels(24.0));
-            Knob::plain(cx, props.input_gain_pos, 0.5, theme, |cx, p| cx.emit(RecorderModelEvent::SetInputGain(p)))
-                .size(Pixels(22.0));
+            with_tip(
+                Knob::plain(cx, props.input_gain_pos, 0.5, theme, |cx, p| cx.emit(RecorderModelEvent::SetInputGain(p))),
+                "Input gain",
+            )
+            .size(Pixels(22.0));
 
             // Which physical input actually gets opened - the OS's own
             // "default" is otherwise the only option, which silently
@@ -490,7 +506,9 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             let device_label = Memo::new(move |_| {
                 props.selected_input_device.get().map(|d| d.to_string()).unwrap_or_else(|| "Default".to_string())
             });
-            Button::new(cx, move |cx| Label::new(cx, device_label))
+            // The tooltip says the part the menu doesn't: a new choice only
+            // applies after a restart.
+            with_tip(Button::new(cx, move |cx| Label::new(cx, device_label)), "Recording input device - applies on next launch")
                 .class("btn")
                 .class("quiet")
                 .on_press(move |_cx| menus.toggle(input_device_menu_open));

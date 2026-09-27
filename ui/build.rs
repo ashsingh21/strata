@@ -430,6 +430,20 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 .context-menu-backdrop {{
   z-index: 170;
 }}
+/* Tooltips: Vizia's own tooltip styling (and the fade it animates) lives
+   in the default theme this app ignores, so both are defined here. */
+@keyframes tooltip_fade {{
+  0% {{ opacity: 0; }}
+  100% {{ opacity: 1; }}
+}}
+tooltip {{
+  size: auto;
+  max-width: 260px;
+  padding: 4px 8px;
+  border-radius: {radius_sm}px;
+  border-width: 1px;
+  font-size: 12px;
+}}
 .context-menu {{
   border-radius: {radius_md}px;
   border-width: 1px;
@@ -541,6 +555,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     // border every button and readout uses) rather than the faint `line`
     // hairline panels use between themselves.
     rule(".context-menu", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
+    rule("tooltip", vec![("background-color", c("bg-300")), ("border-color", c("line-control")), ("color", c("ink"))]);
 
     rule(
         ".btn",
