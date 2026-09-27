@@ -1001,10 +1001,7 @@ impl Model for TimelineState {
                     new_track = Some(id);
                     let index = arr.tracks.len();
                     let color = COLORS[index % COLORS.len()];
-                    let name = match kind {
-                        TrackKind::Audio => format!("Audio {id}"),
-                        TrackKind::Midi => format!("MIDI {id}"),
-                    };
+                    let name = arr.next_track_name(*kind);
                     let track = Track {
                         id,
                         name,

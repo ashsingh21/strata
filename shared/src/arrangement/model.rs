@@ -647,6 +647,23 @@ impl Arrangement {
         id
     }
 
+    /// "Audio 2", "MIDI 1", ... - the lowest number not already used by a
+    /// track name with that prefix. Numbering by the arrangement-wide id
+    /// instead gave names like "Audio 15" for the fourth track.
+    pub fn next_track_name(&self, kind: TrackKind) -> String {
+        let prefix = match kind {
+            TrackKind::Audio => "Audio",
+            TrackKind::Midi => "MIDI",
+        };
+        let taken: std::collections::HashSet<u32> = self
+            .tracks
+            .iter()
+            .filter_map(|t| t.name.strip_prefix(prefix)?.strip_prefix(' ')?.parse().ok())
+            .collect();
+        let n = (1..).find(|n| !taken.contains(n)).unwrap_or(1);
+        format!("{prefix} {n}")
+    }
+
     pub fn track(&self, id: TrackId) -> Option<&Track> {
         self.tracks.iter().find(|t| t.id == id)
     }
@@ -1013,5 +1030,46 @@ mod effect_graph_tests {
         assert_eq!(eq_params.len(), 3);
         assert!(eq_params.contains(&EffectParam::EqFreq));
         assert!(!eq_params.contains(&EffectParam::CompressorThreshold), "an EQ node shouldn't offer Compressor knobs");
+    }
+}
+
+#[cfg(test)]
+mod track_name_tests {
+    use super::*;
+
+    fn arrangement_with(names: &[&str]) -> Arrangement {
+        let mut arr = crate::arrangement::empty_arrangement();
+        for name in names {
+            let id = arr.alloc_id();
+            arr.tracks.push(Track {
+                id,
+                name: name.to_string(),
+                color: ClipColor::Coral,
+                kind: TrackKind::Audio,
+                mute: false,
+                solo: false,
+                arm: false,
+                gain_db: 0.0,
+                height: DEFAULT_TRACK_HEIGHT,
+                instrument: None,
+                effects: vec![],
+                effect_slots: vec![],
+                fx: EffectGraph::new(),
+            });
+        }
+        arr
+    }
+
+    #[test]
+    fn numbers_per_kind_not_by_global_id() {
+        let arr = arrangement_with(&["Audio 1", "Kick", "Snare"]);
+        assert_eq!(arr.next_track_name(TrackKind::Audio), "Audio 2");
+        assert_eq!(arr.next_track_name(TrackKind::Midi), "MIDI 1");
+    }
+
+    #[test]
+    fn fills_the_lowest_gap_and_ignores_lookalikes() {
+        let arr = arrangement_with(&["Audio 1", "Audio 3", "Audio 2b", "Audiophile 2"]);
+        assert_eq!(arr.next_track_name(TrackKind::Audio), "Audio 2");
     }
 }
