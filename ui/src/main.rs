@@ -7,6 +7,7 @@ mod device_area;
 mod eq_curve;
 mod eq_panel;
 mod fader;
+mod fx_board;
 mod glyph;
 mod interval_input;
 mod knob;
@@ -105,6 +106,9 @@ fn main() -> Result<(), ApplicationError> {
         // selected track has no Compressor, `device_area`'s own Panel
         // computation falls back to its instrument/empty state anyway.
         let viewing_effect: Signal<Option<shared::arrangement::EffectNodeId>> = Signal::new(None);
+        // Which track's Effects Board is open in the lower panel, if any
+        // - takes over from `device_area` there while set.
+        let board_open_track: Signal<Option<shared::arrangement::TrackId>> = Signal::new(None);
         let mut timeline_state =
             TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected, selected_track);
         let tl_arrangement = timeline_state.arrangement;
@@ -382,7 +386,7 @@ fn main() -> Result<(), ApplicationError> {
                         loop_on,
                         tl_renaming_marker,
                         tl_renaming_track,
-                        viewing_effect,
+                        board_open_track,
                     );
 
                     Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
@@ -390,32 +394,41 @@ fn main() -> Result<(), ApplicationError> {
                     // The lower panel spans the arrangement's width and sizes to
                     // its device; the device fills it rather than floating.
                     VStack::new(cx, move |cx| {
-                        device_area::device_area(
-                            cx,
-                            device_area::DeviceAreaProps {
-                                theme,
-                                arrangement: tl_arrangement,
-                                selected_track,
-                                viewing_effect,
-                                synth_state,
-                                lfo_phases: synth_lfo_phases,
-                                octave_shift: synth_octave_shift,
-                                meter_l: synth_meter_l,
-                                meter_r: synth_meter_r,
-                                help_open: synth_help_open,
-                                lfo_drag: synth_lfo_drag,
-                                open_clip: piano_roll_open_clip,
-                                edit_mode: piano_roll_mode,
-                                label_mode: piano_roll_label_mode,
-                                selected_notes: piano_roll_selected,
-                                snap: tl_snap,
-                                playhead: tl_playhead,
-                                key: interval_key,
-                                scale_mask: interval_scale_mask,
-                                interval_open,
-                                show_note_names: interval_show_note_names,
-                            },
-                        );
+                        Binding::new(cx, board_open_track, move |cx| {
+                            if let Some(track) = board_open_track.get() {
+                                fx_board::fx_board(
+                                    cx,
+                                    fx_board::FxBoardProps { theme, arrangement: tl_arrangement, track, board_open_track },
+                                );
+                                return;
+                            }
+                            device_area::device_area(
+                                cx,
+                                device_area::DeviceAreaProps {
+                                    theme,
+                                    arrangement: tl_arrangement,
+                                    selected_track,
+                                    viewing_effect,
+                                    synth_state,
+                                    lfo_phases: synth_lfo_phases,
+                                    octave_shift: synth_octave_shift,
+                                    meter_l: synth_meter_l,
+                                    meter_r: synth_meter_r,
+                                    help_open: synth_help_open,
+                                    lfo_drag: synth_lfo_drag,
+                                    open_clip: piano_roll_open_clip,
+                                    edit_mode: piano_roll_mode,
+                                    label_mode: piano_roll_label_mode,
+                                    selected_notes: piano_roll_selected,
+                                    snap: tl_snap,
+                                    playhead: tl_playhead,
+                                    key: interval_key,
+                                    scale_mask: interval_scale_mask,
+                                    interval_open,
+                                    show_note_names: interval_show_note_names,
+                                },
+                            );
+                        });
                     })
                     .gap(Pixels(tokens::SPACE_2))
                     .class("lower-panel")
