@@ -136,7 +136,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                     });
             }),
             Panel::Audio => empty_state(cx, "Audio track \u{b7} no instrument", |_| {}),
-            Panel::Nothing => empty_state(cx, "No track selected", |_| {}),
+            Panel::Nothing => empty_state(cx, "Select a track to see its instrument and effects", |_| {}),
         });
     });
 
@@ -164,7 +164,13 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
         });
         Element::new(cx).class("swatch").background_color(color).toggle_class("hidden", track.map(|t| t.is_none()));
         Label::new(cx, track.map(|t| t.as_ref().map(|(name, _)| name.clone()).unwrap_or_default())).class("title");
-        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
+        // Hidden with the swatch/name when no track is selected - on its
+        // own it was a stray line at the strip's left edge.
+        Element::new(cx)
+            .class("hairline")
+            .toggle_class("hidden", track.map(|t| t.is_none()))
+            .width(Pixels(1.0))
+            .height(Pixels(16.0));
 
         let editing = p.open_clip.map(|c| c.is_some());
         let clip_name = Memo::new(move |_| {
@@ -304,7 +310,9 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             });
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-        Button::new(cx, |cx| Label::new(cx, "Show input"))
+        // Toggles the Interval input (scale) panel - named after it, since
+        // "Show input" read like the audio input.
+        Button::new(cx, |cx| Label::new(cx, "Interval input"))
             .class("btn")
             .class("quiet")
             .toggle_class("is-on", p.interval_open)

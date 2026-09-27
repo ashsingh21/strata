@@ -22,7 +22,7 @@ use spacing::Spacing;
 use state::{scale_name, IntervalInputEvent};
 
 /// Row 3 of the device area: docked under Carve (not floating over the
-/// arrangement), toggled by "Show input" in the device chain or the Key
+/// arrangement), toggled by "Interval input" in the device chain or the Key
 /// button in the header. Built only while open - a `Binding` rather than a
 /// `display: none` toggle, since text shown from hidden never laid out.
 #[allow(clippy::too_many_arguments)]
