@@ -24,6 +24,10 @@ pub enum Command {
     InsertClip { clip: Box<Clip> },
     DeleteClip { clip: ClipId },
     DuplicateClip { clip: ClipId, new_id: ClipId, offset: Ticks },
+    /// Swaps in a whole new version of an existing clip (same id, same
+    /// place in the list); the inverse swaps the old one back. For edits
+    /// that change several fields at once, like turning a clip into a loop.
+    ReplaceClip { clip: Box<Clip> },
     AddMidiNote { clip: ClipId, note: MidiNote },
     RemoveMidiNote { clip: ClipId, start: Ticks, pitch: u8 },
     /// Sets (or, with `None`, removes) a track's instrument.
@@ -160,22 +164,20 @@ impl Command {
                             source_offset_samples: source_offset_samples + delta_samples,
                         }
                     }
-                    ClipContent::Midi { notes } => {
-                        let (_left, right): (Vec<&MidiNote>, Vec<&MidiNote>) =
-                            notes.iter().partition(|n| n.start < left_length);
-                        ClipContent::Midi {
-                            notes: right
-                                .into_iter()
-                                .map(|n| MidiNote { start: n.start - left_length, ..*n })
-                                .collect(),
-                        }
-                    }
+                    // Split what's heard (a looping clip is unrolled), so
+                    // both halves play exactly what the original did.
+                    ClipContent::Midi { .. } => ClipContent::Midi {
+                        notes: original
+                            .played_notes()
+                            .into_iter()
+                            .filter(|n| n.start >= left_length)
+                            .map(|n| MidiNote { start: n.start - left_length, ..n })
+                            .collect(),
+                        loop_len: None,
+                    },
                 };
-                let left_notes = if let ClipContent::Midi { notes } = &original.content {
-                    Some(notes.iter().filter(|n| n.start < left_length).copied().collect())
-                } else {
-                    None
-                };
+                let left_notes: Option<Vec<MidiNote>> = matches!(original.content, ClipContent::Midi { .. })
+                    .then(|| original.played_notes().into_iter().filter(|n| n.start < left_length).collect());
 
                 let right_clip = Clip {
                     id: new_id,
@@ -190,17 +192,23 @@ impl Command {
 
                 let clip = arr.clip_mut(clip_id).unwrap();
                 clip.length = left_length;
-                if let (Some(notes), ClipContent::Midi { notes: dst }) =
+                if let (Some(notes), ClipContent::Midi { notes: dst, loop_len }) =
                     (left_notes, &mut clip.content)
                 {
                     *dst = notes;
+                    *loop_len = None;
                 }
                 arr.clips.push(right_clip);
 
-                Command::Batch(vec![
-                    Command::DeleteClip { clip: new_id },
-                    Command::TrimClip { clip: clip_id, start: original.start, length: original.length },
-                ])
+                // The whole original back, notes and all (a length-only
+                // undo lost the notes that went to the right half).
+                Command::Batch(vec![Command::DeleteClip { clip: new_id }, Command::ReplaceClip { clip: Box::new(original) }])
+            }
+
+            Command::ReplaceClip { clip } => {
+                let slot = arr.clip_mut(clip.id).expect("ReplaceClip: unknown clip");
+                let old = std::mem::replace(slot, *clip);
+                Command::ReplaceClip { clip: Box::new(old) }
             }
 
             Command::InsertClip { clip } => {
@@ -258,7 +266,7 @@ impl Command {
             Command::AddMidiNote { clip: clip_id, note } => {
                 let clip = arr.clip_mut(clip_id).expect("AddMidiNote: unknown clip");
                 match &mut clip.content {
-                    ClipContent::Midi { notes } => notes.push(note),
+                    ClipContent::Midi { notes, .. } => notes.push(note),
                     ClipContent::Audio { .. } => panic!("AddMidiNote: clip is not a MIDI clip"),
                 }
                 Command::RemoveMidiNote { clip: clip_id, start: note.start, pitch: note.pitch }
@@ -267,7 +275,7 @@ impl Command {
             Command::RemoveMidiNote { clip: clip_id, start, pitch } => {
                 let clip = arr.clip_mut(clip_id).expect("RemoveMidiNote: unknown clip");
                 let notes = match &mut clip.content {
-                    ClipContent::Midi { notes } => notes,
+                    ClipContent::Midi { notes, .. } => notes,
                     ClipContent::Audio { .. } => panic!("RemoveMidiNote: clip is not a MIDI clip"),
                 };
                 let index = notes
@@ -339,7 +347,7 @@ impl Command {
 
             Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity } => {
                 let clip = arr.clip_mut(clip_id).expect("SetNoteVelocity: unknown clip");
-                let ClipContent::Midi { notes } = &mut clip.content else {
+                let ClipContent::Midi { notes, .. } = &mut clip.content else {
                     panic!("SetNoteVelocity: clip is not a MIDI clip")
                 };
                 let note = notes
@@ -671,6 +679,81 @@ mod tests {
         assert_eq!(arr.automation_lane(1).unwrap().breakpoints.len(), 0);
     }
 
+    fn looping_clip(arr: &mut Arrangement) -> ClipId {
+        // A one-bar pattern (kick on every beat) looped over four bars.
+        let notes = (0..4).map(|b| MidiNote { start: b * PPQ, length: PPQ / 4, pitch: 36, velocity: 100 }).collect();
+        arr.clips.push(Clip {
+            id: 1,
+            track: 1,
+            start: 0,
+            length: PPQ * 16,
+            name: "Beat".into(),
+            content: ClipContent::Midi { notes, loop_len: Some(PPQ * 4) },
+            recording: false,
+            gain_db: 0.0,
+        });
+        1
+    }
+
+    #[test]
+    fn a_looping_clip_plays_its_pattern_for_its_whole_length() {
+        let mut arr = test_arrangement();
+        let id = looping_clip(&mut arr);
+        let played = arr.clip(id).unwrap().played_notes();
+        assert_eq!(played.len(), 16);
+        assert_eq!(played.last().unwrap().start, PPQ * 15);
+        // Shorter than the pattern: only what fits, the last note cut.
+        let clip = arr.clip_mut(id).unwrap();
+        clip.length = PPQ * 2 + PPQ / 8;
+        let played = arr.clip(id).unwrap().played_notes();
+        assert_eq!(played.len(), 3);
+        assert_eq!(played[2].length, PPQ / 8);
+    }
+
+    #[test]
+    fn notes_past_a_non_looping_clips_end_are_not_played() {
+        let mut arr = test_arrangement();
+        let id = looping_clip(&mut arr);
+        if let ClipContent::Midi { loop_len, .. } = &mut arr.clip_mut(id).unwrap().content {
+            *loop_len = None;
+        }
+        arr.clip_mut(id).unwrap().length = PPQ * 2;
+        assert_eq!(arr.clip(id).unwrap().played_notes().len(), 2);
+    }
+
+    #[test]
+    fn splitting_a_looping_clip_keeps_every_hit_and_undo_restores_it() {
+        let mut arr = test_arrangement();
+        let id = looping_clip(&mut arr);
+        let before = arr.clip(id).unwrap().clone();
+        let mut stack = CommandStack::new();
+        stack.do_command(Command::SplitClip { clip: id, at: PPQ * 6, new_id: 2 }, &mut arr);
+        let left = arr.clip(id).unwrap().played_notes().len();
+        let right = arr.clip(2).unwrap().played_notes().len();
+        assert_eq!((left, right), (6, 10));
+        assert_eq!(arr.clip(2).unwrap().played_notes()[0].start, 0);
+
+        assert!(stack.undo(&mut arr));
+        assert!(arr.clip(2).is_none());
+        let after = arr.clip(id).unwrap();
+        assert_eq!(after.length, before.length);
+        assert_eq!(after.played_notes(), before.played_notes());
+        assert!(matches!(after.content, ClipContent::Midi { loop_len: Some(_), .. }));
+    }
+
+    #[test]
+    fn replace_clip_undoes_to_the_old_clip() {
+        let mut arr = test_arrangement();
+        let id = looping_clip(&mut arr);
+        let mut stack = CommandStack::new();
+        let mut longer = arr.clip(id).unwrap().clone();
+        longer.length = PPQ * 32;
+        stack.do_command(Command::ReplaceClip { clip: Box::new(longer) }, &mut arr);
+        assert_eq!(arr.clip(id).unwrap().played_notes().len(), 32);
+        assert!(stack.undo(&mut arr));
+        assert_eq!(arr.clip(id).unwrap().length, PPQ * 16);
+    }
+
     #[test]
     fn add_midi_note_then_undo_removes_it() {
         let mut arr = test_arrangement();
@@ -681,7 +764,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Step".into(),
-            content: ClipContent::Midi { notes: vec![] },
+            content: ClipContent::Midi { notes: vec![], loop_len: None },
             recording: false,
             gain_db: 0.0,
         });
@@ -691,16 +774,16 @@ mod tests {
             Command::AddMidiNote { clip: clip_id, note: MidiNote { start: 0, length: PPQ / 4, pitch: 60, velocity: DEFAULT_VELOCITY } },
             &mut arr,
         );
-        let ClipContent::Midi { notes } = &arr.clip(clip_id).unwrap().content else { panic!() };
+        let ClipContent::Midi { notes, .. } = &arr.clip(clip_id).unwrap().content else { panic!() };
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].pitch, 60);
 
         assert!(stack.undo(&mut arr));
-        let ClipContent::Midi { notes } = &arr.clip(clip_id).unwrap().content else { panic!() };
+        let ClipContent::Midi { notes, .. } = &arr.clip(clip_id).unwrap().content else { panic!() };
         assert!(notes.is_empty());
 
         assert!(stack.redo(&mut arr));
-        let ClipContent::Midi { notes } = &arr.clip(clip_id).unwrap().content else { panic!() };
+        let ClipContent::Midi { notes, .. } = &arr.clip(clip_id).unwrap().content else { panic!() };
         assert_eq!(notes.len(), 1);
     }
 
@@ -808,7 +891,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Velocity".into(),
-            content: ClipContent::Midi { notes: vec![] },
+            content: ClipContent::Midi { notes: vec![], loop_len: None },
             recording: false,
             gain_db: 0.0,
         });
@@ -819,7 +902,7 @@ mod tests {
         add.apply(&mut arr);
         let undo = Command::SetNoteVelocity { clip: clip_id, start: 0, pitch: 60, velocity: 40 }.apply(&mut arr);
         let velocity = |arr: &Arrangement| match &arr.clip(clip_id).unwrap().content {
-            ClipContent::Midi { notes } => notes[0].velocity,
+            ClipContent::Midi { notes, .. } => notes[0].velocity,
             _ => unreachable!(),
         };
         assert_eq!(velocity(&arr), 40);

@@ -144,12 +144,15 @@ impl Grid {
 
     /// The open clip's id, start and length, plus its notes - or `None` if
     /// nothing's open (or the id is stale).
+    /// The open clip's id, start, editable length and notes. The editable
+    /// length is the pattern (`content_len`): a looping clip is edited as
+    /// its one pattern, not as every repeat.
     fn clip_info(&self) -> Option<(ClipId, Ticks, Ticks, Vec<MidiNote>)> {
         let id = self.open_clip.get()?;
         let arr = self.arrangement.get();
         let clip = arr.clip(id)?;
-        let shared::arrangement::ClipContent::Midi { notes } = &clip.content else { return None };
-        Some((id, clip.start, clip.length, notes.clone()))
+        let shared::arrangement::ClipContent::Midi { notes, .. } = &clip.content else { return None };
+        Some((id, clip.start, clip.content_len(), notes.clone()))
     }
 
     fn drums(&self) -> bool {
@@ -400,7 +403,12 @@ impl View for Grid {
         fill(canvas, vg::Rect::new(gx - 1.0, bounds.y, gx, bottom), p.line);
         fill(canvas, vg::Rect::new(bounds.x, lane_top, bounds.x + bounds.w, lane_top + 1.0), p.line);
 
-        let playhead = self.playhead.get() - clip_start;
+        let mut playhead = self.playhead.get() - clip_start;
+        // Inside a looping clip, the playhead wraps round the pattern.
+        let full_length = self.open_clip.get().and_then(|id| self.arrangement.get().clip(id).map(|c| c.length)).unwrap_or(0);
+        if playhead >= 0 && playhead < full_length {
+            playhead %= clip_length;
+        }
         let label_font = crate::canvas_text::canvas_font(11.0);
 
         // Notes: clip colour with a faint edge; `signal` while sounding;

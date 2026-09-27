@@ -239,6 +239,8 @@ impl View for LaneArea {
 struct ClipFrame<'a> {
     tempo: &'a shared::arrangement::TempoMap,
     missing_sources: &'a std::collections::HashSet<Arc<str>>,
+    /// The lane area's left edge, where tick 0 is measured from.
+    origin_x: f32,
 }
 
 impl LaneArea {
@@ -680,7 +682,7 @@ impl LaneArea {
         // clone of the arrangement per clip made drawing quadratic in the
         // clip count.
         let missing_sources = self.missing_sources.get();
-        let frame = ClipFrame { tempo: &arr.tempo_map, missing_sources: &missing_sources };
+        let frame = ClipFrame { tempo: &arr.tempo_map, missing_sources: &missing_sources, origin_x: bounds.x };
         let rows = build_rows(&arr);
         let scroll_y = transform.scroll_y as f32;
         let sig = arr.tempo_map.time_signature_at(0);
@@ -827,7 +829,10 @@ impl LaneArea {
                                 length = (orig_length + delta_ticks).max(1);
                             }
                         }
-                        let mut preview = clip.clone();
+                        let mut preview = match edge {
+                            Edge::End => clip.extended_as_loop(length).unwrap_or_else(|| clip.clone()),
+                            Edge::Start => clip.clone(),
+                        };
                         preview.start = start;
                         preview.length = length;
                         if let (Edge::Start, ClipContent::Audio { source_offset_samples, .. }) =
@@ -1304,7 +1309,27 @@ impl LaneArea {
                     &paint,
                 );
             }
-            ClipContent::Midi { notes } => {
+            ClipContent::Midi { loop_len, .. } => {
+                let transform = self.transform.get();
+                // The clip's real left edge: `x0` is clamped to the view,
+                // so measuring notes from it shifted them once the clip's
+                // start scrolled off to the left.
+                let clip_x = frame.origin_x + transform.tick_to_x(clip.start) as f32;
+                // A looping clip: a faint line where each repeat starts.
+                if let Some(period) = loop_len.filter(|l| *l > 0) {
+                    let mut line = vg::Paint::default();
+                    let c = tokens::ON_CLIP;
+                    line.set_color(Color::rgba(c.r(), c.g(), c.b(), 90));
+                    let mut at = period;
+                    while at < clip.length {
+                        let x = (clip_x + transform.ticks_to_px(at) as f32).round();
+                        if x > x0 && x < x1 {
+                            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x, y0, x + 1.0, y1), None), &line);
+                        }
+                        at += period;
+                    }
+                }
+                let notes = clip.played_notes();
                 if notes.is_empty() {
                     return;
                 }
@@ -1314,10 +1339,9 @@ impl LaneArea {
                 let mut paint = vg::Paint::default();
                 paint.set_color(tokens::ON_CLIP);
                 paint.set_anti_alias(true);
-                let transform = self.transform.get();
-                for note in notes {
-                    let nx0 = x0 + transform.ticks_to_px(note.start) as f32;
-                    let nx1 = x0 + transform.ticks_to_px(note.start + note.length) as f32;
+                for note in &notes {
+                    let nx0 = clip_x + transform.ticks_to_px(note.start) as f32;
+                    let nx1 = clip_x + transform.ticks_to_px(note.start + note.length) as f32;
                     if nx1 <= x0 || nx0 >= x1 {
                         continue;
                     }

@@ -244,7 +244,7 @@ mod tests {
             start: 0,
             length: PPQ,
             name: "Notes".into(),
-            content: ClipContent::Midi { notes: vec![] },
+            content: ClipContent::Midi { notes: vec![], loop_len: None },
             recording: false,
             gain_db: 0.0,
         });

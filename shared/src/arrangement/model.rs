@@ -536,7 +536,14 @@ pub enum ClipContent {
         source_offset_samples: u64,
     },
     Midi {
+        /// Starts are relative to the clip's start.
         notes: Vec<MidiNote>,
+        /// `Some(len)`: the clip is a looping pattern - the notes in
+        /// `0..len` repeat every `len` ticks for the clip's whole length
+        /// (notes past `len` are kept but not heard). `None`: the notes
+        /// play once. `default` so older projects load.
+        #[serde(default)]
+        loop_len: Option<Ticks>,
     },
 }
 
@@ -559,6 +566,55 @@ pub struct Clip {
 impl Clip {
     pub fn end(&self) -> Ticks {
         self.start + self.length
+    }
+
+    /// A MIDI clip's pattern length: its loop length, or the whole clip.
+    pub fn content_len(&self) -> Ticks {
+        match &self.content {
+            ClipContent::Midi { loop_len: Some(len), .. } => (*len).max(1),
+            _ => self.length,
+        }
+    }
+
+    /// This clip with its end moved so it's `length` long. A MIDI clip
+    /// stretched past its current length becomes a loop of what it held
+    /// (the way clips extend in Ableton or Bitwig), so dragging a one-bar
+    /// beat out to 16 bars repeats it. `None` for anything else (audio,
+    /// or not getting longer): a plain trim.
+    pub fn extended_as_loop(&self, length: Ticks) -> Option<Clip> {
+        let ClipContent::Midi { notes, loop_len } = &self.content else { return None };
+        if length <= self.length {
+            return None;
+        }
+        let mut clip = self.clone();
+        clip.length = length;
+        clip.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(loop_len.unwrap_or(self.length)) };
+        Some(clip)
+    }
+
+    /// Every note as heard, with starts relative to the clip's start: the
+    /// pattern repeated across the clip if it loops, and nothing past the
+    /// clip's end (a note running over it is shortened). Empty for audio.
+    pub fn played_notes(&self) -> Vec<MidiNote> {
+        let ClipContent::Midi { notes, loop_len } = &self.content else { return Vec::new() };
+        let period = loop_len.map(|l| l.max(1)).unwrap_or(self.length.max(1));
+        let mut out = Vec::new();
+        let mut offset = 0;
+        while offset < self.length {
+            for n in notes.iter().filter(|n| n.start < period) {
+                let start = offset + n.start;
+                if start >= self.length {
+                    continue;
+                }
+                out.push(MidiNote { start, length: n.length.min(self.length - start), ..*n });
+            }
+            if loop_len.is_none() {
+                break;
+            }
+            offset += period;
+        }
+        out.sort_by_key(|n| (n.start, n.pitch));
+        out
     }
 }
 

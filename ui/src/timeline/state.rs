@@ -249,7 +249,7 @@ impl TimelineState {
         let arr = self.arrangement.get();
         let notes_selected = self.piano_roll_selected.get();
         if let (Some(clip), false) = (self.piano_roll_open_clip.get(), notes_selected.is_empty()) {
-            let Some(ClipContent::Midi { notes }) = arr.clip(clip).map(|c| &c.content) else { return false };
+            let Some(ClipContent::Midi { notes, .. }) = arr.clip(clip).map(|c| &c.content) else { return false };
             let chosen: Vec<MidiNote> =
                 notes.iter().filter(|n| notes_selected.contains(&(n.start, n.pitch))).copied().collect();
             let first = chosen.iter().map(|n| n.start).min().unwrap_or(0);
@@ -286,7 +286,7 @@ impl TimelineState {
                 let Some(clip_id) = self.piano_roll_open_clip.get() else { return };
                 let arr = self.arrangement.get();
                 let Some(clip) = arr.clip(clip_id) else { return };
-                let ClipContent::Midi { notes: existing } = &clip.content else { return };
+                let ClipContent::Midi { notes: existing, .. } = &clip.content else { return };
                 let at = (playhead - clip.start).clamp(0, clip.length.max(1) - 1);
                 let pasted: Vec<MidiNote> = notes
                     .iter()
@@ -398,6 +398,9 @@ impl TimelineState {
 pub enum TimelineEvent {
     MoveClip { clip: ClipId, track: TrackId, start: Ticks },
     TrimClip { clip: ClipId, start: Ticks, length: Ticks },
+    /// The piano roll's pattern control: makes a MIDI clip loop a pattern
+    /// `bars` long (at least 1), growing the clip if it's shorter.
+    SetPatternBars { clip: ClipId, bars: i64 },
     SplitAtPlayhead,
     DeleteSelected,
     DuplicateSelected,
@@ -556,7 +559,27 @@ impl Model for TimelineState {
                 let bypass = cx.modifiers().alt();
                 let start = snap(*start, snap_grid, bypass);
                 let end = snap(start + *length, snap_grid, bypass);
-                self.do_command(Command::TrimClip { clip: *clip, start, length: (end - start).max(1) });
+                let length = (end - start).max(1);
+                let arr = self.arrangement.get();
+                let looped = arr.clip(*clip).filter(|c| c.start == start).and_then(|c| c.extended_as_loop(length));
+                match looped {
+                    Some(looped) => self.do_command(Command::ReplaceClip { clip: Box::new(looped) }),
+                    None => self.do_command(Command::TrimClip { clip: *clip, start, length }),
+                }
+            }
+            TimelineEvent::SetPatternBars { clip, bars } => {
+                let arr = self.arrangement.get();
+                let Some(old) = arr.clip(*clip) else { return };
+                let ClipContent::Midi { notes, .. } = &old.content else { return };
+                let bar = arr.tempo_map.time_signature_at(old.start).ticks_per_bar();
+                let len = (*bars).max(1) * bar;
+                if old.content_len() == len {
+                    return;
+                }
+                let mut new = old.clone();
+                new.length = new.length.max(len);
+                new.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(len) };
+                self.do_command(Command::ReplaceClip { clip: Box::new(new) });
             }
             TimelineEvent::SplitAtPlayhead => {
                 let playhead = self.playhead_ticks.get();
@@ -753,7 +776,7 @@ impl Model for TimelineState {
                         start: snapped_start,
                         length: snapped_end - snapped_start,
                         name: "Clip".to_string(),
-                        content: ClipContent::Midi { notes: vec![] },
+                        content: ClipContent::Midi { notes: vec![], loop_len: None },
                         recording: false,
                         gain_db: 0.0,
                     };

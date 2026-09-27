@@ -40,7 +40,7 @@ pub fn step_entry_commit(
             start: playhead,
             length: step,
             name: "Step".into(),
-            content: ClipContent::Midi { notes: Vec::new() },
+            content: ClipContent::Midi { notes: Vec::new(), loop_len: None },
             recording: false,
             gain_db: 0.0,
         };
@@ -100,7 +100,7 @@ mod tests {
         let clip = arr.clip(clip_id).unwrap();
         assert_eq!(clip.start, 0);
         assert_eq!(clip.length, STEP);
-        let ClipContent::Midi { notes } = &clip.content else { panic!("expected a MIDI clip") };
+        let ClipContent::Midi { notes, .. } = &clip.content else { panic!("expected a MIDI clip") };
         assert_eq!(notes, &[MidiNote { start: 0, length: STEP, pitch: 60, velocity: DEFAULT_VELOCITY }]);
     }
 
@@ -120,7 +120,7 @@ mod tests {
         assert_eq!(arr.clips.len(), 1);
         let clip = arr.clip(clip1).unwrap();
         assert_eq!(clip.length, STEP * 2);
-        let ClipContent::Midi { notes } = &clip.content else { panic!() };
+        let ClipContent::Midi { notes, .. } = &clip.content else { panic!() };
         assert_eq!(notes.len(), 2);
         assert_eq!(notes[1], MidiNote { start: STEP, length: STEP, pitch: 64, velocity: DEFAULT_VELOCITY });
     }
@@ -159,7 +159,7 @@ mod tests {
         assert_eq!(clip2, clip1);
         let clip = arr.clip(clip1).unwrap();
         assert_eq!(clip.length, STEP * 2);
-        let ClipContent::Midi { notes } = &clip.content else { panic!() };
+        let ClipContent::Midi { notes, .. } = &clip.content else { panic!() };
         assert_eq!(notes.len(), 1, "the rest shouldn't have added a note");
     }
 

@@ -122,7 +122,7 @@ pub fn seed_arrangement() -> Arrangement {
             start,
             length: BAR * 8,
             name: name.into(),
-            content: ClipContent::Midi { notes: bass_pattern() },
+            content: ClipContent::Midi { notes: bass_pattern(), loop_len: None },
             recording: false,
             gain_db: 0.0,
         });
@@ -190,7 +190,7 @@ pub fn seed_arrangement() -> Arrangement {
         start: 0,
         length: BAR * 16,
         name: "Wash".into(),
-        content: ClipContent::Midi { notes: pad_pattern() },
+        content: ClipContent::Midi { notes: pad_pattern(), loop_len: None },
         recording: false,
         gain_db: 0.0,
     });

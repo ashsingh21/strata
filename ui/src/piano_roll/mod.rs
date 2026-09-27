@@ -23,10 +23,18 @@ use state::{EditMode, LabelMode, NoteKey, PianoRollEvent};
 /// notes, where, how long and how hard - or the clip's note count.
 fn selection_text(arr: &Arrangement, clip: Option<ClipId>, selected: &std::collections::HashSet<NoteKey>, key: u8) -> String {
     let Some(clip) = clip.and_then(|id| arr.clip(id)) else { return String::new() };
-    let ClipContent::Midi { notes } = &clip.content else { return String::new() };
+    let ClipContent::Midi { notes, .. } = &clip.content else { return String::new() };
     let mut chosen: Vec<_> = notes.iter().filter(|n| selected.contains(&(n.start, n.pitch))).collect();
     if chosen.is_empty() {
-        return format!("{} notes", notes.len());
+        // Notes past a shortened pattern are kept but neither shown nor
+        // played - say so, so they don't look lost.
+        let in_pattern = notes.iter().filter(|n| n.start < clip.content_len()).count();
+        let hidden = notes.len() - in_pattern;
+        return if hidden > 0 {
+            format!("{in_pattern} notes \u{b7} {hidden} more past the pattern, kept")
+        } else {
+            format!("{in_pattern} notes")
+        };
     }
     chosen.sort_by_key(|n| (n.start, n.pitch));
     let list = |f: &dyn Fn(&shared::arrangement::MidiNote) -> String| {
@@ -93,10 +101,50 @@ pub fn piano_roll_view(
                 let arr = arrangement.get();
                 let Some(clip) = open_clip.get().and_then(|id| arr.clip(id)) else { return String::new() };
                 let track = arr.track(clip.track).map(|t| t.name.clone()).unwrap_or_default();
-                let bars = (clip.length as f64 / (PPQ * 4) as f64).ceil().max(1.0) as i64;
-                format!("{track} \u{b7} MIDI \u{b7} {bars} {}", if bars == 1 { "bar" } else { "bars" })
+                let bars_of = |t: Ticks| (t as f64 / (PPQ * 4) as f64).ceil().max(1.0) as i64;
+                let plural = |n: i64| if n == 1 { "bar" } else { "bars" };
+                let bars = bars_of(clip.length);
+                match &clip.content {
+                    ClipContent::Midi { loop_len: Some(len), .. } if *len < clip.length => {
+                        let repeats = (clip.length as f64 / *len as f64).ceil() as i64;
+                        format!("{track} \u{b7} MIDI \u{b7} {bars} {}, loops \u{d7}{repeats}", plural(bars))
+                    }
+                    _ => format!("{track} \u{b7} MIDI \u{b7} {bars} {}", plural(bars)),
+                }
             });
             Label::new(cx, meta_text).class("value");
+
+            // Pattern length: what the grid edits, and what repeats when
+            // the clip is stretched on the timeline.
+            let pattern_bars = Memo::new(move |_| {
+                let arr = arrangement.get();
+                open_clip
+                    .get()
+                    .and_then(|id| arr.clip(id))
+                    .map(|c| (c.content_len() as f64 / (PPQ * 4) as f64).ceil().max(1.0) as i64)
+                    .unwrap_or(1)
+            });
+            Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
+            Label::new(cx, "Pattern").class("label");
+            Button::new(cx, |cx| Label::new(cx, "\u{2212}"))
+                .class("btn")
+                .class("sm")
+                .class("quiet")
+                .on_press(move |cx| {
+                    if let Some(clip) = open_clip.get() {
+                        cx.emit(TimelineEvent::SetPatternBars { clip, bars: pattern_bars.get() - 1 });
+                    }
+                });
+            Label::new(cx, pattern_bars.map(|n| format!("{n} {}", if *n == 1 { "bar" } else { "bars" }))).class("value");
+            Button::new(cx, |cx| Label::new(cx, "+"))
+                .class("btn")
+                .class("sm")
+                .class("quiet")
+                .on_press(move |cx| {
+                    if let Some(clip) = open_clip.get() {
+                        cx.emit(TimelineEvent::SetPatternBars { clip, bars: pattern_bars.get() + 1 });
+                    }
+                });
 
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
 
@@ -161,7 +209,7 @@ pub fn piano_roll_view(
                 .get()
                 .and_then(|id| arr.clip(id))
                 .map(|c| match &c.content {
-                    ClipContent::Midi { notes } => notes.clone(),
+                    ClipContent::Midi { notes, .. } => notes.clone(),
                     ClipContent::Audio { .. } => Vec::new(),
                 })
                 .unwrap_or_default();

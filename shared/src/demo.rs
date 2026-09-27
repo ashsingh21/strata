@@ -93,7 +93,7 @@ impl Builder {
             start: start_bar * BAR,
             length: (end_bar - start_bar) * BAR,
             name: name.into(),
-            content: ClipContent::Midi { notes },
+            content: ClipContent::Midi { notes, loop_len: None },
             recording: false,
             gain_db: 0.0,
         });

@@ -27,12 +27,18 @@ pub fn notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> ScheduledNot
 
     let any_solo = arr.tracks.iter().any(|t| t.solo);
     for clip in &arr.clips {
-        let ClipContent::Midi { notes } = &clip.content else { continue };
+        if !matches!(clip.content, ClipContent::Midi { .. }) {
+            continue;
+        }
         let Some(track) = arr.track(clip.track) else { continue };
         if track.mute || (any_solo && !track.solo) {
             continue;
         }
-        for note in notes {
+        // Skip clips entirely outside the range before expanding loops.
+        if clip.end() < from || clip.start > to {
+            continue;
+        }
+        for note in &clip.played_notes() {
             let abs_start = clip.start + note.start;
             let abs_end = abs_start + note.length;
             if abs_start > from && abs_start <= to {
@@ -76,7 +82,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Clip".into(),
-            content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60, velocity: DEFAULT_VELOCITY }] },
+            content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60, velocity: DEFAULT_VELOCITY }], loop_len: None },
             recording: false,
             gain_db: 0.0,
         });
@@ -140,5 +146,21 @@ mod tests {
         let arr = arrangement_with_one_note(false, false);
         let scheduled = notes_in_range(&arr, PPQ + 10, PPQ - 10);
         assert!(scheduled.note_on.is_empty() && scheduled.note_off.is_empty());
+    }
+
+    #[test]
+    fn a_looping_clip_schedules_its_repeats() {
+        let mut arr = arrangement_with_one_note(false, false);
+        // The one note (at beat 1) in a one-bar loop, clip two bars long.
+        let clip = &mut arr.clips[0];
+        clip.length = PPQ * 8;
+        if let ClipContent::Midi { loop_len, .. } = &mut clip.content {
+            *loop_len = Some(PPQ * 4);
+        }
+        let start = clip.start;
+        let ons = notes_in_range(&arr, start, start + PPQ * 8).note_on.len();
+        assert_eq!(ons, 2);
+        let second_bar = notes_in_range(&arr, start + PPQ * 4, start + PPQ * 6).note_on.len();
+        assert_eq!(second_bar, 1);
     }
 }
