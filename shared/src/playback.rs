@@ -312,17 +312,26 @@ pub type PreviewBuffer = Arc<[f32]>;
 
 pub const PREVIEW_CAPACITY: usize = 8;
 
+/// How many output samples the live analyzer's tap holds (a third of a
+/// second): the UI drains it every frame, and needs only the latest few
+/// thousand.
+pub const ANALYZER_CAPACITY: usize = 16_384;
+
 pub struct PreviewBridge {
     pub play_tx: rtrb::Producer<PreviewBuffer>,
     pub play_rx: rtrb::Consumer<PreviewBuffer>,
     pub retired_tx: rtrb::Producer<PreviewBuffer>,
     pub retired_rx: rtrb::Consumer<PreviewBuffer>,
+    /// The output as heard (mono), for the live spectrum analyzer.
+    pub analyzer_tx: rtrb::Producer<f32>,
+    pub analyzer_rx: rtrb::Consumer<f32>,
 }
 
 pub fn preview_bridge() -> PreviewBridge {
     let (play_tx, play_rx) = rtrb::RingBuffer::new(PREVIEW_CAPACITY);
     let (retired_tx, retired_rx) = rtrb::RingBuffer::new(PREVIEW_CAPACITY * 2);
-    PreviewBridge { play_tx, play_rx, retired_tx, retired_rx }
+    let (analyzer_tx, analyzer_rx) = rtrb::RingBuffer::new(ANALYZER_CAPACITY);
+    PreviewBridge { play_tx, play_rx, retired_tx, retired_rx, analyzer_tx, analyzer_rx }
 }
 
 /// The UI's ends of a `PreviewBridge`: send buffers to play, and take
@@ -332,8 +341,10 @@ pub struct PreviewSender {
     pub retired_rx: rtrb::Consumer<PreviewBuffer>,
 }
 
-/// The engine's ends of a `PreviewBridge`.
+/// The engine's ends of a `PreviewBridge`: previews in, and the output
+/// out to the analyzer.
 pub struct PreviewEnds {
     pub play_rx: rtrb::Consumer<PreviewBuffer>,
     pub retired_tx: rtrb::Producer<PreviewBuffer>,
+    pub analyzer_tx: rtrb::Producer<f32>,
 }

@@ -80,6 +80,15 @@ pub fn save_lesson_track(id: &str, path: &std::path::Path) {
     save_key("lesson_tracks", serde_json::Value::Object(tracks));
 }
 
+/// Whether the live spectrum analyzer was open.
+pub fn load_analyzer_open() -> bool {
+    load_all().get("analyzer_open").and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+pub fn save_analyzer_open(open: bool) {
+    save_key("analyzer_open", serde_json::json!(open));
+}
+
 /// The lower panel's height (see `crate::splitter`), logical pixels.
 pub fn load_lower_panel_height() -> Option<f32> {
     load_all().get("lower_panel_height")?.as_f64().map(|h| h as f32)

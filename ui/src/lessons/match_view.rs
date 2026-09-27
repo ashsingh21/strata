@@ -16,6 +16,8 @@ use crate::tokens::ThemeId;
 pub enum Graph {
     Spectrum,
     Loudness,
+    /// The live analyzer: one spectrum (drawn as the target), no key.
+    Live,
 }
 
 pub struct MatchGraph {
@@ -47,7 +49,7 @@ impl MatchGraph {
     /// The graph's points for `a`, as (0..1 across, 0..1 up).
     fn points(&self, a: &Analysis) -> Vec<(f32, f32)> {
         match self.graph {
-            Graph::Spectrum => {
+            Graph::Spectrum | Graph::Live => {
                 let octaves = (HIGH_HZ / LOW_HZ).log2();
                 (0..band_count().min(a.spectrum.len()))
                     .map(|i| ((band_hz(i) / LOW_HZ).log2() / octaves, (a.spectrum[i] - FLOOR_DB) / -FLOOR_DB))
@@ -95,7 +97,7 @@ impl View for MatchGraph {
         grid.set_style(vg::PaintStyle::Stroke);
         grid.set_stroke_width(1.0);
         let ticks: Vec<(f32, String)> = match self.graph {
-            Graph::Spectrum => [(100.0, "100 Hz"), (1000.0, "1 kHz"), (10_000.0, "10 kHz")]
+            Graph::Spectrum | Graph::Live => [(100.0, "100 Hz"), (1000.0, "1 kHz"), (10_000.0, "10 kHz")]
                 .into_iter()
                 .map(|(hz, s)| ((hz / LOW_HZ).log2() / (HIGH_HZ / LOW_HZ).log2(), s.to_string()))
                 .collect(),
@@ -112,14 +114,17 @@ impl View for MatchGraph {
         let title = match self.graph {
             Graph::Spectrum => "Spectrum: low \u{2192} high pitch",
             Graph::Loudness => "Loudness over time",
+            Graph::Live => "Output spectrum: low \u{2192} high pitch",
         };
         canvas.draw_str(title, vg::Point::new(b.x + 4.0, b.y + 11.0), &font, &label);
-        // The key, top right.
+        // The key, top right (the live analyzer has one line: no key).
+        if self.graph != Graph::Live {
         let key_x = b.x + b.w - 100.0;
         canvas.draw_path(&vg::Path::rect(vg::Rect::new(key_x, b.y + 4.0, key_x + 10.0, b.y + 11.0), None), &paint(p.signal));
         canvas.draw_str("Target", vg::Point::new(key_x + 14.0, b.y + 11.0), &font, &label);
         canvas.draw_path(&vg::Path::rect(vg::Rect::new(key_x + 54.0, b.y + 7.0, key_x + 64.0, b.y + 8.5), None), &paint(p.ink));
         canvas.draw_str("Yours", vg::Point::new(key_x + 68.0, b.y + 11.0), &font, &label);
+        }
 
         // The target: a filled shape.
         if let Some(target) = self.target.get() {

@@ -447,6 +447,7 @@ where
                     &current_plan,
                     &current_sources,
                     &mut preview_now,
+                    &mut preview.analyzer_tx,
                 );
                 if preview_now.as_ref().is_some_and(|(buf, pos)| *pos >= buf.len()) {
                     if let Some((done, _)) = preview_now.take() {
@@ -486,6 +487,7 @@ fn write_block<T>(
     plan: &PlaybackPlan,
     sources: &[DecodedSource],
     preview: &mut Option<(shared::playback::PreviewBuffer, usize)>,
+    analyzer: &mut rtrb::Producer<f32>,
 ) where
     T: Sample + FromSample<f32>,
 {
@@ -560,6 +562,9 @@ fn write_block<T>(
 
         peak_l = peak_l.max(out_l.abs());
         peak_r = peak_r.max(out_r.abs());
+        // To the live analyzer. Full when it's closed (nobody drains it):
+        // the sample is dropped, never waited on.
+        let _ = analyzer.push(0.5 * (out_l + out_r));
 
         if channels == 1 {
             frame[0] = T::from_sample(out_l);

@@ -54,12 +54,14 @@ fn fft(re: &mut [f32], im: &mut [f32]) {
             im.swap(i, j);
         }
     }
+    // The twiddle factors, once: every stage uses a stride through them.
+    let twiddles: Vec<(f32, f32)> = (0..n / 2).map(|k| (-2.0 * PI * k as f32 / n as f32).sin_cos()).collect();
     let mut len = 2;
     while len <= n {
-        let angle = -2.0 * PI / len as f32;
+        let stride = n / len;
         for start in (0..n).step_by(len) {
             for k in 0..len / 2 {
-                let (s, c) = (angle * k as f32).sin_cos();
+                let (s, c) = twiddles[k * stride];
                 let (a, b) = (start + k, start + k + len / 2);
                 let tr = re[b] * c - im[b] * s;
                 let ti = re[b] * s + im[b] * c;

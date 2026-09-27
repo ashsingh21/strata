@@ -60,6 +60,8 @@ pub struct HeaderProps {
     /// before its first save) - see `crate::project`.
     pub project_name: Signal<String>,
     pub menus: HeaderMenus,
+    /// The live spectrum analyzer's strip is showing.
+    pub analyzer_open: Signal<bool>,
 }
 
 /// Open/closed state of the header's drop-down menus (File, time
@@ -608,6 +610,13 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .height(Auto);
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+
+        // The live spectrum analyzer, beside the other output readouts.
+        with_tip(
+            Button::new(cx, |cx| Label::new(cx, "Spectrum")).class("btn").class("quiet").toggle_class("is-on", props.analyzer_open),
+            "Show what's playing, from low to high pitch",
+        )
+        .on_press(|cx| cx.emit(crate::analyzer::AnalyzerEvent::Toggle));
 
         // CPU: the audio callback's share of its real-time budget.
         Label::new(cx, "CPU").class("label").font_size(12.0);

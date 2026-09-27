@@ -1,3 +1,4 @@
+mod analyzer;
 mod app;
 mod bpm_field;
 mod canvas_text;
@@ -61,7 +62,11 @@ fn main() -> Result<(), ApplicationError> {
         recorder_bridge.telemetry_tx,
         record_params.clone(),
         preferred_input_device.as_deref(),
-        shared::playback::PreviewEnds { play_rx: preview_bridge.play_rx, retired_tx: preview_bridge.retired_tx },
+        shared::playback::PreviewEnds {
+            play_rx: preview_bridge.play_rx,
+            retired_tx: preview_bridge.retired_tx,
+            analyzer_tx: preview_bridge.analyzer_tx,
+        },
     );
     // Without audio there's nothing to run - but a panic is invisible when
     // launched from the desktop (the window just never appears), so say
@@ -76,6 +81,7 @@ fn main() -> Result<(), ApplicationError> {
         }
     };
     let engine_sample_rate = engine_handle.sample_rate;
+    let analyzer_rx = std::cell::Cell::new(Some(preview_bridge.analyzer_rx));
     let lesson_preview = std::cell::Cell::new(Some(shared::playback::PreviewSender {
         play_tx: preview_bridge.play_tx,
         retired_rx: preview_bridge.retired_rx,
@@ -261,6 +267,11 @@ fn main() -> Result<(), ApplicationError> {
         let lessons_done = lesson_model.done;
         lesson_model.build(cx);
 
+        let analyzer_model = analyzer::AnalyzerModel::new(analyzer_rx.take().expect("the app is built once"), engine_sample_rate);
+        let analyzer_open = analyzer_model.open;
+        let analyzer_live = analyzer_model.live;
+        analyzer_model.build(cx);
+
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
         // the synth's animated modulation rings/scope, syncs
         // the timeline playhead from the transport's live position, and
@@ -277,6 +288,7 @@ fn main() -> Result<(), ApplicationError> {
                 last_tick.set(now);
 
                 cx.emit(AppEvent::Tick);
+                cx.emit(analyzer::AnalyzerEvent::Tick);
                 let title = window_title.get();
                 if *last_title.borrow() != title {
                     *last_title.borrow_mut() = title.clone();
@@ -456,6 +468,7 @@ fn main() -> Result<(), ApplicationError> {
                     save_status,
                     project_name,
                     menus: header_menus,
+                    analyzer_open,
                 },
                 tl_bpm,
             );
@@ -471,6 +484,7 @@ fn main() -> Result<(), ApplicationError> {
 
                 VStack::new(cx, move |cx| {
                     lessons::bar::lesson_bar(cx, lesson_bar_props);
+                    analyzer::analyzer_strip(cx, analyzer_open, analyzer_live, theme);
                     timeline::timeline_view(
                         cx,
                         theme,
