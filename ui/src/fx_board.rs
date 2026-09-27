@@ -198,8 +198,18 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
             .height(Stretch(1.0));
 
             // Canvas.
+            let search_popover: Signal<Option<(f32, f32)>> = Signal::new(None);
             ZStack::new(cx, move |cx| {
                 FxCables::new(cx, p.arrangement, p.track, p.theme, selected).width(Stretch(1.0)).height(Stretch(1.0));
+
+                Element::new(cx)
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0))
+                    .on_double_click(move |cx, _| {
+                        let bounds = cx.bounds();
+                        let local = (cx.mouse().cursor_x - bounds.x, cx.mouse().cursor_y - bounds.y);
+                        search_popover.set(Some(local));
+                    });
 
                 Binding::new(cx, p.arrangement, move |cx| {
                     let arr = p.arrangement.get();
@@ -233,6 +243,16 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                     .toggle_class("is-on", node.enabled)
                                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleEffectEnabled(p.track, node.id)));
                                 Label::new(cx, node.effect.name()).class("title");
+                                Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+                                Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
+                                    .class("btn")
+                                    .class("quiet")
+                                    .on_press(move |cx| {
+                                        if selected.get() == Some(node.id) {
+                                            selected.set(None);
+                                        }
+                                        cx.emit(TimelineEvent::RemoveEffectNodeFromBoard(p.track, node.id));
+                                    });
                             })
                             .class("hd")
                             .alignment(Alignment::Left)
@@ -267,6 +287,39 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             let _ = cx;
                         });
                     }
+                });
+
+                // Double-click empty canvas: a small search popover to
+                // append an effect, same absolute-positioned/backdrop
+                // convention as the timeline's own context menu.
+                Element::new(cx)
+                    .class("context-menu-backdrop")
+                    .toggle_class("hidden", search_popover.map(|p| p.is_none()))
+                    .on_mouse_down(move |_cx, _| search_popover.set(None))
+                    .position_type(PositionType::Absolute)
+                    .top(Pixels(0.0))
+                    .left(Pixels(0.0))
+                    .width(Stretch(1.0))
+                    .height(Stretch(1.0));
+                Binding::new(cx, search_popover, move |cx| {
+                    let Some((x, y)) = search_popover.get() else { return };
+                    VStack::new(cx, move |cx| {
+                        for (label, effect) in [
+                            ("Compressor", Effect::Compressor(shared::arrangement::CompressorState::default())),
+                            ("EQ", Effect::Eq(shared::arrangement::EqState::default())),
+                        ] {
+                            Label::new(cx, label).class("menu-item").class("body").on_press(move |cx| {
+                                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect));
+                                search_popover.set(None);
+                            });
+                        }
+                    })
+                    .class("panel")
+                    .class("context-menu")
+                    .position_type(PositionType::Absolute)
+                    .left(Pixels(x))
+                    .top(Pixels(y))
+                    .width(Pixels(120.0));
                 });
             })
             .class("device")

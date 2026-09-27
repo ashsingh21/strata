@@ -451,6 +451,14 @@ pub enum TimelineEvent {
     /// Bypasses (`true`) or restores (`false`) every effect on the
     /// track at once - the header's Alt-click "bypass all".
     SetChainBypassed(TrackId, bool),
+    /// Removes a specific effect node by id - the FxBoard's own delete
+    /// (unlike `RemoveCompressorEffect`/`RemoveEqEffect`, which look a
+    /// node up by *type*, the board always knows exactly which node).
+    RemoveEffectNodeFromBoard(TrackId, EffectNodeId),
+    /// Appends a new effect node of the given kind - the FxBoard's own
+    /// add (from the palette or the empty-canvas search popover).
+    AddEffectNodeToBoard(TrackId, Effect),
+    SetEffectNodePosition(TrackId, EffectNodeId, (f32, f32)),
     /// Drag on a track header's resize handle: absolute new height in px
     /// (clamped by the handler), not undoable - a view preference, like
     /// mute or gain.
@@ -888,6 +896,15 @@ impl Model for TimelineState {
                         .collect();
                     self.do_command(Command::Batch(commands));
                 }
+            }
+            TimelineEvent::RemoveEffectNodeFromBoard(track, node) => {
+                self.do_command(Command::RemoveEffectNode { track: *track, node: *node });
+            }
+            TimelineEvent::AddEffectNodeToBoard(track, effect) => {
+                self.do_command(Command::AddEffectNode { track: *track, effect: *effect });
+            }
+            TimelineEvent::SetEffectNodePosition(track, node, position) => {
+                self.do_command(Command::SetEffectNodePosition { track: *track, node: *node, position: *position });
             }
             TimelineEvent::SetTrackHeight { track, height } => {
                 let height = height.clamp(shared::arrangement::MIN_TRACK_HEIGHT, shared::arrangement::MAX_TRACK_HEIGHT);
