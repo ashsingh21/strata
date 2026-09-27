@@ -185,6 +185,7 @@ fn main() -> Result<(), ApplicationError> {
             tl_arrangement,
             loaded_project.as_ref().map(|p| p.instruments.clone()).unwrap_or_default(),
             selected_track,
+            tl_playhead,
         );
         let synth_state = synth_model.state;
         let synth_lfo_phases = (synth_model.lfo1_phase, synth_model.lfo2_phase);
@@ -261,7 +262,9 @@ fn main() -> Result<(), ApplicationError> {
                 // Latest-wins: cheap to rebuild every tick, and avoids
                 // needing to dirty-track arrangement changes separately.
                 let arr = tl_arrangement.get();
-                let plan = shared::playback::PlaybackPlan::from_arrangement(&arr, engine_sample_rate);
+                // Automation applied at the playhead (a borrowed no-op when
+                // no lane has a target).
+                let plan = shared::playback::PlaybackPlan::from_arrangement(&arr.with_automation_at(ticks), engine_sample_rate);
                 let _ = playback_plan_tx.borrow_mut().push(plan);
 
                 // Same reasoning as the plan above: recomputed every tick

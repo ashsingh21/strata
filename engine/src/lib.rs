@@ -28,6 +28,28 @@ use shared::{Params, Position, Telemetry};
 use effects::EffectChain;
 use synth::SynthEngine;
 
+/// A gain that glides to its target instead of jumping. Track gain now
+/// changes continuously (automation, fader drags), but only reaches the
+/// audio thread once per UI frame / audio block; applied as a step, each
+/// change would click ("zipper"). A one-pole ramp with a ~5 ms time
+/// constant removes that without audible lag.
+#[derive(Clone, Copy)]
+struct SmoothedGain {
+    current: f32,
+    coeff: f32,
+}
+
+impl SmoothedGain {
+    fn new(sample_rate: f32) -> Self {
+        Self { current: 1.0, coeff: 1.0 - (-1.0 / (0.005 * sample_rate)).exp() }
+    }
+
+    fn next(&mut self, target: f32) -> f32 {
+        self.current += (target - self.current) * self.coeff;
+        self.current
+    }
+}
+
 fn db_to_gain(db: f32) -> f32 {
     10f32.powf(db / 20.0)
 }
@@ -243,6 +265,10 @@ where
     // until the first `SynthParams` snapshot for that slot arrives, so a
     // freshly added track isn't silent before the UI's first tick.
     let mut slot_gain = [1.0f32; MAX_INSTRUMENTS];
+    // What each slot's / bus's gain is actually at, gliding towards the
+    // latest target (see `SmoothedGain`).
+    let mut slot_gain_smooth = [SmoothedGain::new(sample_rate); MAX_INSTRUMENTS];
+    let mut bus_gain_smooth = [SmoothedGain::new(sample_rate); MAX_BUS_TRACKS];
     // One persistent effect chain per Carve slot - persistent (not
     // rebuilt per block) because e.g. a compressor's envelope follower
     // needs continuity across blocks to sound like one rather than
@@ -317,6 +343,8 @@ where
                     sample_rate,
                     &mut synth_engines,
                     &slot_gain,
+                    &mut slot_gain_smooth,
+                    &mut bus_gain_smooth,
                     &mut slot_effects,
                     &mut bus_effects,
                     &mut master_effects,
@@ -346,6 +374,8 @@ fn write_block<T>(
     sample_rate: f32,
     synth_engines: &mut [SynthEngine],
     slot_gain: &[f32],
+    slot_gain_smooth: &mut [SmoothedGain],
+    bus_gain_smooth: &mut [SmoothedGain],
     slot_effects: &mut [EffectChain],
     bus_effects: &mut [EffectChain],
     master_effects: &mut EffectChain,
@@ -387,7 +417,7 @@ fn write_block<T>(
             // same as a real device chain (the fader is the last thing
             // before the master sum, not part of the chain itself).
             let (fx_l, fx_r) = slot_effects[i].process(raw_l, raw_r);
-            let gain = slot_gain[i];
+            let gain = slot_gain_smooth[i].next(slot_gain[i]);
             let (l, r) = (fx_l * gain, fx_r * gain);
             synth_l += l;
             synth_r += r;
@@ -414,7 +444,7 @@ fn write_block<T>(
         *click_env *= click_decay_coeff;
 
         let (clip_l, clip_r) = if playing {
-            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects)
+            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth)
         } else {
             (0.0, 0.0)
         };
@@ -480,6 +510,7 @@ fn mix_audio_clips(
     sources: &[DecodedSource],
     pos: i64,
     bus_effects: &mut [EffectChain],
+    bus_gain_smooth: &mut [SmoothedGain],
 ) -> (f32, f32) {
     let mut bus_raw = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut bus_gain_db = [0.0f32; MAX_BUS_TRACKS];
@@ -521,7 +552,7 @@ fn mix_audio_clips(
         }
         let (raw_l, raw_r) = bus_raw[slot];
         let (fx_l, fx_r) = bus_effects[slot].process(raw_l, raw_r);
-        let gain = db_to_gain(bus_gain_db[slot]);
+        let gain = bus_gain_smooth[slot].next(db_to_gain(bus_gain_db[slot]));
         out_l += fx_l * gain;
         out_r += fx_r * gain;
     }
@@ -539,5 +570,22 @@ fn position_from_samples(sample_counter: u64, sample_rate: f32, bpm: f64) -> Pos
         bar: bar_index as u32 + 1,
         beat: beat_index as u8 + 1,
         sixteenth: sixteenth_in_beat as u8 + 1,
+    }
+}
+
+#[cfg(test)]
+mod gain_smoothing_tests {
+    use super::SmoothedGain;
+
+    #[test]
+    fn glides_instead_of_jumping_and_settles_quickly() {
+        let sr = 48_000.0;
+        let mut g = SmoothedGain::new(sr);
+        let first = g.next(0.0);
+        assert!(first > 0.9, "one sample after a 1.0 -> 0.0 change it must not have jumped (got {first})");
+        for _ in 0..(0.03 * sr) as usize {
+            g.next(0.0);
+        }
+        assert!(g.current < 0.01, "should have settled within ~30 ms (got {})", g.current);
     }
 }

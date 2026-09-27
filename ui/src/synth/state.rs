@@ -136,6 +136,8 @@ pub struct SynthModel {
     /// `state` - for saving, and for playing the tracks not on screen.
     pub patches: Signal<BTreeMap<TrackId, SynthState>>,
     arrangement: Signal<Arrangement>,
+    /// Where automation is evaluated each tick (see `Arrangement::with_automation_at`).
+    playhead: Signal<shared::arrangement::Ticks>,
     /// Which engine slot plays which track's Carve.
     slots: [Option<TrackId>; MAX_INSTRUMENTS],
     /// Whose patch `state` currently holds - only ever stored back there,
@@ -169,6 +171,7 @@ impl SynthModel {
         arrangement: Signal<Arrangement>,
         patches: Vec<(TrackId, SynthState)>,
         selected_track: Signal<Option<TrackId>>,
+        playhead: Signal<shared::arrangement::Ticks>,
     ) -> Self {
         // Start on the first track with an instrument, showing its patch.
         let patches: BTreeMap<TrackId, SynthState> = patches.into_iter().collect();
@@ -181,6 +184,7 @@ impl SynthModel {
             },
             patches: Signal::new(patches),
             arrangement,
+            playhead,
             slots: [None; MAX_INSTRUMENTS],
             state_track: first,
             state: Signal::new(state),
@@ -415,7 +419,10 @@ impl Model for SynthModel {
                 // Every instrument's latest patch to its slot (the engine
                 // keeps the latest per slot).
                 let patches = self.patches.get();
-                let arr = self.arrangement.get();
+                // Automated track gain / effect params, as they are at the
+                // playhead - never written back to the arrangement.
+                let arrangement = self.arrangement.get();
+                let arr = arrangement.with_automation_at(self.playhead.get());
                 for (slot, track) in self.slots.iter().enumerate() {
                     if let Some(patch) = track.and_then(|t| patches.get(&t)) {
                         let mut snapshot = SynthParams::from_state(patch);
