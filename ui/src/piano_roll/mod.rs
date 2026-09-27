@@ -16,7 +16,7 @@ use shared::theory::{degree_name, note_name};
 use crate::synth::segmented::segmented;
 use crate::timeline::state::TimelineEvent;
 use crate::tokens::{self, ThemeId};
-use grid::{grid_height, note_with_octave, row_pitches, ticks_to_bbs, Grid};
+use grid::{grid_height, is_drum_clip, note_with_octave, row_pitches, ticks_to_bbs, Grid};
 use state::{EditMode, LabelMode, NoteKey, PianoRollEvent};
 
 /// The footer's description of the selection: how many, which degrees and
@@ -100,21 +100,31 @@ pub fn piano_roll_view(
 
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
 
-            let label_modes = [LabelMode::Notes, LabelMode::Intervals];
-            segmented(
-                cx,
-                2,
-                |cx, i| Label::new(cx, if i == 0 { "Notes" } else { "Intervals" }),
-                move |i| label_mode.map(move |m| *m == label_modes[i]),
-                move |cx, i| cx.emit(PianoRollEvent::SetLabelMode(label_modes[i])),
-            );
-            let key_text = Memo::new(move |_| {
-                format!("{} {}", note_name(key.get()), crate::interval_input::state::scale_name(scale_mask.get()).to_lowercase())
-            });
-            Button::new(cx, move |cx| Label::new(cx, key_text))
-                .class("btn")
-                .class("sm")
-                .on_press(|cx| cx.emit(crate::interval_input::state::IntervalInputEvent::ToggleOpen));
+            // Note naming and the key only mean something for pitched
+            // instruments; a Drum Kit clip's rows are its pads.
+            let drums = Memo::new(move |_| open_clip.get().is_some_and(|id| is_drum_clip(&arrangement.get(), id)));
+            HStack::new(cx, move |cx| {
+                let label_modes = [LabelMode::Notes, LabelMode::Intervals];
+                segmented(
+                    cx,
+                    2,
+                    |cx, i| Label::new(cx, if i == 0 { "Notes" } else { "Intervals" }),
+                    move |i| label_mode.map(move |m| *m == label_modes[i]),
+                    move |cx, i| cx.emit(PianoRollEvent::SetLabelMode(label_modes[i])),
+                );
+                let key_text = Memo::new(move |_| {
+                    format!("{} {}", note_name(key.get()), crate::interval_input::state::scale_name(scale_mask.get()).to_lowercase())
+                });
+                Button::new(cx, move |cx| Label::new(cx, key_text))
+                    .class("btn")
+                    .class("sm")
+                    .on_press(|cx| cx.emit(crate::interval_input::state::IntervalInputEvent::ToggleOpen));
+            })
+            .toggle_class("hidden", drums)
+            .gap(Pixels(tokens::SPACE_2))
+            .alignment(Alignment::Left)
+            .width(Auto)
+            .height(Auto);
 
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
@@ -155,7 +165,8 @@ pub fn piano_roll_view(
                     ClipContent::Audio { .. } => Vec::new(),
                 })
                 .unwrap_or_default();
-            Pixels(grid_height(row_pitches(&notes, key.get(), scale_mask.get()).len()))
+            let drums = open_clip.get().is_some_and(|id| is_drum_clip(&arr, id));
+            Pixels(grid_height(row_pitches(&notes, key.get(), scale_mask.get(), drums).len()))
         });
         Grid::new(cx, arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme)
             .width(Stretch(1.0))

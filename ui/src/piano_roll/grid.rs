@@ -36,7 +36,16 @@ const STEM_GRAB_PX: f32 = 6.0;
 /// third octave for an empty clip - plus any pitch the notes use even if
 /// it's off-scale (e.g. from before a key change). High to low,
 /// piano-style.
-pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16) -> Vec<u8> {
+pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, drums: bool) -> Vec<u8> {
+    // A Drum Kit clip is a step grid: one row per pad (plus any other
+    // pitch the notes use), kick at the bottom, scale ignored.
+    if drums {
+        let mut rows: Vec<u8> = shared::drums::DRUM_KIT.iter().map(|p| p.note).collect();
+        rows.extend(notes.iter().map(|n| n.pitch));
+        rows.sort_unstable_by(|a, b| b.cmp(a));
+        rows.dedup();
+        return rows;
+    }
     const MIN_SPAN: i32 = 18;
     let (mut lo, mut hi) = match (notes.iter().map(|n| n.pitch).min(), notes.iter().map(|n| n.pitch).max()) {
         (Some(min), Some(max)) => (min as i32 - 3, max as i32 + 3),
@@ -61,6 +70,13 @@ pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16) -> Vec<u8> {
         .collect();
     rows.sort_unstable_by(|a, b| b.cmp(a));
     rows
+}
+
+/// Whether `clip` sits on a Drum Kit track (its editor is a step grid).
+pub fn is_drum_clip(arr: &Arrangement, clip: ClipId) -> bool {
+    arr.clip(clip)
+        .and_then(|c| arr.track(c.track))
+        .is_some_and(|t| t.instrument == Some(shared::arrangement::Instrument::Drums))
 }
 
 /// The canvas height for `rows` rows: ruler + rows + velocity lane.
@@ -136,6 +152,10 @@ impl Grid {
         Some((id, clip.start, clip.length, notes.clone()))
     }
 
+    fn drums(&self) -> bool {
+        self.open_clip.get().is_some_and(|id| is_drum_clip(&self.arrangement.get(), id))
+    }
+
     /// The open clip's track colour - notes are filled with it.
     fn clip_color(&self) -> Color {
         let arr = self.arrangement.get();
@@ -181,7 +201,7 @@ impl View for Grid {
             WindowEvent::MouseDown(MouseButton::Left) => {
                 let Some((clip_id, _clip_start, clip_length, notes)) = self.clip_info() else { return };
                 let bounds = cx.bounds();
-                let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get());
+                let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums());
                 if rows.is_empty() || clip_length <= 0 {
                     return;
                 }
@@ -244,7 +264,7 @@ impl View for Grid {
             WindowEvent::MouseMove(_, y) => {
                 if let Some((key, _)) = self.vel_drag {
                     let Some((_, _, _, notes)) = self.clip_info() else { return };
-                    let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get());
+                    let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums());
                     let lane_top = cx.bounds().y + RULER_H + rows.len() as f32 * ROW_H;
                     self.vel_drag = Some((key, Self::velocity_at(lane_top, *y)));
                     cx.needs_redraw();
@@ -270,7 +290,8 @@ impl View for Grid {
             return;
         }
         let key = self.key.get();
-        let rows = row_pitches(&notes, key, self.scale_mask.get());
+        let drums = self.drums();
+        let rows = row_pitches(&notes, key, self.scale_mask.get(), drums);
         if rows.is_empty() {
             return;
         }
@@ -299,7 +320,12 @@ impl View for Grid {
             let y0 = top + i as f32 * ROW_H;
             let y1 = y0 + ROW_H;
             let rel = ((pitch as i32 - key as i32).rem_euclid(12)) as u8;
-            if rel == 0 {
+            if drums {
+                // Alternate rows shaded so a hit reads across to its pad.
+                if i % 2 == 1 {
+                    fill(canvas, vg::Rect::new(gx, y0, gx + gw, y1), p.bg_000);
+                }
+            } else if rel == 0 {
                 fill(canvas, vg::Rect::new(gx, y0, gx + gw, y1), p.selection);
                 fill(canvas, vg::Rect::new(bounds.x, y0 + 2.0, bounds.x + 3.0, y1 - 2.0), p.ink);
             } else if !degrees.contains(&rel) {
@@ -307,9 +333,13 @@ impl View for Grid {
             }
             fill(canvas, vg::Rect::new(bounds.x, y1 - 1.0, bounds.x + bounds.w, y1), p.grid_beat);
 
-            let (big, small) = match label_mode {
-                LabelMode::Intervals => (degree_name(rel).to_string(), note_with_octave(pitch)),
-                LabelMode::Notes => (note_with_octave(pitch), degree_name(rel).to_string()),
+            let (big, small) = match (drums, label_mode) {
+                (true, _) => (
+                    shared::drums::pad_for_note(pitch).map(|p| p.name.to_string()).unwrap_or_else(|| note_with_octave(pitch)),
+                    String::new(),
+                ),
+                (false, LabelMode::Intervals) => (degree_name(rel).to_string(), note_with_octave(pitch)),
+                (false, LabelMode::Notes) => (note_with_octave(pitch), degree_name(rel).to_string()),
             };
             let baseline = y0 + ROW_H * 0.5 + 4.0;
             text(canvas, &big, bounds.x + 10.0, baseline, 12.0, p.ink);
@@ -317,9 +347,10 @@ impl View for Grid {
         }
 
         // Column heads.
-        let head = match label_mode {
-            LabelMode::Intervals => "Interval",
-            LabelMode::Notes => "Note",
+        let head = match (drums, label_mode) {
+            (true, _) => "Pad",
+            (false, LabelMode::Intervals) => "Interval",
+            (false, LabelMode::Notes) => "Note",
         };
         text(canvas, head, bounds.x + 10.0, bounds.y + 16.0, 11.0, p.ink_muted);
         text(canvas, "Velocity", bounds.x + 10.0, lane_top + 18.0, 11.0, p.ink_muted);
@@ -402,7 +433,7 @@ impl View for Grid {
                 canvas.draw_path(&vg::Path::rect(rect.with_inset((0.5, 0.5)), None), &edge);
             }
 
-            if x1 - x0 >= 18.0 {
+            if x1 - x0 >= 18.0 && !drums {
                 let rel = ((note.pitch as i32 - key as i32).rem_euclid(12)) as u8;
                 let name = match label_mode {
                     LabelMode::Notes => note_name(note.pitch % 12).to_string(),
