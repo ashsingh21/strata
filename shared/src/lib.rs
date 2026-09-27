@@ -22,10 +22,6 @@ pub mod theory;
 
 /// UI -> engine control parameters.
 pub struct Params {
-    /// Fader gain, linear 0.0..=1.0, stored as f32 bits.
-    gain: AtomicU32,
-    /// Pan, -1.0 (left) ..= 1.0 (right), stored as f32 bits.
-    pan: AtomicU32,
     playing: AtomicBool,
     /// Edge-triggered: the UI sets this on Stop; the engine clears it after
     /// resetting its sample counter.
@@ -54,8 +50,6 @@ pub const DEFAULT_BPM: f64 = 128.0;
 impl Params {
     pub fn new() -> Self {
         Self {
-            gain: AtomicU32::new(1.0f32.to_bits()),
-            pan: AtomicU32::new(0.0f32.to_bits()),
             playing: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
             click_enabled: AtomicBool::new(false),
@@ -64,22 +58,6 @@ impl Params {
             loop_start_sample: AtomicU64::new(0),
             loop_end_sample: AtomicU64::new(0),
         }
-    }
-
-    pub fn set_gain(&self, value: f32) {
-        self.gain.store(value.to_bits(), Ordering::Relaxed);
-    }
-
-    pub fn gain(&self) -> f32 {
-        f32::from_bits(self.gain.load(Ordering::Relaxed))
-    }
-
-    pub fn set_pan(&self, value: f32) {
-        self.pan.store(value.to_bits(), Ordering::Relaxed);
-    }
-
-    pub fn pan(&self) -> f32 {
-        f32::from_bits(self.pan.load(Ordering::Relaxed))
     }
 
     pub fn set_playing(&self, value: bool) {
