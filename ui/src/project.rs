@@ -88,8 +88,8 @@ pub enum GuardedAction {
     Close,
     New,
     Open,
-    /// Open the built-in house demo (`shared::demo`) as a new, unsaved project.
-    Demo,
+    /// Open a built-in demo song (`shared::demo`) as a new, unsaved project.
+    Demo(shared::demo::DemoSong),
     /// Open lesson `n`'s starting project and begin it (`crate::lessons`).
     Lesson(usize),
 }
@@ -99,7 +99,7 @@ pub enum ProjectEvent {
     SaveAsDialog,
     OpenDialog,
     New,
-    OpenDemo,
+    OpenDemo(shared::demo::DemoSong),
     /// Start lesson `n` of `crate::lessons::course::LESSONS`.
     StartLesson(usize),
     /// A new file stem, typed into the header's title field - moves the
@@ -319,7 +319,7 @@ impl ProjectModel {
             GuardedAction::Close => "closing",
             GuardedAction::New => "starting a new project",
             GuardedAction::Open => "opening another project",
-            GuardedAction::Demo => "opening the demo",
+            GuardedAction::Demo(_) => "opening the demo",
             GuardedAction::Lesson(_) => "starting a lesson",
         };
         cx.spawn(move |proxy| {
@@ -352,10 +352,16 @@ impl ProjectModel {
                 self.display_name.set(format!("Lesson {}", n + 1));
                 cx.emit(crate::lessons::LessonEvent::Begin(n));
             }
-            GuardedAction::Demo => {
-                self.replace_project(cx, shared::demo::house_demo());
+            GuardedAction::Demo(song) => {
+                self.replace_project(cx, song.project());
                 self.current_path.set(None);
-                self.display_name.set(shared::demo::NAME.to_string());
+                self.display_name.set(song.name().to_string());
+                // Its key and scale, so the piano roll shows its notes.
+                let (root, scale) = song.key();
+                cx.emit(crate::interval_input::state::IntervalInputEvent::SetKey(root));
+                if let Some(preset) = shared::theory::SCALE_PRESETS.iter().find(|p| p.name == scale) {
+                    cx.emit(crate::interval_input::state::IntervalInputEvent::SetScaleMask(preset.mask));
+                }
             }
         }
     }
@@ -421,7 +427,7 @@ impl Model for ProjectModel {
                 }
             }
             ProjectEvent::New => self.guard(cx, GuardedAction::New),
-            ProjectEvent::OpenDemo => self.guard(cx, GuardedAction::Demo),
+            ProjectEvent::OpenDemo(song) => self.guard(cx, GuardedAction::Demo(*song)),
             ProjectEvent::StartLesson(n) => self.guard(cx, GuardedAction::Lesson(*n)),
             ProjectEvent::DiscardDecided(action, choice) => {
                 self.asking = false;

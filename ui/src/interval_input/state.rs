@@ -28,6 +28,8 @@ pub struct IntervalInputModel {
 
 pub enum IntervalInputEvent {
     SetKey(u8),
+    /// Replace the whole scale (bit n = semitone n above the root).
+    SetScaleMask(u16),
     ToggleDegree(u8),
     CyclePreset,
     ToggleOpen,
@@ -56,6 +58,7 @@ impl Model for IntervalInputModel {
     fn event(&mut self, _cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
             IntervalInputEvent::SetKey(key) => self.key.set(key % 12),
+            IntervalInputEvent::SetScaleMask(mask) => self.scale_mask.set(*mask | 1),
             IntervalInputEvent::ToggleDegree(degree) => {
                 if *degree != 0 {
                     self.scale_mask.update(|m| *m ^= 1 << (degree % 12));
