@@ -1,40 +1,28 @@
 //! The Effects Board: a full-width lower-panel view of a track's effect
 //! graph - palette (left), canvas (middle, nodes at their own positions
-//! wired by cables), inspector (right). Phase 5 of the effects-board
-//! plan: renders the real graph, but read-only - no drag, no wiring, no
-//! palette-drop yet (Phases 6-9).
+//! wired by cables), inspector (right).
+//!
+//! Split into three pieces, same "one directory module per growing UI
+//! area" convention `timeline/`, `synth/` and `piano_roll/` already use:
+//! - `geometry`: pure layout math (node/port positions, latency), no
+//!   Vizia dependency at all.
+//! - `cables`: the canvas's custom-drawn layer (dot grid, cable curves,
+//!   port dots, live wire-drag preview).
+//! - this file: the actual widget tree and its interaction wiring
+//!   (drag-to-move, drag-to-rewire, palette-to-add, select/delete).
+
+mod cables;
+mod geometry;
 
 use vizia::prelude::*;
-use vizia::vg;
 
 use shared::arrangement::{Arrangement, ClipColor, Effect, EffectGraph, EffectNodeId, TrackId};
 
+use cables::FxCables;
+use geometry::{effect_latency_ms, io_position, nearest_input_port, port_out, CANVAS_MARGIN_X, IO_H, IO_W, NODE_H, NODE_W};
+
 use crate::timeline::state::TimelineEvent;
 use crate::tokens::{self, ThemeId};
-
-/// A node box's fixed size (per the FxBoard spec: effect nodes are
-/// 150x86; source/output are smaller, 88x40).
-const NODE_W: f32 = 150.0;
-const NODE_H: f32 = 86.0;
-const IO_W: f32 = 88.0;
-const IO_H: f32 = 40.0;
-/// Horizontal spacing between auto-laid-out nodes - matches
-/// `EffectGraph::push_at_end`'s own spacing so a freshly added node
-/// lines up with this board's layout instead of drifting from it.
-const NODE_SPACING: f32 = 166.0;
-const ROW_Y: f32 = 60.0;
-/// Reserves room left of the first real node for the Source pill and its
-/// cable, so the graph never renders at a negative canvas-local x (which
-/// used to spill the Source node visually into the palette column).
-/// Purely a display-space offset - stored `EffectNode::position` values
-/// stay 0-based; this is added/subtracted at the render boundary only.
-const CANVAS_MARGIN_X: f32 = NODE_SPACING;
-/// Gap between the last real node (or Source, if the chain is empty) and
-/// the Out node - deliberately roomier than the tight 16px gap
-/// `EffectGraph::push_at_end` leaves between consecutive effect nodes, so
-/// Out reads as the board's fixed "end of chain" anchor rather than just
-/// another node crowded into the row.
-const OUTPUT_GAP: f32 = 56.0;
 
 #[derive(Clone, Copy)]
 pub struct FxBoardProps {
@@ -47,203 +35,6 @@ pub struct FxBoardProps {
     /// device area. `Some(None)` is the master board open; `None` is
     /// no board open at all.
     pub board_open_track: Signal<Option<Option<TrackId>>>,
-}
-
-/// A node's position, honoring a live drag preview for whichever node
-/// (if any) is currently being dragged - so cables follow the drag
-/// without needing the model itself (and thus the whole node list) to
-/// change until the drag actually commits on release.
-fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
-    if let Some((drag_id, x, y)) = drag {
-        if drag_id == id {
-            return (x, y);
-        }
-    }
-    if id == EffectGraph::SOURCE {
-        return (0.0, ROW_Y + (NODE_H - IO_H) * 0.5);
-    }
-    if id == EffectGraph::OUTPUT {
-        // The gap is measured from the *actual last node in signal-chain
-        // order* (`ordered()`, walked from the real edge list), not just
-        // whichever node happens to have the largest x - position is
-        // cosmetic and dragging doesn't touch chain order (Phase 7), so
-        // those two can disagree once a node's been dragged out of its
-        // auto-layout position.
-        let last_x = graph.ordered().last().map(|n| n.position.0);
-        let x = match last_x {
-            Some(last_x) => last_x + CANVAS_MARGIN_X + NODE_W + OUTPUT_GAP,
-            None => IO_W + OUTPUT_GAP,
-        };
-        return (x, ROW_Y + (NODE_H - IO_H) * 0.5);
-    }
-    graph.node(id).map(|n| (n.position.0 + CANVAS_MARGIN_X, n.position.1)).unwrap_or((CANVAS_MARGIN_X, ROW_Y))
-}
-
-fn port_out(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
-    let (x, y) = io_position(graph, id, drag);
-    let (w, h) = node_size(id);
-    (x + w, y + h * 0.5)
-}
-
-fn port_in(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
-    let (x, y) = io_position(graph, id, drag);
-    let (_, h) = node_size(id);
-    (x, y + h * 0.5)
-}
-
-/// The input port nearest `(x, y)` (canvas-local), within a generous
-/// grab radius - used on wire-drag release to figure out what the
-/// cursor actually landed on, since mouse capture routes the release
-/// event to the port that started the drag, not whatever's visually
-/// under the cursor.
-fn nearest_input_port(graph: &EffectGraph, x: f32, y: f32) -> Option<EffectNodeId> {
-    const RADIUS: f32 = 20.0;
-    let mut targets: Vec<EffectNodeId> = graph.nodes.iter().map(|n| n.id).collect();
-    targets.push(EffectGraph::OUTPUT);
-    targets
-        .into_iter()
-        .map(|id| {
-            let (px, py) = port_in(graph, id, None);
-            (id, ((px - x).powi(2) + (py - y).powi(2)).sqrt())
-        })
-        .filter(|(_, d)| *d <= RADIUS)
-        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-        .map(|(id, _)| id)
-}
-
-/// An effect's processing latency in milliseconds, at the engine's fixed
-/// 48kHz sample rate (matching `eq_curve.rs`'s own display-side constant).
-/// Both effect types today are zero-latency feedforward DSP - update this
-/// alongside `engine::EffectUnit` when a lookahead- or FIR-based effect
-/// type is added.
-fn effect_latency_ms(effect: &Effect) -> f32 {
-    match effect {
-        Effect::Compressor(_) | Effect::Eq(_) => 0.0,
-    }
-}
-
-fn node_size(id: EffectNodeId) -> (f32, f32) {
-    if id == EffectGraph::SOURCE || id == EffectGraph::OUTPUT {
-        (IO_W, IO_H)
-    } else {
-        (NODE_W, NODE_H)
-    }
-}
-
-/// Draws every cable in the graph as a cubic-bezier curve between its
-/// two ports - the selected node's own cables draw heavier/brighter,
-/// matching the FxBoard spec.
-struct FxCables {
-    arrangement: Signal<Arrangement>,
-    track: Option<TrackId>,
-    theme: Signal<ThemeId>,
-    selected: Signal<Option<EffectNodeId>>,
-    drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
-    wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>,
-}
-
-impl FxCables {
-    fn new(
-        cx: &mut Context,
-        arrangement: Signal<Arrangement>,
-        track: Option<TrackId>,
-        theme: Signal<ThemeId>,
-        selected: Signal<Option<EffectNodeId>>,
-        drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
-        wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>,
-    ) -> Handle<'_, Self> {
-        Self { arrangement, track, theme, selected, drag_state, wire_drag }
-            .build(cx, |_| {})
-            .bind(arrangement, |mut h| h.needs_redraw())
-            .bind(theme, |mut h| h.needs_redraw())
-            .bind(selected, |mut h| h.needs_redraw())
-            .bind(drag_state, |mut h| h.needs_redraw())
-            .bind(wire_drag, |mut h| h.needs_redraw())
-    }
-}
-
-impl View for FxCables {
-    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
-        let palette = self.theme.get().palette();
-
-        // A dot grid at the same 16px spacing nodes snap to on drag-release
-        // - a working graph-paper surface, not just decoration.
-        let mut grid_dot = vg::Paint::default();
-        grid_dot.set_color(palette.ink_faint);
-        grid_dot.set_anti_alias(true);
-        let grid_step = 16.0f32;
-        let mut gy = bounds.y;
-        while gy < bounds.y + bounds.h {
-            let mut gx = bounds.x;
-            while gx < bounds.x + bounds.w {
-                canvas.draw_path(&vg::Path::circle(vg::Point::new(gx, gy), 0.75, None), &grid_dot);
-                gx += grid_step;
-            }
-            gy += grid_step;
-        }
-
-        let arr = self.arrangement.get();
-        let Some(graph) = arr.fx(self.track) else { return };
-        let selected = self.selected.get();
-        let drag = self.drag_state.get();
-
-        for edge in &graph.edges {
-            let (x0, y0) = port_out(graph, edge.from, drag);
-            let (x1, y1) = port_in(graph, edge.to, drag);
-            let (x0, y0, x1, y1) = (bounds.x + x0, bounds.y + y0, bounds.x + x1, bounds.y + y1);
-            let mid = (x0 + x1) * 0.5;
-
-            let mut path = vg::PathBuilder::new();
-            path.move_to(vg::Point::new(x0, y0));
-            path.cubic_to(vg::Point::new(mid, y0), vg::Point::new(mid, y1), vg::Point::new(x1, y1));
-            let path = path.detach();
-
-            let is_selected = selected.is_some_and(|s| s == edge.from || s == edge.to);
-            let mut paint = vg::Paint::default();
-            paint.set_color(if is_selected { palette.ink } else { palette.ink_muted });
-            paint.set_style(vg::PaintStyle::Stroke);
-            paint.set_stroke_width(if is_selected { 2.0 } else { 1.5 });
-            paint.set_anti_alias(true);
-            canvas.draw_path(&path, &paint);
-        }
-
-        // Ports: 10px ink dots at every real node's in/out (source only
-        // has an out, output only an in).
-        let mut dot = vg::Paint::default();
-        dot.set_color(palette.ink);
-        dot.set_anti_alias(true);
-        let draw_dot = |x: f32, y: f32| {
-            canvas.draw_path(&vg::Path::circle(vg::Point::new(bounds.x + x, bounds.y + y), 3.0, None), &dot);
-        };
-        let (sx, sy) = port_out(graph, EffectGraph::SOURCE, drag);
-        draw_dot(sx, sy);
-        let (ox, oy) = port_in(graph, EffectGraph::OUTPUT, drag);
-        draw_dot(ox, oy);
-        for node in &graph.nodes {
-            let (ox, oy) = port_out(graph, node.id, drag);
-            let (ix, iy) = port_in(graph, node.id, drag);
-            draw_dot(ox, oy);
-            draw_dot(ix, iy);
-        }
-
-        // A live wire being dragged from a port to the cursor.
-        if let Some((from, mx, my)) = self.wire_drag.get() {
-            let (x0, y0) = port_out(graph, from, drag);
-            let (x0, y0) = (bounds.x + x0, bounds.y + y0);
-            let (x1, y1) = (bounds.x + mx, bounds.y + my);
-            let mid = (x0 + x1) * 0.5;
-            let mut path = vg::PathBuilder::new();
-            path.move_to(vg::Point::new(x0, y0));
-            path.cubic_to(vg::Point::new(mid, y0), vg::Point::new(mid, y1), vg::Point::new(x1, y1));
-            let mut paint = vg::Paint::default();
-            paint.set_color(palette.ink);
-            paint.set_style(vg::PaintStyle::Stroke);
-            paint.set_stroke_width(2.0);
-            paint.set_anti_alias(true);
-            canvas.draw_path(&path.detach(), &paint);
-        }
-    }
 }
 
 /// One palette row: `bg-400` while its own effect is the one currently
