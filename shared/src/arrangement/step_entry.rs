@@ -42,6 +42,7 @@ pub fn step_entry_commit(
             name: "Step".into(),
             content: ClipContent::Midi { notes: Vec::new() },
             recording: false,
+            gain_db: 0.0,
         };
         batch.push(Command::InsertClip { clip: Box::new(clip) });
         (next_new_id, playhead)

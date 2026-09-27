@@ -491,8 +491,9 @@ fn mix_audio_clips(
             (l, r)
         };
         let slot = (clip.bus_slot as usize).min(MAX_BUS_TRACKS - 1);
-        bus_raw[slot].0 += l;
-        bus_raw[slot].1 += r;
+        let clip_gain = db_to_gain(clip.clip_gain_db);
+        bus_raw[slot].0 += l * clip_gain;
+        bus_raw[slot].1 += r * clip_gain;
         bus_gain_db[slot] = clip.gain_db;
         bus_active[slot] = true;
     }

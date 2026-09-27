@@ -101,6 +101,7 @@ pub fn seed_arrangement() -> Arrangement {
                 source_offset_samples,
             },
             recording: false,
+            gain_db: 0.0,
         });
     }
 
@@ -115,6 +116,7 @@ pub fn seed_arrangement() -> Arrangement {
             name: name.into(),
             content: ClipContent::Midi { notes: bass_pattern() },
             recording: false,
+            gain_db: 0.0,
         });
     }
 
@@ -132,6 +134,7 @@ pub fn seed_arrangement() -> Arrangement {
             source_offset_samples: 0,
         },
         recording: false,
+        gain_db: 0.0,
     });
     let take_id = arr.alloc_id();
     arr.clips.push(Clip {
@@ -151,6 +154,7 @@ pub fn seed_arrangement() -> Arrangement {
         // support for that yet, so it would just grow forever once
         // playback passed it. This is a finished (fixed-length) take.
         recording: false,
+        gain_db: 0.0,
     });
 
     let cutoff_lane = arr.alloc_id();
@@ -179,6 +183,7 @@ pub fn seed_arrangement() -> Arrangement {
         name: "Wash".into(),
         content: ClipContent::Midi { notes: pad_pattern() },
         recording: false,
+        gain_db: 0.0,
     });
 
     arr.loop_range = Some(LoopRange { start: BAR * 4, end: BAR * 12 });

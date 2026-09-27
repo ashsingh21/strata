@@ -32,6 +32,10 @@ pub struct PlaybackClip {
     /// The owning track's mixer gain (`Track.gain_db`) at the moment this
     /// plan was built - applied per-sample when mixing this clip in.
     pub gain_db: f32,
+    /// This clip's own gain (`Clip.gain_db`) - applied to its own samples
+    /// before they're summed into the track bus, separately from the
+    /// track-wide `gain_db` above.
+    pub clip_gain_db: f32,
     /// The owning track's Compressor insert effect, if any -
     /// `CompressorState::bypass()` when it has none. See `SynthParams`'s
     /// own `compressor` field for why this is always concrete, never
@@ -101,6 +105,7 @@ impl PlaybackPlan {
                     length_samples: end_sample - start_sample,
                     source_offset_samples: *source_offset_samples,
                     gain_db: track.gain_db,
+                    clip_gain_db: clip.gain_db,
                     compressor,
                     bus_slot,
                 })
@@ -168,6 +173,7 @@ mod tests {
             name: "Take".into(),
             content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0 },
             recording: false,
+            gain_db: 0.0,
         }
     }
 
@@ -200,6 +206,7 @@ mod tests {
             name: "Notes".into(),
             content: ClipContent::Midi { notes: vec![] },
             recording: false,
+            gain_db: 0.0,
         });
         let plan = PlaybackPlan::from_arrangement(&arr, 48_000);
         assert!(plan.clips.is_empty());

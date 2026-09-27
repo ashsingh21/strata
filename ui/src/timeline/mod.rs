@@ -2,6 +2,7 @@
 //! area, backed by [`state::TimelineState`].
 
 pub mod beat_templates;
+pub mod drum_pads;
 pub mod header;
 pub mod lanes;
 pub mod peaks_loader;

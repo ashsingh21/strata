@@ -156,6 +156,7 @@ impl Command {
                     name: original.name.clone(),
                     content: right_content,
                     recording: false,
+                    gain_db: original.gain_db,
                 };
 
                 let clip = arr.clip_mut(clip_id).unwrap();
@@ -450,6 +451,7 @@ mod tests {
                 source_offset_samples: 0,
             },
             recording: false,
+            gain_db: 0.0,
         }
     }
 
@@ -562,6 +564,7 @@ mod tests {
             name: "Step".into(),
             content: ClipContent::Midi { notes: vec![] },
             recording: false,
+            gain_db: 0.0,
         });
         let mut stack = CommandStack::new();
 
@@ -685,6 +688,7 @@ mod tests {
             name: "Velocity".into(),
             content: ClipContent::Midi { notes: vec![] },
             recording: false,
+            gain_db: 0.0,
         });
         let add = Command::AddMidiNote {
             clip: clip_id,

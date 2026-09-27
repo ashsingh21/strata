@@ -184,6 +184,11 @@ pub struct Clip {
     pub name: String,
     pub content: ClipContent,
     pub recording: bool,
+    /// This clip's own level, on top of its track's mixer gain - 0 for
+    /// every normal clip; a drum pad tap sets a small random value so
+    /// repeated hits of the same sample aren't byte-for-byte identical.
+    #[serde(default)]
+    pub gain_db: f32,
 }
 
 impl Clip {

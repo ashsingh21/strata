@@ -76,6 +76,7 @@ mod tests {
             name: "Clip".into(),
             content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60, velocity: DEFAULT_VELOCITY }] },
             recording: false,
+            gain_db: 0.0,
         });
         arr
     }

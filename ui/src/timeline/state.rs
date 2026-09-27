@@ -114,6 +114,12 @@ pub struct TimelineState {
     /// this can't be a constructor argument without a circular
     /// dependency.
     decode_request_tx: Option<std::sync::mpsc::Sender<Arc<str>>>,
+
+    /// Drum-pad keys currently physically held down - guards against OS
+    /// key-repeat re-triggering `TapDrumPad` dozens of times a second for
+    /// one held key (each retrigger used to mean a fresh clip *and* a
+    /// fresh full decode-and-rebuild-peaks job with no caching at all).
+    held_drum_pads: HashSet<Code>,
 }
 
 /// What Copy/Cut put aside. Starts are relative to the earliest item, so
@@ -207,6 +213,7 @@ impl TimelineState {
             selected_track,
             clipboard: None,
             decode_request_tx: None,
+            held_drum_pads: HashSet::new(),
         }
     }
 
@@ -370,6 +377,7 @@ pub enum TimelineEvent {
     DeleteSelected,
     DuplicateSelected,
     RepeatToFillLoop,
+    TapDrumPad(usize),
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
@@ -676,6 +684,7 @@ impl Model for TimelineState {
                         name: "Clip".to_string(),
                         content: ClipContent::Midi { notes: vec![] },
                         recording: false,
+                        gain_db: 0.0,
                     };
                     stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
                 });
@@ -869,6 +878,7 @@ impl Model for TimelineState {
                         name: "Take".to_string(),
                         content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
                         recording: false,
+                        gain_db: 0.0,
                     };
                     stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
                 });
@@ -970,6 +980,7 @@ impl Model for TimelineState {
                         name: name.clone(),
                         content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
                         recording: false,
+                        gain_db: 0.0,
                     };
                     stack.do_command(
                         Command::InsertTrack { track: Box::new(track), index, clips: vec![clip], automation: vec![] },
@@ -1033,6 +1044,7 @@ impl Model for TimelineState {
                                         source_offset_samples: 0,
                                     },
                                     recording: false,
+                                    gain_db: 0.0,
                                 });
                             }
                         }
@@ -1117,6 +1129,110 @@ impl Model for TimelineState {
                     }
                 });
             }
+            TimelineEvent::TapDrumPad(index) => {
+                let Some(pad) = crate::timeline::drum_pads::DRUM_PADS.get(*index).copied() else { return };
+                let assets_dir = crate::timeline::assets_dir();
+                let path = assets_dir.join(pad.sample);
+                let Some(duration_seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
+                    eprintln!("timeline: failed to read {}", path.display());
+                    return;
+                };
+                let playhead = self.playhead_ticks.get();
+                let source: Arc<str> = Arc::from(pad.sample);
+                // A drum pad hits the same handful of samples over and
+                // over - reuse another clip's already-loaded peaks
+                // instead of re-decoding this source from disk every
+                // single tap (that unconditional reload, combined with no
+                // guard against OS key-repeat, is what turned a couple of
+                // seconds of a held key into a pile of clips and a
+                // backlog of redundant decode jobs).
+                let cached_peaks = self.arrangement.get().clips.iter().find_map(|c| match &c.content {
+                    ClipContent::Audio { source: s, peaks: Some(p), .. } if *s == source => Some(p.clone()),
+                    _ => None,
+                });
+                self.with_arrangement(|arr, stack| {
+                    let length = arr.tempo_map.seconds_to_ticks(duration_seconds).max(1);
+                    let clip_id = arr.alloc_id();
+                    let new_clip = |track_id: TrackId| Clip {
+                        id: clip_id,
+                        track: track_id,
+                        start: playhead,
+                        length,
+                        name: pad.track_name.to_string(),
+                        content: ClipContent::Audio {
+                            source: source.clone(),
+                            peaks: cached_peaks.clone(),
+                            source_offset_samples: 0,
+                        },
+                        recording: false,
+                        // A touch of per-hit level variation so the same
+                        // sample struck over and over doesn't sound like
+                        // the exact same recording played back-to-back -
+                        // real hits are never that identical.
+                        gain_db: random_gain_variation_db(),
+                    };
+                    if let Some(track_id) = arr.tracks.iter().find(|t| t.name == pad.track_name).map(|t| t.id) {
+                        stack.do_command(Command::InsertClip { clip: Box::new(new_clip(track_id)) }, arr);
+                    } else {
+                        let track_id = arr.alloc_id();
+                        let index = arr.tracks.len();
+                        let track = Track {
+                            id: track_id,
+                            name: pad.track_name.to_string(),
+                            color: pad.color,
+                            kind: TrackKind::Audio,
+                            mute: false,
+                            solo: false,
+                            arm: false,
+                            gain_db: 0.0,
+                            height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
+                            instrument: None,
+                            effects: vec![],
+                        };
+                        stack.do_command(
+                            Command::InsertTrack {
+                                track: Box::new(track),
+                                index,
+                                clips: vec![new_clip(track_id)],
+                                automation: vec![],
+                            },
+                            arr,
+                        );
+                    }
+                });
+                if cached_peaks.is_none() {
+                    crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
+                }
+                if let Some(tx) = &self.decode_request_tx {
+                    let _ = tx.send(source.clone());
+                }
+            }
+        });
+
+        event.map(|window_event, _| match window_event {
+            WindowEvent::KeyDown(code, _) => {
+                if cx.modifiers().is_empty() && self.held_drum_pads.insert(*code) {
+                    if let Some(index) = crate::timeline::drum_pads::DRUM_PADS.iter().position(|p| p.key == *code) {
+                        cx.emit(TimelineEvent::TapDrumPad(index));
+                    }
+                }
+            }
+            WindowEvent::KeyUp(code, _) => {
+                self.held_drum_pads.remove(code);
+            }
+            _ => {}
         });
     }
+}
+
+/// A small +-2 dB nudge for one drum-pad hit - not cryptographic, just
+/// enough that back-to-back taps of the same sample don't sound like the
+/// exact same recording playing twice. Seeded from the clock rather than
+/// a stored RNG state since this fires from user input, not the audio
+/// callback - no real-time-safety constraint to satisfy here.
+fn random_gain_variation_db() -> f32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let unit = (nanos % 1000) as f32 / 1000.0; // 0..1
+    (unit - 0.5) * 4.0 // -2..2
 }
