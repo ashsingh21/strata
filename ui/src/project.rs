@@ -155,6 +155,8 @@ pub enum GuardedAction {
     Close,
     New,
     Open,
+    /// Open the built-in house demo (`shared::demo`) as a new, unsaved project.
+    Demo,
 }
 
 pub enum ProjectEvent {
@@ -162,6 +164,7 @@ pub enum ProjectEvent {
     SaveAsDialog,
     OpenDialog,
     New,
+    OpenDemo,
     /// A new file stem, typed into the header's title field - moves the
     /// project's file on disk if it's been saved before, otherwise just
     /// updates the name a future Save As will suggest.
@@ -259,18 +262,27 @@ impl ProjectModel {
     fn open(&mut self, cx: &mut EventContext, path: PathBuf) {
         match load(&path) {
             Ok(project) => {
-                cx.emit(TimelineEvent::LoadArrangement(project.arrangement.clone()));
-                cx.emit(SynthEvent::LoadPatches(project.instruments.into_iter().collect()));
-                let assets_dir = crate::timeline::assets_dir();
-                for source in crate::timeline::peaks_loader::audio_sources(&project.arrangement) {
-                    crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
-                    let _ = self.decode_request_tx.send(source);
-                }
+                self.replace_project(cx, project);
                 self.current_path.set(Some(path.clone()));
                 self.display_name.set(name_from_path(Some(&path)));
-                self.saved.set(snapshot(&project.arrangement, &self.patches.get()));
             }
             Err(e) => eprintln!("project: failed to load {}: {e}", path.display()),
+        }
+    }
+
+    /// Swaps in `project` wholesale and marks it as saved. The caller sets
+    /// the path/name.
+    fn replace_project(&mut self, cx: &mut EventContext, project: Project) {
+        let patches: BTreeMap<TrackId, SynthState> = project.instruments.into_iter().collect();
+        // From `patches`, not `self.patches`: `LoadPatches` hasn't been
+        // handled yet, so `self.patches` still holds the old project's.
+        self.saved.set(snapshot(&project.arrangement, &patches));
+        cx.emit(TimelineEvent::LoadArrangement(project.arrangement.clone()));
+        cx.emit(SynthEvent::LoadPatches(patches));
+        let assets_dir = crate::timeline::assets_dir();
+        for source in crate::timeline::peaks_loader::audio_sources(&project.arrangement) {
+            crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
+            let _ = self.decode_request_tx.send(source);
         }
     }
 
@@ -310,6 +322,7 @@ impl ProjectModel {
             GuardedAction::Close => "closing",
             GuardedAction::New => "starting a new project",
             GuardedAction::Open => "opening another project",
+            GuardedAction::Demo => "opening the demo",
         };
         cx.spawn(move |proxy| {
             let choice = zenity_ask_save(&name, verb);
@@ -332,6 +345,11 @@ impl ProjectModel {
             }
             GuardedAction::Open => {
                 spawn_dialog(cx, || zenity_pick_file(&default_projects_dir()), ProjectEvent::OpenPicked)
+            }
+            GuardedAction::Demo => {
+                self.replace_project(cx, shared::demo::house_demo());
+                self.current_path.set(None);
+                self.display_name.set(shared::demo::NAME.to_string());
             }
         }
     }
@@ -373,6 +391,7 @@ impl Model for ProjectModel {
             // action it was saving for, too.
             ProjectEvent::SaveAsPicked(None) => self.pending = None,
             ProjectEvent::New => self.guard(cx, GuardedAction::New),
+            ProjectEvent::OpenDemo => self.guard(cx, GuardedAction::Demo),
             ProjectEvent::DiscardDecided(action, choice) => {
                 self.asking = false;
                 match choice {

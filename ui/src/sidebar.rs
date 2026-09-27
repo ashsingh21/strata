@@ -127,11 +127,15 @@ pub fn sidebar(
                 // click, rather than placing each hit by hand - see
                 // `timeline::beat_templates`.
                 let templates = crate::timeline::beat_templates::TEMPLATES;
-                section_head(cx, "Beat templates", templates.len());
+                section_head(cx, "Beat templates", templates.len() + 1);
                 for (index, template) in templates.iter().enumerate() {
                     row(cx, template.name.to_string(), query, true)
                         .on_press(move |cx| cx.emit(TimelineEvent::AddDrumPattern(index)));
                 }
+                // A whole finished song, opened as a new project (asks
+                // first if the current one has unsaved changes).
+                row(cx, "House demo \u{b7} 2 min".to_string(), query, true)
+                    .on_press(|cx| cx.emit(crate::project::ProjectEvent::OpenDemo));
 
                 // Insert effects: works on any track kind (an audio track
                 // has effects but no instrument). Lit when the selected

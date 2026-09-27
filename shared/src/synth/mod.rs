@@ -13,7 +13,7 @@ pub use bridge::{
 pub use params::SynthParam;
 pub use curves::{envelope_points, filter_response_points, waveform_points};
 pub use model::{
-    cutoff_mod_depth, deep_rave_bass, lfo_mod_depth, seed_synth, Envelope, Filter, FilterType, Fx, Lfo, LfoTarget, Mix,
+    cutoff_mod_depth, deep_rave_bass, lfo_mod_depth, seed_synth, soft_pad, Envelope, Filter, FilterType, Fx, Lfo, LfoTarget, Mix,
     Oscillator, Output, SynthState, Unison, VoiceMode, Waveform, LFO_CUTOFF_MAX_OCT, LFO_PITCH_MAX_CENTS,
     LFO_PULSE_WIDTH_MAX, LFO_RESONANCE_MAX, MAX_UNISON, PRESETS,
 };
