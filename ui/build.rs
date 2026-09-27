@@ -663,6 +663,11 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     // being the same flat bg-100.
     rule(".fx-canvas", vec![("background-color", c("bg-000"))]);
     rule(".fx-node", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
+    // Draggable effect nodes (not the fixed Source/Out pills) and output
+    // ports brighten on hover, so what can be grabbed reads as grabbable.
+    // Before `.is-sel` so a selected node keeps its focus border.
+    rule(".fx-node.fx-effect:hover", vec![("border-color", c("ink-muted"))]);
+    rule(".fx-pip.fx-port:hover", vec![("background-color", c("focus")), ("border-color", c("focus"))]);
     // Selection needs to read on the node itself, not just its cables -
     // `focus` is the token's own purpose ("keyboard focus ring").
     rule(".fx-node.is-sel", vec![("background-color", c("bg-300")), ("border-color", c("focus"))]);

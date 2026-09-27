@@ -75,6 +75,7 @@ fn palette_row(cx: &mut Context, label: &'static str, effect: Effect, p: FxBoard
 fn output_port(cx: &mut Context, p: FxBoardProps, node: EffectNodeId, x: f32, y: f32, wire_drag: Signal<Option<(EffectNodeId, f32, f32)>>) {
     Element::new(cx)
         .class("fx-pip")
+        .class("fx-port")
         .class("is-on")
         .position_type(PositionType::Absolute)
         .left(Pixels(x - 5.0))
@@ -321,6 +322,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             }
                         })
                         .class("fx-node")
+                        .class("fx-effect")
                         .toggle_class("is-sel", is_selected)
                         // Bypassed nodes dim, so the chain's state reads at
                         // a glance, not just from the 6px pip.
