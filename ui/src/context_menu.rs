@@ -125,6 +125,10 @@ pub fn context_menu_view(
             }
             ContextMenuTarget::Ruler { tick } => {
                 item(cx, "Add marker here", move |cx| cx.emit(TimelineEvent::AddMarker(tick)));
+                if arr.loop_range.is_some() {
+                    separator(cx);
+                    item(cx, "Remove loop", |cx| cx.emit(TimelineEvent::SetLoopRange(None)));
+                }
             }
             ContextMenuTarget::Marker { marker } => {
                 item(cx, "Rename...", move |cx| cx.emit(TimelineEvent::BeginRenameMarker(marker)));

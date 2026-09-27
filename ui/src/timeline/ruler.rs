@@ -18,15 +18,14 @@ const EDGE_HIT_PX: f64 = 5.0;
 
 #[derive(Clone, Copy)]
 enum Drag {
-    Scrub,
     LoopStart,
     LoopEnd,
     LoopMiddle { grab_offset: Ticks },
-    /// Dragging on the ruler with no loop range set yet - there was
-    /// previously no way to create the *first* one at all (every other
-    /// drag variant only adjusts an existing range). A plain click still
-    /// just scrubs, same as always: this only becomes a real loop if the
-    /// drag actually covers a nonzero span by mouse-up.
+    /// Dragging anywhere on the ruler that isn't one of an existing loop
+    /// range's own handles/middle - with no loop set yet, or replacing
+    /// whatever's already there. A plain click still just scrubs, same as
+    /// always: this only becomes a real loop if the drag actually covers
+    /// a nonzero span by mouse-up.
     CreateLoop { anchor: Ticks },
 }
 
@@ -88,10 +87,15 @@ impl View for Ruler {
                     Some(range) if tick > range.start && tick < range.end => {
                         Drag::LoopMiddle { grab_offset: tick - range.start }
                     }
-                    Some(_) => Drag::Scrub,
-                    None => Drag::CreateLoop { anchor: tick.max(0) },
+                    // Anywhere else on the ruler redraws the loop from
+                    // scratch, replacing whatever's there - same as when
+                    // there's no loop yet. A plain click (no drag) still
+                    // just scrubs: `MouseUp`'s `CreateLoop` arm only
+                    // commits a new range when it actually has a nonzero
+                    // span.
+                    Some(_) | None => Drag::CreateLoop { anchor: tick.max(0) },
                 });
-                if matches!(self.drag, Some(Drag::Scrub) | Some(Drag::CreateLoop { .. })) {
+                if matches!(self.drag, Some(Drag::CreateLoop { .. })) {
                     cx.emit(TimelineEvent::ScrubPlayhead(tick.max(0)));
                 }
                 cx.capture();
@@ -129,7 +133,6 @@ impl View for Ruler {
                     let tick = snap(transform.x_to_tick(local_x), shared::arrangement::SnapGrid::Sixteenth, bypass);
 
                     match drag {
-                        Drag::Scrub => cx.emit(TimelineEvent::ScrubPlayhead(tick.max(0))),
                         Drag::LoopStart => {
                             let end = self.loop_range().map(|r| r.end).unwrap_or(tick + 1);
                             self.loop_preview = Some(LoopRange { start: tick.min(end - 1).max(0), end });
