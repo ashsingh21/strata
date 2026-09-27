@@ -29,6 +29,12 @@ const ROW_Y: f32 = 60.0;
 /// Purely a display-space offset - stored `EffectNode::position` values
 /// stay 0-based; this is added/subtracted at the render boundary only.
 const CANVAS_MARGIN_X: f32 = NODE_SPACING;
+/// Gap between the last real node (or Source, if the chain is empty) and
+/// the Out node - deliberately roomier than the tight 16px gap
+/// `EffectGraph::push_at_end` leaves between consecutive effect nodes, so
+/// Out reads as the board's fixed "end of chain" anchor rather than just
+/// another node crowded into the row.
+const OUTPUT_GAP: f32 = 56.0;
 
 #[derive(Clone, Copy)]
 pub struct FxBoardProps {
@@ -58,7 +64,10 @@ fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId
     }
     if id == EffectGraph::OUTPUT {
         let max_x = graph.nodes.iter().map(|n| n.position.0).fold(0.0f32, f32::max);
-        let x = if graph.nodes.is_empty() { CANVAS_MARGIN_X } else { max_x + CANVAS_MARGIN_X + NODE_SPACING };
+        // Gap measured from whatever's last node's right edge - Source's
+        // own (at x=0) when the chain is empty, otherwise the rightmost
+        // real node's.
+        let x = if graph.nodes.is_empty() { IO_W + OUTPUT_GAP } else { max_x + CANVAS_MARGIN_X + NODE_W + OUTPUT_GAP };
         return (x, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
     graph.node(id).map(|n| (n.position.0 + CANVAS_MARGIN_X, n.position.1)).unwrap_or((CANVAS_MARGIN_X, ROW_Y))
@@ -140,6 +149,23 @@ impl View for FxCables {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
         let bounds = cx.bounds();
         let palette = self.theme.get().palette();
+
+        // A dot grid at the same 16px spacing nodes snap to on drag-release
+        // - a working graph-paper surface, not just decoration.
+        let mut grid_dot = vg::Paint::default();
+        grid_dot.set_color(palette.ink_faint);
+        grid_dot.set_anti_alias(true);
+        let grid_step = 16.0f32;
+        let mut gy = bounds.y;
+        while gy < bounds.y + bounds.h {
+            let mut gx = bounds.x;
+            while gx < bounds.x + bounds.w {
+                canvas.draw_path(&vg::Path::circle(vg::Point::new(gx, gy), 0.75, None), &grid_dot);
+                gx += grid_step;
+            }
+            gy += grid_step;
+        }
+
         let arr = self.arrangement.get();
         let Some(graph) = arr.fx(self.track) else { return };
         let selected = self.selected.get();
@@ -398,7 +424,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             Label::new(cx, label).class("meta");
                             Label::new(cx, meta).class("meta");
                         })
-                        .class("device")
+                        .class("fx-node")
                         .position_type(PositionType::Absolute)
                         .left(Pixels(x))
                         .top(Pixels(y))
@@ -450,6 +476,8 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             .height(Pixels(22.0))
                             .width(Stretch(1.0));
 
+                            Element::new(cx).class("hairline").width(Stretch(1.0)).height(Pixels(1.0));
+
                             match node.effect {
                                 Effect::Eq(state) => {
                                     let state_signal = Memo::new(move |_| state);
@@ -463,15 +491,15 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                 }
                             }
                         })
-                        .class("panel")
+                        .class("fx-node")
                         .toggle_class("is-sel", is_selected)
                         .position_type(PositionType::Absolute)
                         .left(x.map(|v| Pixels(*v)))
                         .top(y.map(|v| Pixels(*v)))
                         .width(Pixels(NODE_W))
                         .height(Pixels(NODE_H))
-                        .padding(Pixels(4.0))
-                        .gap(Pixels(4.0))
+                        .padding(Pixels(6.0))
+                        .gap(Pixels(6.0))
                         .cursor(CursorIcon::Hand)
                         .on_mouse_down(move |cx, button| {
                             if button == MouseButton::Left {
@@ -558,7 +586,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     .width(Pixels(120.0));
                 });
             })
-            .class("device")
+            .class("fx-canvas")
             .width(Stretch(1.0))
             .height(Stretch(1.0));
 

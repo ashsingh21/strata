@@ -366,6 +366,13 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   border-radius: {radius_md}px;
   border-width: 1px;
 }}
+.fx-node {{
+  border-radius: {radius_md}px;
+  border-width: 1px;
+}}
+.fx-node.is-sel {{
+  border-width: 2px;
+}}
 .synth-devhead {{
   padding: 0px {space3}px;
 }}
@@ -645,6 +652,17 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     // focus ring").
     rule(".search.editing", vec![("background-color", c("bg-300")), ("border-color", c("focus"))]);
     rule(".device", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
+    // FxBoard: the canvas reads as a recessed work surface (same bg-000
+    // "sunken well" idiom `.synth-disp`/`.lower-panel`/`.tl-corner` already
+    // use, no border - flat, like `.lower-panel`) so effect nodes - one
+    // step lighter, like `.context-menu` sits a step above `.panel` -
+    // visibly float on top of it instead of every surface in the board
+    // being the same flat bg-100.
+    rule(".fx-canvas", vec![("background-color", c("bg-000"))]);
+    rule(".fx-node", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
+    // Selection needs to read on the node itself, not just its cables -
+    // `focus` is the token's own purpose ("keyboard focus ring").
+    rule(".fx-node.is-sel", vec![("background-color", c("bg-300")), ("border-color", c("focus"))]);
     rule(".synth-disp", vec![("background-color", c("bg-000"))]);
     rule(".synth-seg", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
     rule(
