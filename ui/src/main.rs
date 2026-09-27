@@ -56,8 +56,23 @@ fn main() -> Result<(), ApplicationError> {
         recorder_bridge.telemetry_tx,
         record_params.clone(),
         preferred_input_device.as_deref(),
-    )
-    .expect("failed to start audio engine");
+    );
+    // Without audio there's nothing to run - but a panic is invisible when
+    // launched from the desktop (the window just never appears), so say
+    // why in a dialog first.
+    let engine_handle = match engine_handle {
+        Ok(handle) => handle,
+        Err(e) => {
+            let message = format!("Strata couldn't start audio: {}.\n\nCheck that an output device is connected and not held exclusively by another program.", e.to_string().trim_end_matches('.'));
+            eprintln!("{message}");
+            let _ = std::process::Command::new("zenity")
+                .arg("--error")
+                .arg("--title=Strata")
+                .arg(format!("--text={message}"))
+                .status();
+            std::process::exit(1);
+        }
+    };
     let engine_sample_rate = engine_handle.sample_rate;
     let playback_plan_tx = std::cell::RefCell::new(playback_bridge.plan_tx);
     let playback_decode_tx = playback_bridge.decode_tx;
