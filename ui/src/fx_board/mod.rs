@@ -434,7 +434,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
             .height(Stretch(1.0));
 
             // Inspector: the selected node's real panel, reusing
-            // compressor_panel/eq_panel exactly as device_area does.
+            // the same effect_panel device_area uses, for exactly this node.
             VStack::new(cx, move |cx| {
                 Binding::new(cx, selected, move |cx| {
                     let Some(node_id) = selected.get() else {
@@ -445,12 +445,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     let Some(fx) = arr.fx(p.track) else { return };
                     let Some(node) = fx.node(node_id) else { return };
                     let color = p.track.and_then(|id| arr.track(id)).map(|t| t.color).unwrap_or(ClipColor::Violet);
-                    match node.effect {
-                        Effect::Compressor(_) => {
-                            crate::compressor_panel::compressor_panel(cx, p.theme, p.arrangement, p.track, color)
-                        }
-                        Effect::Eq(_) => crate::eq_panel::eq_panel(cx, p.theme, p.arrangement, p.track, color),
-                    }
+                    crate::effect_panel::effect_panel(cx, p.theme, p.arrangement, p.track, node.id, color);
                 });
             })
             .class("panel")

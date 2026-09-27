@@ -459,14 +459,13 @@ pub enum TimelineEvent {
     /// until there's a real multi-slot chain UI).
     AddCompressorEffect(TrackId),
     RemoveCompressorEffect(TrackId),
-    /// Replaces the track's Compressor's whole config - not undoable
-    /// (like `SetTrackHeight`/gain, a knob-drag preference, not an edit
-    /// worth a history entry), and a no-op if the track has none.
-    SetCompressorState(Option<TrackId>, CompressorState),
     /// Same shape as the Compressor trio above, for the EQ.
     AddEqEffect(TrackId),
     RemoveEqEffect(TrackId),
-    SetEqState(Option<TrackId>, EqState),
+    /// Replaces one effect node's whole config (a panel knob moved) - not
+    /// undoable, like `SetTrackHeight`/gain: a knob-drag, not an edit worth
+    /// a history entry. `None` track is the master bus.
+    SetEffectState(Option<TrackId>, EffectNodeId, Effect),
     /// Flips one effect slot's own enabled bit (the `TrackHeaderFx` pip).
     /// `None` targets the master bus's own chain (the pinned row's pips).
     ToggleEffectEnabled(Option<TrackId>, EffectNodeId),
@@ -873,12 +872,10 @@ impl Model for TimelineState {
                     }
                 }
             }
-            TimelineEvent::SetCompressorState(track, state) => {
+            TimelineEvent::SetEffectState(track, node, effect) => {
                 self.with_arrangement(|arr, _| {
-                    if let Some(fx) = arr.fx_mut(*track) {
-                        if let Some(node) = fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Compressor(_))) {
-                            node.effect = Effect::Compressor(*state);
-                        }
+                    if let Some(n) = arr.fx_mut(*track).and_then(|fx| fx.nodes.iter_mut().find(|n| n.id == *node)) {
+                        n.effect = *effect;
                     }
                 });
             }
@@ -901,15 +898,6 @@ impl Model for TimelineState {
                         self.do_command(Command::RemoveEffectNode { track: Some(*track), node: node.id });
                     }
                 }
-            }
-            TimelineEvent::SetEqState(track, state) => {
-                self.with_arrangement(|arr, _| {
-                    if let Some(fx) = arr.fx_mut(*track) {
-                        if let Some(node) = fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Eq(_))) {
-                            node.effect = Effect::Eq(*state);
-                        }
-                    }
-                });
             }
             TimelineEvent::ToggleEffectEnabled(track, node) => {
                 let arr = self.arrangement.get();

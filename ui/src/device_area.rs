@@ -10,7 +10,6 @@ use vizia::prelude::*;
 use shared::arrangement::{Arrangement, ClipId, Effect, EffectNodeId, Instrument, SnapGrid, Ticks, TrackId, TrackKind};
 use shared::synth::SynthState;
 
-use crate::compressor_panel;
 use crate::interval_input;
 use crate::interval_input::state::IntervalInputEvent;
 use crate::piano_roll;
@@ -120,12 +119,8 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                 let arr = p.arrangement.get();
                 let color = arr.track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Violet);
                 let kind = arr.track(track).and_then(|t| t.fx.node(node)).map(|n| n.effect);
-                match kind {
-                    Some(Effect::Compressor(_)) => {
-                        compressor_panel::compressor_panel(cx, p.theme, p.arrangement, Some(track), color)
-                    }
-                    Some(Effect::Eq(_)) => crate::eq_panel::eq_panel(cx, p.theme, p.arrangement, Some(track), color),
-                    None => {}
+                if kind.is_some() {
+                    crate::effect_panel::effect_panel(cx, p.theme, p.arrangement, Some(track), node, color);
                 }
             }
             Panel::NoInstrument(track) => empty_state(cx, "No instrument on this track", move |cx| {
