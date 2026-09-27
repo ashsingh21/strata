@@ -191,6 +191,8 @@ pub enum GuardedAction {
     Open,
     /// Open the built-in house demo (`shared::demo`) as a new, unsaved project.
     Demo,
+    /// Open lesson `n`'s starting project and begin it (`crate::lessons`).
+    Lesson(usize),
 }
 
 pub enum ProjectEvent {
@@ -199,6 +201,8 @@ pub enum ProjectEvent {
     OpenDialog,
     New,
     OpenDemo,
+    /// Start lesson `n` of `crate::lessons::course::LESSONS`.
+    StartLesson(usize),
     /// A new file stem, typed into the header's title field - moves the
     /// project's file on disk if it's been saved before, otherwise just
     /// updates the name a future Save As will suggest.
@@ -417,6 +421,7 @@ impl ProjectModel {
             GuardedAction::New => "starting a new project",
             GuardedAction::Open => "opening another project",
             GuardedAction::Demo => "opening the demo",
+            GuardedAction::Lesson(_) => "starting a lesson",
         };
         cx.spawn(move |proxy| {
             let choice = zenity_ask_save(&name, verb);
@@ -439,6 +444,14 @@ impl ProjectModel {
             }
             GuardedAction::Open => {
                 spawn_dialog(cx, || zenity_pick_file(&default_projects_dir()), ProjectEvent::OpenPicked)
+            }
+            GuardedAction::Lesson(n) => {
+                let Some(lesson) = crate::lessons::course::LESSONS.get(n) else { return };
+                self.replace_project(cx, shared::lessons::starting_project(lesson.id));
+                self.current_path.set(None);
+                // Short: the header's name field is narrow (the bar shows the title).
+                self.display_name.set(format!("Lesson {}", n + 1));
+                cx.emit(crate::lessons::LessonEvent::Begin(n));
             }
             GuardedAction::Demo => {
                 self.replace_project(cx, shared::demo::house_demo());
@@ -510,6 +523,7 @@ impl Model for ProjectModel {
             }
             ProjectEvent::New => self.guard(cx, GuardedAction::New),
             ProjectEvent::OpenDemo => self.guard(cx, GuardedAction::Demo),
+            ProjectEvent::StartLesson(n) => self.guard(cx, GuardedAction::Lesson(*n)),
             ProjectEvent::DiscardDecided(action, choice) => {
                 self.asking = false;
                 match choice {

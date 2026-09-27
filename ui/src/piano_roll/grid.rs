@@ -140,6 +140,7 @@ impl Grid {
             .bind(scale_mask, |mut h| h.needs_redraw())
             .bind(playhead, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
+            .bind(crate::lessons::highlight_signal().unwrap_or_else(|| Signal::new(None)), |mut h| h.needs_redraw())
     }
 
     /// The open clip's id, start and length, plus its notes - or `None` if
@@ -341,6 +342,10 @@ impl View for Grid {
                 fill(canvas, vg::Rect::new(bounds.x, y0 + 2.0, bounds.x + 3.0, y1 - 2.0), p.ink);
             } else if !degrees.contains(&rel) {
                 fill(canvas, vg::Rect::new(gx, y0, gx + gw, y1), p.bg_000);
+            }
+            // A lesson pointing at this row: it glows across the grid.
+            if crate::lessons::highlighted() == Some(crate::lessons::Target::PianoRollRow(pitch)) {
+                fill(canvas, vg::Rect::new(bounds.x, y0, bounds.x + bounds.w, y1), p.signal_soft);
             }
             fill(canvas, vg::Rect::new(bounds.x, y1 - 1.0, bounds.x + bounds.w, y1), p.grid_beat);
 

@@ -10,6 +10,7 @@ pub mod ruler;
 pub mod scheduler;
 pub mod state;
 
+use crate::lessons::LessonTargetExt;
 use std::path::PathBuf;
 
 use vizia::prelude::*;
@@ -79,7 +80,8 @@ pub fn timeline_view(
                     |cx, i| Label::new(cx, if i == 0 { "Select" } else { "Draw" }),
                     move |i| tool.map(move |t| *t == tools[i]),
                     move |cx, i| cx.emit(TimelineEvent::SetTool(tools[i])),
-                );
+                )
+                .lesson_target(crate::lessons::Target::DrawTool);
             })
             .class("tl-corner")
             .alignment(Alignment::Left)
@@ -119,6 +121,7 @@ pub fn timeline_view(
                     Button::new(cx, |cx| Label::new(cx, "+ MIDI track"))
                         .class("btn")
                         .class("quiet")
+                        .lesson_target(crate::lessons::Target::AddMidiTrack)
                         .on_press(|cx| {
                             cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi))
                         });

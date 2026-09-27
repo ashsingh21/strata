@@ -8,6 +8,7 @@
 pub mod grid;
 pub mod state;
 
+use crate::lessons::LessonTargetExt;
 use vizia::prelude::*;
 
 use shared::arrangement::{Arrangement, ClipContent, ClipId, SnapGrid, Ticks, PPQ};
@@ -145,6 +146,7 @@ pub fn piano_roll_view(
                 .class("btn")
                 .class("sm")
                 .class("quiet")
+                .lesson_target(crate::lessons::Target::PatternPlus)
                 .on_press(move |cx| {
                     if let Some(clip) = open_clip.get() {
                         cx.emit(TimelineEvent::SetPatternBars { clip, bars: pattern_bars.get() + 1 });

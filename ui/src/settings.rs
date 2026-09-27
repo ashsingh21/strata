@@ -54,3 +54,16 @@ pub fn load_sidebar_open() -> Option<bool> {
 pub fn save_sidebar_open(open: bool) {
     save_key("sidebar_open", serde_json::json!(open));
 }
+
+/// Ids of the lessons finished so far (see `crate::lessons`).
+pub fn load_lessons_done() -> Vec<String> {
+    load_all()
+        .get("lessons_done")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+pub fn save_lessons_done(ids: &[String]) {
+    save_key("lessons_done", serde_json::json!(ids));
+}

@@ -195,6 +195,7 @@ impl LaneArea {
         .bind(recording_preview, |mut h| h.needs_redraw())
         .bind(live_peaks, |mut h| h.needs_redraw())
         .bind(missing_sources, |mut h| h.needs_redraw())
+        .bind(crate::lessons::highlight_signal().unwrap_or_else(|| Signal::new(None)), |mut h| h.needs_redraw())
         .cursor(hover_cursor)
     }
 }
@@ -713,8 +714,15 @@ impl LaneArea {
             let row_rect = vg::Rect::new(bounds.x, y0, bounds.x + bounds.w, y0 + row.height);
 
             match row.kind {
-                RowKind::Track(_) => {
+                RowKind::Track(track) => {
                     self.draw_grid(canvas, &palette, row_rect, &transform, ticks_per_bar, ticks_per_beat);
+                    // A lesson pointing at this track: the whole lane glows.
+                    if crate::lessons::highlighted() == Some(crate::lessons::Target::Lane(track)) {
+                        let mut wash = vg::Paint::default();
+                        wash.set_color(palette.signal_soft);
+                        wash.set_anti_alias(true);
+                        canvas.draw_path(&vg::Path::rect(row_rect, None), &wash);
+                    }
                 }
                 // Same gridded ground as a track row: a lane is part of its
                 // track's timeline, not a separate black strip.

@@ -15,7 +15,7 @@ pub fn segmented<V: View>(
     mut content: impl FnMut(&mut Context, usize) -> Handle<'_, V>,
     mut is_on: impl FnMut(usize) -> Memo<bool>,
     on_select: impl Fn(&mut EventContext, usize) + Copy + Send + Sync + 'static,
-) {
+) -> Handle<'_, HStack> {
     HStack::new(cx, move |cx| {
         for i in 0..count {
             Button::new(cx, |cx| content(cx, i))
@@ -25,5 +25,5 @@ pub fn segmented<V: View>(
         }
     })
     .class("synth-seg")
-    .size(Auto);
+    .size(Auto)
 }

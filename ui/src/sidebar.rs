@@ -9,6 +9,7 @@ use vizia::prelude::*;
 use shared::arrangement::{Arrangement, Effect, Instrument, TrackId};
 use shared::synth::{SynthState, PRESETS};
 
+use crate::lessons::{LessonTargetExt, Target};
 use crate::synth::state::SynthEvent;
 use crate::timeline::state::TimelineEvent;
 
@@ -55,6 +56,8 @@ pub fn sidebar(
     arrangement: Signal<Arrangement>,
     selected_track: Signal<Option<TrackId>>,
     open: Signal<bool>,
+    lessons_active: Signal<Option<(usize, usize)>>,
+    lessons_done: Signal<Vec<String>>,
 ) {
     let query = Signal::new(String::new());
     let sample_categories = crate::timeline::drum_sample_categories();
@@ -69,6 +72,19 @@ pub fn sidebar(
 
         ScrollView::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
+                // The course: each lesson opens its own starting project.
+                let lessons = crate::lessons::course::LESSONS;
+                section_head(cx, "Learn", lessons.len());
+                Binding::new(cx, lessons_done, move |cx| {
+                    let done = lessons_done.get();
+                    for (i, lesson) in lessons.iter().enumerate() {
+                        let mark = if done.iter().any(|d| d == lesson.id) { "\u{2713} " } else { "" };
+                        row(cx, format!("{mark}{}. {}", i + 1, lesson.title), query, true)
+                            .toggle_class("is-on", lessons_active.map(move |a| a.is_some_and(|(l, _)| l == i)))
+                            .on_press(move |cx| cx.emit(crate::project::ProjectEvent::StartLesson(i)));
+                    }
+                });
+
                 section_head(cx, "Instruments", 2);
                 // Puts the instrument on the selected MIDI track; lit when
                 // that track already plays through it.
@@ -80,6 +96,7 @@ pub fn sidebar(
                             .unwrap_or(false)
                     });
                     row(cx, instrument.name().to_string(), query, true)
+                        .lesson_target(Target::SidebarInstrument(instrument))
                         .toggle_class("is-on", selected_has)
                         .on_press(move |cx| cx.emit(SynthEvent::AddInstrumentToSelected(instrument)));
                 }
@@ -88,6 +105,7 @@ pub fn sidebar(
                 for (name, build) in PRESETS {
                     let loaded = synth.map(move |s| s.name == name);
                     row(cx, name.to_string(), query, true)
+                        .lesson_target(Target::SidebarPreset(name))
                         .toggle_class("is-on", loaded)
                         .on_press(move |cx| cx.emit(SynthEvent::LoadPreset(build)));
                 }

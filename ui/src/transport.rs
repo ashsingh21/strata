@@ -3,6 +3,7 @@
 //! elapsed time, loop and metronome, the input level, and CPU/output
 //! meters. `size-toolbar` tall on `bg-000`.
 
+use crate::lessons::LessonTargetExt;
 use vizia::prelude::*;
 
 use shared::arrangement::{position_to_ticks, Arrangement, PPQ};
@@ -301,6 +302,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             file_menu_item_with_shortcut(cx, "Save", "Ctrl+S", file_menu_open, |cx| cx.emit(ProjectEvent::Save));
             file_menu_item(cx, "Save As...", file_menu_open, |cx| cx.emit(ProjectEvent::SaveAsDialog));
             file_menu_item(cx, "Export Audio...", file_menu_open, |cx| cx.emit(ProjectEvent::ExportDialog));
+            file_menu_item(cx, "Start Lesson 1", file_menu_open, |cx| cx.emit(ProjectEvent::StartLesson(0)));
             file_menu_sep(cx);
             // Undo/Redo were keyboard-only; listed here (with their keys)
             // so they're discoverable.
@@ -477,6 +479,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             with_tip(transport_button(cx, theme, GlyphKind::Stop, never, ink), "Stop").on_press(|cx| cx.emit(AppEvent::Stop));
             with_tip(transport_button(cx, theme, GlyphKind::Play, playing, |p, on| if on { p.on_signal } else { p.ink }), "Play / stop (Space)")
                 .toggle_class("is-play", playing)
+                .lesson_target(crate::lessons::Target::Play)
                 .on_press(|cx| cx.emit(AppEvent::TogglePlay));
             with_tip(transport_button(cx, theme, GlyphKind::Record, record_armed, |p, on| if on { p.on_record } else { p.ink }), "Arm recording")
                 .toggle_class("is-rec", record_armed)

@@ -12,6 +12,7 @@ mod fx_board;
 mod glyph;
 mod interval_input;
 mod knob;
+mod lessons;
 mod meter;
 mod piano_roll;
 mod pill;
@@ -234,6 +235,21 @@ fn main() -> Result<(), ApplicationError> {
         let interval_show_note_names = interval_model.show_note_names;
         interval_model.build(cx);
 
+        // Before any view is built: it also publishes the highlight signal
+        // that `lesson_target` glows read.
+        let lesson_model = lessons::LessonModel::new(
+            tl_arrangement,
+            selected_track,
+            playing,
+            synth_state,
+            tl_tool,
+            sidebar_open,
+        );
+        let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model);
+        let lessons_active = lesson_model.active;
+        let lessons_done = lesson_model.done;
+        lesson_model.build(cx);
+
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
         // the synth's animated modulation rings/scope, syncs
         // the timeline playhead from the transport's live position, and
@@ -265,6 +281,7 @@ fn main() -> Result<(), ApplicationError> {
                 cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: is_playing });
                 midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing);
                 cx.emit(SynthEvent::Tick(dt));
+                cx.emit(lessons::LessonEvent::Tick);
 
                 // Latest-wins: cheap to rebuild every tick, and avoids
                 // needing to dirty-track arrangement changes separately.
@@ -430,7 +447,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
             HStack::new(cx, move |cx| {
-                sidebar::sidebar(cx, synth_state, tl_arrangement, selected_track, sidebar_open);
+                sidebar::sidebar(cx, synth_state, tl_arrangement, selected_track, sidebar_open, lessons_active, lessons_done);
                 Element::new(cx)
                     .class("hairline")
                     .toggle_class("hidden", sidebar_open.map(|o| !*o))
@@ -438,6 +455,7 @@ fn main() -> Result<(), ApplicationError> {
                     .height(Stretch(1.0));
 
                 VStack::new(cx, move |cx| {
+                    lessons::bar::lesson_bar(cx, lesson_bar_props);
                     timeline::timeline_view(
                         cx,
                         theme,
