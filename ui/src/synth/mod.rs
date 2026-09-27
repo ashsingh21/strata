@@ -9,6 +9,7 @@ pub mod keyboard;
 pub mod segmented;
 pub mod state;
 
+use crate::lessons::LessonTargetExt;
 use vizia::prelude::*;
 
 use std::cell::Cell;
@@ -143,6 +144,7 @@ fn knob(
         Label::new(cx, text).class("value");
     })
     .class("knob-col")
+    .lesson_target(crate::lessons::Target::Knob(param))
     .toggle_class("is-automated", automated)
     // Right-click: "Automate Carve · <param>" on the selected track.
     .on_mouse_down(move |cx, button| {
@@ -235,7 +237,8 @@ fn waveform_seg(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId
                 SynthEvent::SetOsc2Waveform(waves[i])
             });
         },
-    );
+    )
+    .lesson_target(crate::lessons::Target::OscWave(if is_osc1 { 1 } else { 2 }));
 }
 
 const OCTAVE_RANGE: f32 = 3.0;
@@ -327,7 +330,8 @@ fn filter_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<Theme
                 move |cx, i| Label::new(cx, labels[i]),
                 move |i| state.map(move |s| s.filter.filter_type == types[i]),
                 move |cx, i| cx.emit(SynthEvent::SetFilterType(types[i])),
-            );
+            )
+            .lesson_target(crate::lessons::Target::FilterType);
         },
         move |cx| {
             FilterDisplay::new(cx, state, theme).width(Stretch(1.0)).height(Pixels(88.0)).class("synth-disp");
@@ -431,6 +435,7 @@ fn mod_section(
             // Resonance, Tune, Pulse width) to route that LFO there.
             for (i, name) in ["LFO 1", "LFO 2"].into_iter().enumerate() {
                 HStack::new(cx, move |cx| modulator_pill(cx, theme, name, 1))
+                    .lesson_target(crate::lessons::Target::LfoPill(i as u8 + 1))
                     .size(Auto)
                     .cursor(CursorIcon::Grab)
                     .on_mouse_down(move |cx, button| {
@@ -575,7 +580,8 @@ pub fn synth_view(
                 move |cx, i| {
                     cx.emit(SynthEvent::SetVoiceMode(if i == 0 { VoiceMode::Mono } else { VoiceMode::Poly }));
                 },
-            );
+            )
+            .lesson_target(crate::lessons::Target::VoiceMode);
             let voices = state.map(|s| format!("{} voices", s.voices));
             Label::new(cx, voices).class("readout").size(Auto);
         })

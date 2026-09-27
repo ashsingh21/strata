@@ -10,7 +10,10 @@ use crate::arrangement::{
 };
 use crate::drums::{CLAP, KICK, OPEN_HAT};
 use crate::project::Project;
-use crate::synth::deep_rave_bass;
+use crate::synth::{
+    deep_rave_bass, Envelope, Filter, FilterType, Fx, Lfo, LfoTarget, Mix, Oscillator, SynthState, Unison,
+    VoiceMode, Waveform,
+};
 
 pub const BAR: Ticks = PPQ * 4;
 pub const SIXTEENTH: Ticks = PPQ / 4;
@@ -24,18 +27,125 @@ const PART_BARS: i64 = 8;
 pub const FIRST_BEAT: &str = "first-beat";
 pub const BASSLINE: &str = "bassline";
 pub const CHORDS: &str = "chords";
+pub const CARVE_WAVES: &str = "carve-waves";
+pub const CARVE_MIX: &str = "carve-mix";
+pub const CARVE_FILTER: &str = "carve-filter";
+pub const CARVE_ENVELOPES: &str = "carve-envelopes";
+pub const CARVE_MOVEMENT: &str = "carve-movement";
+pub const RECIPE_BASS: &str = "recipe-bass";
+pub const RECIPE_FLUTE: &str = "recipe-flute";
+pub const RECIPE_HARP: &str = "recipe-harp";
+pub const RECIPE_LEAD: &str = "recipe-lead";
+
+/// Carve lessons loop their riff this long, so there's time to turn knobs.
+const CARVE_BARS: i64 = 64;
+
+/// A blank-slate Carve patch for the synth lessons: one plain saw, the
+/// filter wide open, no envelope movement, no LFOs, no effects - so every
+/// change a lesson asks for is clearly audible on its own.
+pub fn init_patch() -> SynthState {
+    SynthState {
+        name: "Init",
+        voice_mode: VoiceMode::Poly,
+        voices: 8,
+        osc1: Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 0.0, knob_b: 0.0, knob_c: 0.0, sync: false },
+        osc2: Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 0.0, knob_b: 0.5, knob_c: 0.0, sync: false },
+        mix: Mix { osc1_db: -6.0, osc2_db: -60.0, sub_db: -60.0, noise_db: -60.0 },
+        filter: Filter {
+            filter_type: FilterType::Lp24,
+            cutoff_hz: 18_000.0,
+            resonance: 0.1,
+            drive_db: 0.0,
+            env_amount_oct: 0.0,
+            key_track: 0.0,
+        },
+        filter_env: Envelope { attack_ms: 1.0, decay_ms: 400.0, sustain: 0.0, release_ms: 200.0 },
+        amp_env: Envelope { attack_ms: 8.0, decay_ms: 200.0, sustain: 1.0, release_ms: 150.0 },
+        lfo1: Lfo { rate_label: "", rate_norm: 0.6, depth: 0.0, sync: false, target: LfoTarget::PulseWidth, target_count: 1 },
+        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1 },
+        output: crate::synth::Output { glide_ms: 1.0, volume_db: -6.0, meter_l: 0.0, meter_r: 0.0 },
+        unison: Unison { voices: 1, detune_cents: 12.0, width: 0.6 },
+        fx: Fx { chorus_depth: 0.4, chorus_mix: 0.0, reverb_size: 0.5, reverb_mix: 0.0 },
+        held_notes: vec![],
+    }
+}
+
+/// (16th, pitch, length in 16ths) -> notes.
+fn steps(pattern: &[(i64, u8, i64)]) -> Vec<MidiNote> {
+    pattern.iter().map(|&(at, pitch, len)| MidiNote { start: at * SIXTEENTH, length: len * SIXTEENTH, pitch, velocity: 100 }).collect()
+}
+
+/// Each Carve lesson's riff and pattern length in bars.
+fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
+    match lesson {
+        // Long notes: waves and detuning are easiest to hear held.
+        CARVE_WAVES => ("Held note", steps(&[(0, 57, 14)]), 1),
+        CARVE_MIX => ("Held note", steps(&[(0, 45, 14)]), 1),
+        // Repeated eighths: filter and envelope changes show on every hit.
+        CARVE_FILTER | CARVE_ENVELOPES => (
+            "Riff",
+            steps(&[(0, 45, 2), (2, 45, 2), (4, 57, 2), (6, 45, 2), (8, 48, 2), (10, 45, 2), (12, 55, 2), (14, 45, 2)]),
+            1,
+        ),
+        // Held chords, A minor then F: slow movement needs time to show.
+        CARVE_MOVEMENT => {
+            let mut notes = steps(&[(0, 57, 15), (0, 60, 15), (0, 64, 15)]);
+            notes.extend(steps(&[(16, 53, 15), (16, 57, 15), (16, 60, 15)]));
+            ("Chords", notes, 2)
+        }
+        RECIPE_BASS => ("Bassline", steps(&[(2, 45, 1), (6, 45, 1), (10, 45, 1), (14, 57, 1)]), 1),
+        // Slow and singing, in A minor pentatonic.
+        RECIPE_FLUTE => ("Melody", steps(&[(0, 69, 3), (4, 72, 3), (8, 74, 7), (16, 76, 11), (28, 74, 3)]), 2),
+        // Raga Malkauns in A (A C D F G): a descending cascade, then a phrase.
+        RECIPE_HARP => (
+            "Cascade",
+            steps(&[
+                (0, 81, 1), (1, 79, 1), (2, 77, 1), (3, 74, 1), (4, 72, 1), (5, 69, 1), (6, 67, 1), (7, 65, 1),
+                (8, 62, 1), (9, 60, 1), (10, 57, 6),
+                (16, 57, 3), (20, 60, 2), (22, 62, 2), (24, 65, 7),
+            ]),
+            2,
+        ),
+        RECIPE_LEAD => (
+            "Hook",
+            steps(&[
+                (0, 81, 2), (3, 79, 1), (4, 76, 2), (6, 74, 2), (8, 76, 3), (11, 72, 1), (12, 74, 2), (14, 76, 2),
+                (16, 72, 3), (19, 74, 1), (20, 76, 2), (22, 72, 2), (24, 69, 6),
+            ]),
+            2,
+        ),
+        _ => ("Clip", Vec::new(), 1),
+    }
+}
+
+/// The Carve lessons: a synth track (after a drum track, for the recipes
+/// that sit in a beat) with the Init patch, looping a riff.
+fn carve_lesson(lesson: &str) -> Project {
+    let mut arr = empty_arrangement();
+    if lesson == RECIPE_BASS || lesson == RECIPE_LEAD {
+        let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, -8.0);
+        add_loop(&mut arr, drums, "Beat", lesson_one_beat(), 1, CARVE_BARS);
+    }
+    let synth = add_track(&mut arr, "Carve", ClipColor::Violet, Instrument::Carve, -4.0);
+    let (name, notes, pattern_bars) = carve_riff(lesson);
+    add_loop(&mut arr, synth, name, notes, pattern_bars, CARVE_BARS);
+    Project { arrangement: arr, instruments: vec![(synth, init_patch())], synth: None }
+}
 
 /// The project `lesson` starts from (a blank one for an unknown id).
 pub fn starting_project(lesson: &str) -> Project {
+    if lesson.starts_with("carve-") || lesson.starts_with("recipe-") {
+        return carve_lesson(lesson);
+    }
     let mut arr = empty_arrangement();
     let mut instruments = Vec::new();
     if lesson == BASSLINE || lesson == CHORDS {
         let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, -6.0);
-        add_loop(&mut arr, drums, "Beat", lesson_one_beat());
+        add_loop(&mut arr, drums, "Beat", lesson_one_beat(), 1, PART_BARS);
     }
     if lesson == CHORDS {
         let bass = add_track(&mut arr, "Bass", ClipColor::Blue, Instrument::Carve, -7.0);
-        add_loop(&mut arr, bass, "Bassline", lesson_two_bassline());
+        add_loop(&mut arr, bass, "Bassline", lesson_two_bassline(), 1, PART_BARS);
         instruments.push((bass, deep_rave_bass()));
     }
     Project { arrangement: arr, instruments, synth: None }
@@ -81,16 +191,16 @@ fn add_track(arr: &mut Arrangement, name: &str, color: ClipColor, instrument: In
     id
 }
 
-/// A one-bar pattern looping for `PART_BARS` bars from the start.
-fn add_loop(arr: &mut Arrangement, track: TrackId, name: &str, notes: Vec<MidiNote>) {
+/// A `pattern_bars` pattern looping for `bars` bars from the start.
+fn add_loop(arr: &mut Arrangement, track: TrackId, name: &str, notes: Vec<MidiNote>, pattern_bars: i64, bars: i64) {
     let id = arr.alloc_id();
     arr.clips.push(Clip {
         id,
         track,
         start: 0,
-        length: PART_BARS * BAR,
+        length: bars * BAR,
         name: name.into(),
-        content: ClipContent::Midi { notes, loop_len: Some(BAR), link: None },
+        content: ClipContent::Midi { notes, loop_len: Some(pattern_bars * BAR), link: None },
         recording: false,
         gain_db: 0.0,
     });
@@ -119,8 +229,24 @@ mod tests {
     }
 
     #[test]
+    fn carve_lessons_start_on_the_init_patch_with_a_riff() {
+        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD] {
+            let p = starting_project(id);
+            let synth = p.arrangement.tracks.last().unwrap();
+            assert_eq!(synth.instrument, Some(Instrument::Carve), "{id}");
+            assert_eq!(p.instruments, vec![(synth.id, init_patch())], "{id}");
+            let clip = p.arrangement.clips.iter().find(|c| c.track == synth.id).unwrap();
+            assert!(!clip.played_notes().is_empty(), "{id} has no riff");
+        }
+        // The harp cascade stays in raga Malkauns (A C D F G).
+        let harp = starting_project(RECIPE_HARP);
+        let ClipContent::Midi { notes, .. } = &harp.arrangement.clips[0].content else { panic!() };
+        assert!(notes.iter().all(|n| [9, 0, 2, 5, 7].contains(&(n.pitch % 12))));
+    }
+
+    #[test]
     fn starting_projects_round_trip_through_the_save_format() {
-        for id in [FIRST_BEAT, BASSLINE, CHORDS] {
+        for id in [FIRST_BEAT, BASSLINE, CHORDS, CARVE_WAVES, RECIPE_HARP, RECIPE_LEAD] {
             let p = starting_project(id);
             let back: Project = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
             assert_eq!(back.arrangement.clips.len(), p.arrangement.clips.len(), "{id}");

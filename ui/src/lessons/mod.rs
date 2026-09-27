@@ -51,6 +51,16 @@ pub enum Target {
     Lane(TrackId),
     /// A row of the open piano roll (a canvas wash).
     PianoRollRow(u8),
+    /// A Carve knob.
+    Knob(shared::synth::SynthParam),
+    /// Oscillator 1 or 2's wave switch.
+    OscWave(u8),
+    /// Carve's Mono/Poly switch.
+    VoiceMode,
+    /// Carve's filter type switch (LP 24 / LP 12 / BP / HP).
+    FilterType,
+    /// LFO 1 or 2's pill (drag it onto a knob).
+    LfoPill(u8),
 }
 
 thread_local! {
@@ -195,6 +205,11 @@ impl Model for LessonModel {
                 cx.emit(TimelineEvent::SetTool(TimelineTool::Select));
                 if !self.sidebar_open.get() {
                     cx.emit(AppEvent::ToggleSidebar);
+                }
+                // The part the lesson is about is the last track: select
+                // it, so its instrument is what the panel shows.
+                if let Some(last) = self.arrangement.get().tracks.last() {
+                    cx.emit(crate::synth::state::SynthEvent::SelectTrack(last.id));
                 }
                 self.go_to(*lesson, 0);
             }

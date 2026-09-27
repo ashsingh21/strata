@@ -4,7 +4,11 @@
 
 use shared::arrangement::{Clip, ClipContent, Instrument, Ticks, PPQ};
 use shared::drums::{CLAP, KICK, OPEN_HAT};
-use shared::lessons::{BAR, BASSLINE, BASS_NOTE, CHORDS, FIRST_BEAT};
+use shared::lessons::{
+    BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
+    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD,
+};
+use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
 use super::{selected, tracks_with, Snapshot, Target};
 
@@ -184,7 +188,515 @@ pub const LESSONS: &[Lesson] = &[
             ),
         ],
     },
+    Lesson {
+        id: CARVE_WAVES,
+        title: "Carve: waves",
+        steps: &[
+            act(
+                "Press Space. This is Oscillator 1 playing a saw wave: bright and buzzy, because it holds every harmonic.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Click the square wave, the last shape above Oscillator 1. Hollow and woody: only the odd harmonics.",
+                "The four little wave pictures next to \u{201c}Oscillator 1\u{201d}.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Square),
+                |_| Some(Target::OscWave(1)),
+            ),
+            act(
+                "Now the triangle, the second shape: softer - its harmonics are faint.",
+                "The shape that looks like a mountain range.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Triangle),
+                |_| Some(Target::OscWave(1)),
+            ),
+            act(
+                "Now the sine, the first shape: pure, with no harmonics at all. Flutes and sub-basses live here.",
+                "The smooth round wave.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Sine),
+                |_| Some(Target::OscWave(1)),
+            ),
+            act(
+                "Back to the saw. The more harmonics a wave has, the more a filter can shape - which is why most synth sounds start from a saw or square.",
+                "The saw is the third shape: a ramp that drops.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Saw),
+                |_| Some(Target::OscWave(1)),
+            ),
+            info("Sine is pure, triangle soft, square hollow, saw bright. Every sound in this course starts by picking one."),
+        ],
+    },
+    Lesson {
+        id: CARVE_MIX,
+        title: "Carve: mixing oscillators",
+        steps: &[
+            act("Press Space: one saw, held.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "Oscillator 2 is silent. In the Mixer, turn Osc 2 up past -12 dB.",
+                "Drag the Osc 2 knob in the Mixer upward.",
+                |s| carve(s).is_some_and(|p| p.mix.osc2_db > -12.0),
+                |_| Some(Target::Knob(SynthParam::Osc2Level)),
+            ),
+            act(
+                "Detune it: set Oscillator 2's Detune to about +10 cents. The two waves drift in and out of step - that beating makes it thick.",
+                "Anywhere from +5 to +25 cents works.",
+                |s| carve(s).is_some_and(|p| (5.0..=25.0).contains(&p.osc2.knob_a_cents)),
+                |_| Some(Target::Knob(SynthParam::Osc2Detune)),
+            ),
+            act(
+                "Set Oscillator 2's Octave to +1: it now plays an octave up, adding brightness on top.",
+                "One step up on the Octave knob under Oscillator 2.",
+                |s| carve(s).is_some_and(|p| p.osc2.octave == 1),
+                |_| Some(Target::Knob(SynthParam::Osc2Octave)),
+            ),
+            act(
+                "Add weight: turn Sub up past -12 dB - a sine one octave below the note.",
+                "The Sub knob in the Mixer.",
+                |s| carve(s).is_some_and(|p| p.mix.sub_db > -12.0),
+                |_| Some(Target::Knob(SynthParam::SubLevel)),
+            ),
+            act(
+                "A little air: Noise to about -30 dB. Not much - noise gets harsh fast.",
+                "Between -40 and -15 dB.",
+                |s| carve(s).is_some_and(|p| (-40.0..=-15.0).contains(&p.mix.noise_db)),
+                |_| Some(Target::Knob(SynthParam::NoiseLevel)),
+            ),
+            info(
+                "The Mixer blends four sources: two oscillators, a sub and noise. Most sounds use two or three, \
+                 and their levels matter as much as their waves.",
+            ),
+        ],
+    },
+    Lesson {
+        id: CARVE_FILTER,
+        title: "Carve: the filter",
+        steps: &[
+            act("Press Space: a bright saw riff.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "Turn Cutoff down below 400 Hz. The low-pass filter removes the highs: darker, muffled.",
+                "Cutoff is the big knob in the Filter section.",
+                |s| carve(s).is_some_and(|p| p.filter.cutoff_hz < 400.0),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            act(
+                "Turn Resonance up past 70%. It boosts right at the cutoff - that whistling edge.",
+                "Resonance is next to Cutoff.",
+                |s| carve(s).is_some_and(|p| p.filter.resonance > 0.7),
+                |_| Some(Target::Knob(SynthParam::Resonance)),
+            ),
+            act(
+                "Now sweep Cutoff slowly back up past 3 kHz while it plays: the classic filter sweep of acid house.",
+                "Drag it up gradually and listen.",
+                |s| carve(s).is_some_and(|p| p.filter.cutoff_hz > 3000.0),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            act(
+                "Try another filter type: click HP (high-pass). It keeps only the highs - thin and airy.",
+                "The LP 24 / LP 12 / BP / HP switch at the top of the Filter.",
+                |s| carve(s).is_some_and(|p| p.filter.filter_type == FilterType::Hp),
+                |_| Some(Target::FilterType),
+            ),
+            act(
+                "Back to LP 24, the warm low-pass most sounds use.",
+                "The first option on the same switch.",
+                |s| carve(s).is_some_and(|p| p.filter.filter_type == FilterType::Lp24),
+                |_| Some(Target::FilterType),
+            ),
+            info(
+                "Low-pass cuts highs (warm), high-pass cuts lows (thin), band-pass keeps a middle band. \
+                 Cutoff sets where the filter cuts; resonance sets how sharp the edge is.",
+            ),
+        ],
+    },
+    Lesson {
+        id: CARVE_ENVELOPES,
+        title: "Carve: envelopes",
+        steps: &[
+            act("Press Space.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "The Amp envelope shapes each note's loudness. Drag Amp Sustain to 0: notes now fade while they're held.",
+                "Sustain is the third knob under Amp envelope.",
+                |s| carve(s).is_some_and(|p| p.amp_env.sustain < 0.05),
+                |_| Some(Target::Knob(SynthParam::AmpSustain)),
+            ),
+            act(
+                "Shorten Amp Decay below 150 ms: a short, plucked note.",
+                "Decay is the second knob under Amp envelope.",
+                |s| carve(s).is_some_and(|p| p.amp_env.decay_ms < 150.0),
+                |_| Some(Target::Knob(SynthParam::AmpDecay)),
+            ),
+            act(
+                "Close the filter a little: Cutoff to about 1 kHz.",
+                "Between 500 Hz and 2 kHz.",
+                |s| carve(s).is_some_and(|p| (500.0..=2000.0).contains(&p.filter.cutoff_hz)),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            act(
+                "Now the Filter envelope: turn Env amount above +3 oct. Each note opens the filter, then it closes - a \u{201c}blip\u{201d}.",
+                "Env amount is in the Filter section.",
+                |s| carve(s).is_some_and(|p| p.filter.env_amount_oct > 3.0),
+                |_| Some(Target::Knob(SynthParam::EnvAmount)),
+            ),
+            act(
+                "Filter Decay below 150 ms: a snappier blip.",
+                "Decay under Filter envelope.",
+                |s| carve(s).is_some_and(|p| p.filter_env.decay_ms < 150.0),
+                |_| Some(Target::Knob(SynthParam::FilterDecay)),
+            ),
+            act(
+                "Last: raise Amp Attack above 300 ms. Notes swell in instead of striking - that's how pads begin.",
+                "Attack is the first knob under Amp envelope.",
+                |s| carve(s).is_some_and(|p| p.amp_env.attack_ms > 300.0),
+                |_| Some(Target::Knob(SynthParam::AmpAttack)),
+            ),
+            info(
+                "Attack is how fast a note starts, Decay how fast it falls, Sustain the level while held, Release the tail \
+                 after you let go. The Amp envelope moves loudness, the Filter envelope moves brightness.",
+            ),
+        ],
+    },
+    Lesson {
+        id: CARVE_MOVEMENT,
+        title: "Carve: movement",
+        steps: &[
+            act("Press Space: two held chords.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "First darken it: Cutoff to about 700 Hz.",
+                "Between 400 Hz and 1.2 kHz.",
+                |s| carve(s).is_some_and(|p| (400.0..=1200.0).contains(&p.filter.cutoff_hz)),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            act(
+                "LFOs move knobs for you. Drag the LFO 1 pill (top of Modulation) and drop it on the Cutoff knob.",
+                "Press on \u{201c}LFO 1\u{201d}, hold, move onto Cutoff, let go.",
+                |s| carve(s).is_some_and(|p| p.lfo1.target == LfoTarget::Cutoff),
+                |_| Some(Target::LfoPill(1)),
+            ),
+            act(
+                "Turn LFO 1 Depth past 50%: the filter now opens and closes on its own.",
+                "Depth is under LFO 1 in Modulation.",
+                |s| carve(s).is_some_and(|p| p.lfo1.target == LfoTarget::Cutoff && p.lfo1.depth > 0.5),
+                |_| Some(Target::Knob(SynthParam::Lfo1Depth)),
+            ),
+            act(
+                "Slow it down: LFO 1 Rate under 1 Hz, for a long sweep.",
+                "Rate is next to Depth.",
+                |s| carve(s).is_some_and(|p| lfo_rate_hz(p.lfo1.rate_norm) < 1.0),
+                |_| Some(Target::Knob(SynthParam::Lfo1Rate)),
+            ),
+            act(
+                "Now speed it up past 5 Hz: a wobble.",
+                "Rate up.",
+                |s| carve(s).is_some_and(|p| lfo_rate_hz(p.lfo1.rate_norm) > 5.0),
+                |_| Some(Target::Knob(SynthParam::Lfo1Rate)),
+            ),
+            act(
+                "Make it wide: Unison Voices to 3 or more - detuned copies of every note, spread left and right.",
+                "Voices, under Unison.",
+                |s| carve(s).is_some_and(|p| p.unison.voices >= 3),
+                |_| Some(Target::Knob(SynthParam::UnisonVoices)),
+            ),
+            act(
+                "Add space: Reverb mix past 30%.",
+                "Reverb, under Effects.",
+                |s| carve(s).is_some_and(|p| p.fx.reverb_mix > 0.3),
+                |_| Some(Target::Knob(SynthParam::ReverbMix)),
+            ),
+            info(
+                "An LFO is a slow wave that moves another control: on Cutoff it's a sweep or wobble, on Pitch it's vibrato. \
+                 Unison and reverb make any sound bigger.",
+            ),
+        ],
+    },
+    Lesson {
+        id: RECIPE_BASS,
+        title: "Recipe: deep bass",
+        steps: &[
+            act("Press Space: a beat and a plain saw bass.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "Weight first: Oscillator 1 Octave to -1.",
+                "The Octave knob under Oscillator 1, one step down.",
+                |s| carve(s).is_some_and(|p| p.osc1.octave == -1),
+                |_| Some(Target::Knob(SynthParam::Osc1Octave)),
+            ),
+            act(
+                "Sub up to about -6 dB: the sine underneath is what you feel on big speakers.",
+                "Above -9 dB.",
+                |s| carve(s).is_some_and(|p| p.mix.sub_db > -9.0),
+                |_| Some(Target::Knob(SynthParam::SubLevel)),
+            ),
+            act(
+                "Close the filter: Cutoff to about 250 Hz. Bass wants weight, not fizz.",
+                "Between 150 and 450 Hz.",
+                |s| carve(s).is_some_and(|p| (150.0..=450.0).contains(&p.filter.cutoff_hz)),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            act(
+                "Make each note punch: Env amount about +2.5 oct and Filter Decay about 200 ms.",
+                "Env amount +1.5 to +3.5 oct; Filter Decay 100 to 350 ms.",
+                |s| carve(s).is_some_and(|p| (1.5..=3.5).contains(&p.filter.env_amount_oct) && (100.0..=350.0).contains(&p.filter_env.decay_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((1.5..=3.5).contains(&p.filter.env_amount_oct), Target::Knob(SynthParam::EnvAmount)),
+                        ((100.0..=350.0).contains(&p.filter_env.decay_ms), Target::Knob(SynthParam::FilterDecay)),
+                    ])
+                },
+            ),
+            act(
+                "Grit: Drive past 6 dB.",
+                "Drive is in the Filter section.",
+                |s| carve(s).is_some_and(|p| p.filter.drive_db > 6.0),
+                |_| Some(Target::Knob(SynthParam::Drive)),
+            ),
+            act(
+                "Switch to Mono and set Glide to about 50 ms: notes slide into each other instead of stacking up.",
+                "Mono is at the top right of Carve; Glide is under Output (20 to 120 ms).",
+                |s| carve(s).is_some_and(|p| p.voice_mode == VoiceMode::Mono && (20.0..=120.0).contains(&p.output.glide_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.voice_mode == VoiceMode::Mono, Target::VoiceMode),
+                        ((20.0..=120.0).contains(&p.output.glide_ms), Target::Knob(SynthParam::Glide)),
+                    ])
+                },
+            ),
+            info(
+                "Deep bass: a low octave, a sub underneath, a closed filter that punches open, and mono. \
+                 Compare with Presets \u{2192} Deep Rave Bass, which adds a detuned second saw.",
+            ),
+        ],
+    },
+    Lesson {
+        id: RECIPE_FLUTE,
+        title: "Recipe: flute",
+        steps: &[
+            act("Press Space: a slow melody, on a buzzy saw for now.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "A flute is almost pure: set Oscillator 1 to the triangle.",
+                "The second wave shape above Oscillator 1.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Triangle),
+                |_| Some(Target::OscWave(1)),
+            ),
+            act(
+                "Breath: Noise to about -26 dB.",
+                "Between -34 and -18 dB, in the Mixer.",
+                |s| carve(s).is_some_and(|p| (-34.0..=-18.0).contains(&p.mix.noise_db)),
+                |_| Some(Target::Knob(SynthParam::NoiseLevel)),
+            ),
+            act(
+                "Soften it: Cutoff about 2.5 kHz, so the breath isn't hissy.",
+                "Between 1.5 and 3.5 kHz.",
+                |s| carve(s).is_some_and(|p| (1500.0..=3500.0).contains(&p.filter.cutoff_hz)),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            act(
+                "Blow into it: Amp Attack about 80 ms, so each note breathes in.",
+                "Between 50 and 150 ms.",
+                |s| carve(s).is_some_and(|p| (50.0..=150.0).contains(&p.amp_env.attack_ms)),
+                |_| Some(Target::Knob(SynthParam::AmpAttack)),
+            ),
+            act(
+                "Vibrato: LFO 2 already points at Pitch. Set its Rate to about 5 Hz and Depth to about 20%.",
+                "Rate 4 to 7 Hz, Depth 10 to 35%, under LFO 2.",
+                |s| carve(s).is_some_and(vibrato),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((4.0..=7.0).contains(&lfo_rate_hz(p.lfo2.rate_norm)), Target::Knob(SynthParam::Lfo2Rate)),
+                        ((0.1..=0.35).contains(&p.lfo2.depth), Target::Knob(SynthParam::Lfo2Depth)),
+                    ])
+                },
+            ),
+            act(
+                "A room to play in: Reverb mix about 30%.",
+                "Between 20 and 50%.",
+                |s| carve(s).is_some_and(|p| (0.2..=0.5).contains(&p.fx.reverb_mix)),
+                |_| Some(Target::Knob(SynthParam::ReverbMix)),
+            ),
+            info(
+                "Flute: a soft wave, a breath of noise, a gentle attack and vibrato. The same idea - soft wave, \
+                 slow attack, vibrato - gives you recorders, ocarinas and the bansuri.",
+            ),
+        ],
+    },
+    Lesson {
+        id: RECIPE_HARP,
+        title: "Recipe: Indian harp",
+        steps: &[
+            act(
+                "Press Space. This cascade uses the notes of raga Malkauns (A, C, D, F, G), a late-night raga.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Strings are bright: keep the saw on Oscillator 1, and bring in Oscillator 2 as a square, one octave up, at about -10 dB.",
+                "Osc 2 wave: square. Octave: +1. Mixer Osc 2: above -14 dB.",
+                |s| carve(s).is_some_and(|p| p.osc2.waveform == Waveform::Square && p.osc2.octave == 1 && p.mix.osc2_db > -14.0),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.osc2.waveform == Waveform::Square, Target::OscWave(2)),
+                        (p.osc2.octave == 1, Target::Knob(SynthParam::Osc2Octave)),
+                        (p.mix.osc2_db > -14.0, Target::Knob(SynthParam::Osc2Level)),
+                    ])
+                },
+            ),
+            act(
+                "The pluck: Amp Attack all the way down (under 5 ms), Sustain to 0, Decay about 1 second.",
+                "Decay between 0.6 and 1.6 s.",
+                |s| carve(s).is_some_and(|p| p.amp_env.attack_ms < 5.0 && p.amp_env.sustain < 0.05 && (600.0..=1600.0).contains(&p.amp_env.decay_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.amp_env.attack_ms < 5.0, Target::Knob(SynthParam::AmpAttack)),
+                        (p.amp_env.sustain < 0.05, Target::Knob(SynthParam::AmpSustain)),
+                        ((600.0..=1600.0).contains(&p.amp_env.decay_ms), Target::Knob(SynthParam::AmpDecay)),
+                    ])
+                },
+            ),
+            act(
+                "Let the strings ring after each note: Amp Release about 1 second.",
+                "Between 0.6 and 1.6 s.",
+                |s| carve(s).is_some_and(|p| (600.0..=1600.0).contains(&p.amp_env.release_ms)),
+                |_| Some(Target::Knob(SynthParam::AmpRelease)),
+            ),
+            act(
+                "A string is brightest when struck, then mellows: Cutoff about 1 kHz, Env amount about +3 oct, Filter Decay about 300 ms.",
+                "Cutoff 0.6 to 1.8 kHz, Env amount +2 to +4 oct, Filter Decay 150 to 500 ms.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        (600.0..=1800.0).contains(&p.filter.cutoff_hz)
+                            && (2.0..=4.0).contains(&p.filter.env_amount_oct)
+                            && (150.0..=500.0).contains(&p.filter_env.decay_ms)
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((600.0..=1800.0).contains(&p.filter.cutoff_hz), Target::Knob(SynthParam::Cutoff)),
+                        ((2.0..=4.0).contains(&p.filter.env_amount_oct), Target::Knob(SynthParam::EnvAmount)),
+                        ((150.0..=500.0).contains(&p.filter_env.decay_ms), Target::Knob(SynthParam::FilterDecay)),
+                    ])
+                },
+            ),
+            act(
+                "Shimmer: Chorus mix about 30%.",
+                "Between 20 and 50%, under Effects.",
+                |s| carve(s).is_some_and(|p| (0.2..=0.5).contains(&p.fx.chorus_mix)),
+                |_| Some(Target::Knob(SynthParam::ChorusMix)),
+            ),
+            act(
+                "Space around it: Reverb mix about 40%, and Size above 70%.",
+                "Reverb mix 30 to 60%; Size over 70%.",
+                |s| carve(s).is_some_and(|p| (0.3..=0.6).contains(&p.fx.reverb_mix) && p.fx.reverb_size > 0.7),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((0.3..=0.6).contains(&p.fx.reverb_mix), Target::Knob(SynthParam::ReverbMix)),
+                        (p.fx.reverb_size > 0.7, Target::Knob(SynthParam::ReverbSize)),
+                    ])
+                },
+            ),
+            info(
+                "A plucked-string sound in the spirit of the swarmandal and santoor: bright attack, a filter that \
+                 mellows, a long ring and a big room. Write your own cascade: Malkauns has no E and no B.",
+            ),
+        ],
+    },
+    Lesson {
+        id: RECIPE_LEAD,
+        title: "Recipe: lead melody",
+        steps: &[
+            act("Press Space: a beat and a hook on a plain saw.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "A lead has to cut through: Oscillator 1 to the square, and Osc 2 up to about -8 dB, detuned about +7 cents.",
+                "Osc 1 wave: square. Mixer Osc 2: above -12 dB. Osc 2 Detune: +3 to +15 cents.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        p.osc1.waveform == Waveform::Square && p.mix.osc2_db > -12.0 && (3.0..=15.0).contains(&p.osc2.knob_a_cents)
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.osc1.waveform == Waveform::Square, Target::OscWave(1)),
+                        (p.mix.osc2_db > -12.0, Target::Knob(SynthParam::Osc2Level)),
+                        ((3.0..=15.0).contains(&p.osc2.knob_a_cents), Target::Knob(SynthParam::Osc2Detune)),
+                    ])
+                },
+            ),
+            act(
+                "Bright but not harsh: Cutoff about 3 kHz, Resonance about 30%.",
+                "Cutoff 1.8 to 4.5 kHz; Resonance 20 to 45%.",
+                |s| carve(s).is_some_and(|p| (1800.0..=4500.0).contains(&p.filter.cutoff_hz) && (0.2..=0.45).contains(&p.filter.resonance)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((1800.0..=4500.0).contains(&p.filter.cutoff_hz), Target::Knob(SynthParam::Cutoff)),
+                        ((0.2..=0.45).contains(&p.filter.resonance), Target::Knob(SynthParam::Resonance)),
+                    ])
+                },
+            ),
+            act(
+                "Switch to Mono with Glide about 60 ms: notes slide like a voice.",
+                "Mono at the top right of Carve; Glide 30 to 120 ms, under Output.",
+                |s| carve(s).is_some_and(|p| p.voice_mode == VoiceMode::Mono && (30.0..=120.0).contains(&p.output.glide_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.voice_mode == VoiceMode::Mono, Target::VoiceMode),
+                        ((30.0..=120.0).contains(&p.output.glide_ms), Target::Knob(SynthParam::Glide)),
+                    ])
+                },
+            ),
+            act(
+                "Expression: vibrato on LFO 2 - Rate about 5 Hz, Depth about 15%.",
+                "Rate 4 to 7 Hz, Depth 10 to 35%.",
+                |s| carve(s).is_some_and(vibrato),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((4.0..=7.0).contains(&lfo_rate_hz(p.lfo2.rate_norm)), Target::Knob(SynthParam::Lfo2Rate)),
+                        ((0.1..=0.35).contains(&p.lfo2.depth), Target::Knob(SynthParam::Lfo2Depth)),
+                    ])
+                },
+            ),
+            act(
+                "Polish: Chorus mix about 20% and Reverb mix about 25%.",
+                "Chorus 10 to 40%; Reverb 15 to 40%.",
+                |s| carve(s).is_some_and(|p| (0.1..=0.4).contains(&p.fx.chorus_mix) && (0.15..=0.4).contains(&p.fx.reverb_mix)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((0.1..=0.4).contains(&p.fx.chorus_mix), Target::Knob(SynthParam::ChorusMix)),
+                        ((0.15..=0.4).contains(&p.fx.reverb_mix), Target::Knob(SynthParam::ReverbMix)),
+                    ])
+                },
+            ),
+            info(
+                "Lead: two detuned oscillators, a bright filter, mono glide and vibrato. Swap the hook for your own \
+                 melody - double-click the clip to open it.",
+            ),
+        ],
+    },
 ];
+
+/// The on-screen Carve patch - only while a Carve track is selected (the
+/// panel shows the selected track's patch).
+fn carve(s: &Snapshot) -> Option<&SynthState> {
+    selected(s).filter(|t| t.instrument == Some(Instrument::Carve)).map(|_| &s.synth)
+}
+
+/// The first control in a multi-knob step that isn't set yet.
+fn first_unmet(controls: &[(bool, Target)]) -> Option<Target> {
+    controls.iter().find(|(done, _)| !done).map(|&(_, t)| t)
+}
+
+/// LFO 2 on pitch at a vibrato rate and depth.
+fn vibrato(p: &SynthState) -> bool {
+    p.lfo2.target == LfoTarget::Pitch && (4.0..=7.0).contains(&lfo_rate_hz(p.lfo2.rate_norm)) && (0.1..=0.35).contains(&p.lfo2.depth)
+}
 
 /// Clips on tracks playing `instrument`.
 fn clips_on(s: &Snapshot, instrument: Instrument) -> impl Iterator<Item = &Clip> {
@@ -245,13 +757,13 @@ mod tests {
     /// The app state a lesson starts in.
     fn start(id: &str) -> Snapshot {
         let p = starting_project(id);
-        Snapshot {
-            arrangement: p.arrangement,
-            selected_track: None,
-            playing: false,
-            synth: shared::synth::seed_synth(),
-            open_clip: None,
-        }
+        // As `LessonEvent::Begin` leaves it: the last track selected, its
+        // patch on screen.
+        let selected = p.arrangement.tracks.last().map(|t| t.id);
+        let synth = selected
+            .and_then(|id| p.instruments.iter().find(|(t, _)| *t == id).map(|(_, patch)| patch.clone()))
+            .unwrap_or_else(shared::synth::seed_synth);
+        Snapshot { arrangement: p.arrangement, selected_track: selected, playing: false, synth, open_clip: None }
     }
 
     fn lesson(id: &str) -> &'static Lesson {
@@ -397,6 +909,211 @@ mod tests {
                 &|s| s.playing = true,
             ],
         );
+    }
+
+    fn play(s: &mut Snapshot) {
+        s.playing = true;
+    }
+
+    /// Sets `param` so its knob reads `value` (in the knob's own units,
+    /// via the same table the knob uses).
+    fn knob(s: &mut Snapshot, param: SynthParam, norm: f32) {
+        param.apply_norm(&mut s.synth, norm);
+    }
+
+    fn hz_norm(hz: f32) -> f32 {
+        (hz / 0.05).ln() / (20.0f32 / 0.05).ln()
+    }
+
+    #[test]
+    fn carve_waves_can_be_done_step_by_step() {
+        walk(
+            CARVE_WAVES,
+            &[
+                &play,
+                &|s| s.synth.osc1.waveform = Waveform::Square,
+                &|s| s.synth.osc1.waveform = Waveform::Triangle,
+                &|s| s.synth.osc1.waveform = Waveform::Sine,
+                &|s| s.synth.osc1.waveform = Waveform::Saw,
+            ],
+        );
+    }
+
+    #[test]
+    fn carve_mix_can_be_done_step_by_step() {
+        walk(
+            CARVE_MIX,
+            &[
+                &play,
+                &|s| s.synth.mix.osc2_db = -8.0,
+                &|s| s.synth.osc2.knob_a_cents = 10.0,
+                &|s| s.synth.osc2.octave = 1,
+                &|s| s.synth.mix.sub_db = -8.0,
+                &|s| s.synth.mix.noise_db = -30.0,
+            ],
+        );
+    }
+
+    #[test]
+    fn carve_filter_can_be_done_step_by_step() {
+        walk(
+            CARVE_FILTER,
+            &[
+                &play,
+                &|s| s.synth.filter.cutoff_hz = 300.0,
+                &|s| s.synth.filter.resonance = 0.8,
+                &|s| s.synth.filter.cutoff_hz = 4000.0,
+                &|s| s.synth.filter.filter_type = FilterType::Hp,
+                &|s| s.synth.filter.filter_type = FilterType::Lp24,
+            ],
+        );
+    }
+
+    #[test]
+    fn carve_envelopes_can_be_done_step_by_step() {
+        walk(
+            CARVE_ENVELOPES,
+            &[
+                &play,
+                &|s| s.synth.amp_env.sustain = 0.0,
+                &|s| s.synth.amp_env.decay_ms = 120.0,
+                &|s| s.synth.filter.cutoff_hz = 1000.0,
+                &|s| s.synth.filter.env_amount_oct = 3.5,
+                &|s| s.synth.filter_env.decay_ms = 120.0,
+                &|s| s.synth.amp_env.attack_ms = 400.0,
+            ],
+        );
+    }
+
+    #[test]
+    fn carve_movement_can_be_done_step_by_step() {
+        walk(
+            CARVE_MOVEMENT,
+            &[
+                &play,
+                &|s| s.synth.filter.cutoff_hz = 700.0,
+                &|s| s.synth.lfo1.target = LfoTarget::Cutoff,
+                &|s| s.synth.lfo1.depth = 0.7,
+                &|s| knob(s, SynthParam::Lfo1Rate, hz_norm(0.5)),
+                &|s| knob(s, SynthParam::Lfo1Rate, hz_norm(6.0)),
+                &|s| s.synth.unison.voices = 3,
+                &|s| s.synth.fx.reverb_mix = 0.4,
+            ],
+        );
+    }
+
+    #[test]
+    fn recipe_bass_can_be_done_step_by_step() {
+        walk(
+            RECIPE_BASS,
+            &[
+                &play,
+                &|s| s.synth.osc1.octave = -1,
+                &|s| s.synth.mix.sub_db = -6.0,
+                &|s| s.synth.filter.cutoff_hz = 250.0,
+                &|s| {
+                    s.synth.filter.env_amount_oct = 2.5;
+                    s.synth.filter_env.decay_ms = 200.0;
+                },
+                &|s| s.synth.filter.drive_db = 9.0,
+                &|s| {
+                    s.synth.voice_mode = VoiceMode::Mono;
+                    s.synth.output.glide_ms = 50.0;
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn recipe_flute_can_be_done_step_by_step() {
+        walk(
+            RECIPE_FLUTE,
+            &[
+                &play,
+                &|s| s.synth.osc1.waveform = Waveform::Triangle,
+                &|s| s.synth.mix.noise_db = -26.0,
+                &|s| s.synth.filter.cutoff_hz = 2500.0,
+                &|s| s.synth.amp_env.attack_ms = 80.0,
+                &|s| {
+                    knob(s, SynthParam::Lfo2Rate, hz_norm(5.0));
+                    s.synth.lfo2.depth = 0.2;
+                },
+                &|s| s.synth.fx.reverb_mix = 0.3,
+            ],
+        );
+    }
+
+    #[test]
+    fn recipe_harp_can_be_done_step_by_step() {
+        walk(
+            RECIPE_HARP,
+            &[
+                &play,
+                &|s| {
+                    s.synth.osc2.waveform = Waveform::Square;
+                    s.synth.osc2.octave = 1;
+                    s.synth.mix.osc2_db = -10.0;
+                },
+                &|s| {
+                    s.synth.amp_env.attack_ms = 1.0;
+                    s.synth.amp_env.sustain = 0.0;
+                    s.synth.amp_env.decay_ms = 1000.0;
+                },
+                &|s| s.synth.amp_env.release_ms = 1000.0,
+                &|s| {
+                    s.synth.filter.cutoff_hz = 1000.0;
+                    s.synth.filter.env_amount_oct = 3.0;
+                    s.synth.filter_env.decay_ms = 300.0;
+                },
+                &|s| s.synth.fx.chorus_mix = 0.3,
+                &|s| {
+                    s.synth.fx.reverb_mix = 0.4;
+                    s.synth.fx.reverb_size = 0.8;
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn recipe_lead_can_be_done_step_by_step() {
+        walk(
+            RECIPE_LEAD,
+            &[
+                &play,
+                &|s| {
+                    s.synth.osc1.waveform = Waveform::Square;
+                    s.synth.mix.osc2_db = -8.0;
+                    s.synth.osc2.knob_a_cents = 7.0;
+                },
+                &|s| {
+                    s.synth.filter.cutoff_hz = 3000.0;
+                    s.synth.filter.resonance = 0.3;
+                },
+                &|s| {
+                    s.synth.voice_mode = VoiceMode::Mono;
+                    s.synth.output.glide_ms = 60.0;
+                },
+                &|s| {
+                    knob(s, SynthParam::Lfo2Rate, hz_norm(5.0));
+                    s.synth.lfo2.depth = 0.15;
+                },
+                &|s| {
+                    s.synth.fx.chorus_mix = 0.2;
+                    s.synth.fx.reverb_mix = 0.25;
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn carve_steps_need_the_carve_track_selected() {
+        // With nothing selected the panel isn't Carve's, so no knob step
+        // can pass, whatever the patch holds.
+        let mut s = start(CARVE_FILTER);
+        s.synth.filter.cutoff_hz = 100.0;
+        s.selected_track = None;
+        let Kind::Action { check, .. } = lesson(CARVE_FILTER).steps[1].kind else { panic!() };
+        assert!(!check(&s));
     }
 
     #[test]
