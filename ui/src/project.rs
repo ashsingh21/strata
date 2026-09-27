@@ -72,10 +72,19 @@ fn carried_over(lesson: &str) -> Option<Project> {
     let drums = arr.tracks.iter().position(|t| t.instrument == Some(shared::arrangement::Instrument::Drums));
     let carve: Vec<usize> =
         arr.tracks.iter().enumerate().filter(|(_, t)| t.instrument == Some(shared::arrangement::Instrument::Carve)).map(|(i, _)| i).collect();
-    for (index, name) in drums.into_iter().map(|i| (i, "Drums")).chain(carve.into_iter().zip(["Bass", "Chords"])) {
+    let names = shared::lessons::part_track_names(lesson).iter().copied();
+    for (index, name) in drums.into_iter().map(|i| (i, "Drums")).chain(carve.into_iter().zip(names)) {
         arr.tracks[index].name = name.into();
     }
     Some(project)
+}
+
+/// Sets the piano roll's key and scale (a `theory::SCALE_PRESETS` name).
+fn set_key(cx: &mut EventContext, root: u8, scale: &str) {
+    cx.emit(crate::interval_input::state::IntervalInputEvent::SetKey(root));
+    if let Some(preset) = shared::theory::SCALE_PRESETS.iter().find(|p| p.name == scale) {
+        cx.emit(crate::interval_input::state::IntervalInputEvent::SetScaleMask(preset.mask));
+    }
 }
 
 /// What to do with unsaved changes before a destructive action.
@@ -420,6 +429,10 @@ impl ProjectModel {
                 self.current_path.set(saves.then(|| new_track_path(lesson.title)));
                 // Short: the header's name field is narrow (the bar shows the title).
                 self.display_name.set(format!("Lesson {}", n + 1));
+                // The key its steps name notes in, so they're the rows shown.
+                if let Some((root, scale)) = shared::lessons::lesson_key(lesson.id) {
+                    set_key(cx, root, scale);
+                }
                 cx.emit(crate::lessons::LessonEvent::Begin(n));
             }
             GuardedAction::OpenPath(path) => self.open(cx, path),
@@ -429,10 +442,7 @@ impl ProjectModel {
                 self.display_name.set(song.name().to_string());
                 // Its key and scale, so the piano roll shows its notes.
                 let (root, scale) = song.key();
-                cx.emit(crate::interval_input::state::IntervalInputEvent::SetKey(root));
-                if let Some(preset) = shared::theory::SCALE_PRESETS.iter().find(|p| p.name == scale) {
-                    cx.emit(crate::interval_input::state::IntervalInputEvent::SetScaleMask(preset.mask));
-                }
+                set_key(cx, root, scale);
             }
         }
     }

@@ -16,6 +16,25 @@ fn init(name: &'static str) -> SynthState {
     s
 }
 
+pub fn lofi_keys() -> SynthState {
+    let mut s = init("Lo-fi Keys");
+    s.osc1.waveform = Waveform::Sine;
+    s.osc2.waveform = Waveform::Triangle;
+    s.osc2.octave = 1;
+    s.mix.osc2_db = -14.0;
+    s.amp_env.attack_ms = 2.0;
+    s.amp_env.decay_ms = 1500.0;
+    s.amp_env.sustain = 0.15;
+    s.amp_env.release_ms = 1500.0;
+    s.filter.cutoff_hz = 1500.0;
+    s.lfo2.target = LfoTarget::Pitch;
+    s.lfo2.rate_norm = rate_for_hz(0.6);
+    s.lfo2.depth = 0.08;
+    s.fx.chorus_mix = 0.3;
+    s.fx.reverb_mix = 0.3;
+    s
+}
+
 pub fn deep_bass() -> SynthState {
     let mut s = init("Deep Bass");
     s.osc1.octave = -1;

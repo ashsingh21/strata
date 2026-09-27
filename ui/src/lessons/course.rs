@@ -8,6 +8,8 @@ use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
     RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
     PROJECT_ARRANGE, PROJECT_BASS, PROJECT_BASS_ROOTS, PROJECT_CHORDS, PROJECT_CHORDS_NOTES, PROJECT_FINISH, PROJECT_GROOVE,
+    RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
+    SIXTEENTH,
 };
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
@@ -1046,6 +1048,86 @@ pub const LESSONS: &[Lesson] = &[
         ],
     },
     Lesson {
+        id: RECIPE_KEYS,
+        group: RECIPES,
+        title: "Lo-fi keys",
+        steps: &[
+            act("Press Space: stabs of two chords, on a buzzy saw for now.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "An electric piano is soft and round: set Oscillator 1 to the sine.",
+                "A sine has no harmonics at all - the smoothest tone there is. An electric piano is close to it: a struck metal bar, ringing almost purely.",
+                "The first wave shape above Oscillator 1.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Sine),
+                |_| Some(Target::OscWave(1)),
+            ),
+            recipe(
+                "Add the bell: Oscillator 2 to the triangle, one octave up, its level about -14 dB.",
+                "The ping at the start of an electric-piano note is a quieter, higher tone above the main one. A soft triangle an octave up, kept low, is that bell.",
+                "Oscillator 2's wave switch and Octave knob, then Osc 2 in the Mixer (-20 to -8 dB).",
+                |s| carve(s).is_some_and(|p| p.osc2.waveform == Waveform::Triangle && p.osc2.octave == 1 && (-20.0..=-8.0).contains(&p.mix.osc2_db)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.osc2.waveform == Waveform::Triangle, Target::OscWave(2)),
+                        (p.osc2.octave == 1, Target::Knob(SynthParam::Osc2Octave)),
+                        ((-20.0..=-8.0).contains(&p.mix.osc2_db), Target::Knob(SynthParam::Osc2Level)),
+                    ])
+                },
+            ),
+            recipe(
+                "Strike and fade: Amp Decay about 1.5 s, Sustain down near 0, Release about 1.5 s.",
+                "A piano note is struck, then fades whether you hold the key or not. A long decay to almost nothing, and a long release, let every short click ring out - like holding the sustain pedal.",
+                "Decay and Release 1 to 2.5 s, Sustain under 30%.",
+                |s| carve(s).is_some_and(struck),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((1000.0..=2500.0).contains(&p.amp_env.decay_ms), Target::Knob(SynthParam::AmpDecay)),
+                        (p.amp_env.sustain <= 0.3, Target::Knob(SynthParam::AmpSustain)),
+                        ((1000.0..=2500.0).contains(&p.amp_env.release_ms), Target::Knob(SynthParam::AmpRelease)),
+                    ])
+                },
+            ),
+            recipe(
+                "Dust: Cutoff about 1.5 kHz.",
+                "Old recordings lose their top end. Cutting the highs is most of what makes a sound feel like it's playing off a worn record.",
+                "Between 1 and 2.2 kHz.",
+                |s| carve(s).is_some_and(|p| (1000.0..=2200.0).contains(&p.filter.cutoff_hz)),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            recipe(
+                "Tape wobble: LFO 2 already points at Pitch. Rate about 0.6 Hz, Depth about 8%.",
+                "Old tape never ran at quite the same speed, so the pitch drifts slowly up and down. A slow, shallow pitch wobble is that warble - lo-fi's signature.",
+                "Rate 0.3 to 1 Hz, Depth 4 to 15%, under LFO 2.",
+                |s| carve(s).is_some_and(tape_wobble),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((0.3..=1.0).contains(&lfo_rate_hz(p.lfo2.rate_norm)), Target::Knob(SynthParam::Lfo2Rate)),
+                        ((0.04..=0.15).contains(&p.lfo2.depth), Target::Knob(SynthParam::Lfo2Depth)),
+                    ])
+                },
+            ),
+            recipe(
+                "Space: Chorus mix and Reverb mix about 30% each.",
+                "Chorus's slightly detuned copies add to the warble, and reverb puts the keys in a room, softening every edge.",
+                "Each between 15 and 50%.",
+                |s| carve(s).is_some_and(|p| (0.15..=0.5).contains(&p.fx.chorus_mix) && (0.15..=0.5).contains(&p.fx.reverb_mix)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((0.15..=0.5).contains(&p.fx.chorus_mix), Target::Knob(SynthParam::ChorusMix)),
+                        ((0.15..=0.5).contains(&p.fx.reverb_mix), Target::Knob(SynthParam::ReverbMix)),
+                    ])
+                },
+            ),
+            info(
+                "Lo-fi keys: a soft sine with a bell on top, struck and fading, dulled and warbling like old tape. It's \
+                 the sound of the Lo-fi project - and more Depth makes it seasick on purpose.",
+            ),
+        ],
+    },
+    Lesson {
         id: ARRANGE_HOUSE,
         group: ARRANGEMENT,
         title: "House: how a track is built",
@@ -1462,6 +1544,363 @@ pub const LESSONS: &[Lesson] = &[
             ),
         ],
     },
+    Lesson {
+        id: LOFI_BEAT,
+        group: PROJECTS,
+        title: "Lo-fi 1: the beat",
+        steps: &[
+            info(
+                "Lo-fi: slow, soft and a little dusty - music to study to. In four parts you'll build a lo-fi beat at \
+                 80 BPM, then add a Bollywood melody on top. Part 1: the boom-bap drums.",
+            ),
+            act(
+                "Add a drum track: \u{201c}+ Drums\u{201d} under the tracks.",
+                "Below the track list, on the left of the timeline.",
+                |s| tracks_with(s, Instrument::Drums).next().is_some(),
+                |_| Some(Target::AddDrumTrack),
+            ),
+            act(
+                "Double-click bar 1 of the Drums track to make a clip.",
+                "Two quick clicks on the empty lane. The clip opens below.",
+                |s| clips_on(s, Instrument::Drums).next().is_some(),
+                |s| tracks_with(s, Instrument::Drums).next().map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "The \u{201c}boom\u{201d}: Kick on beat 1, and again on the \u{201c}and\u{201d} of beat 3 (the 11th square).",
+                "Each beat has four squares; the \u{201c}and\u{201d} of 3 is two squares after the 3 mark.",
+                |s| drum_pattern_has(s, KICK, &[0, 2 * PPQ + PPQ / 2]),
+                |s| row_or_clip(s, Instrument::Drums, KICK),
+            ),
+            act(
+                "The \u{201c}bap\u{201d}: Snare on beats 2 and 4.",
+                "The Snare row, under 2 and 4.",
+                |s| drum_pattern_has(s, SNARE, &[PPQ, 3 * PPQ]),
+                |s| row_or_clip(s, Instrument::Drums, SNARE),
+            ),
+            act(
+                "Closed hats keep time - your pick: every other square (the eighths) is the classic. At least four hits.",
+                "The Closed Hat row. Eighths: squares 1, 3, 5, 7...",
+                |s| clips_on(s, Instrument::Drums).any(|c| pitch_count(c, CLOSED_HAT) >= 4),
+                |s| row_or_clip(s, Instrument::Drums, CLOSED_HAT),
+            ),
+            act("Press Space: hear how much slower than house it is.", "Or the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Your turn: a ghost note. Add a Snare on the very last square, or a Kick on a square of your own - the \
+                 little extras that make a beat swing.",
+                "Hip-hop drummers fill the gaps with quiet extra hits. One off the main beats makes the loop feel played by a person.",
+                "Anything that isn't one of the kicks or snares above counts. Click it again to take it away.",
+                lofi_has_extra,
+                |s| row_or_clip(s, Instrument::Drums, SNARE),
+            ),
+            act(
+                "Stretch the clip to bar 17: drag its right edge.",
+                "Grab the very end of the clip in the timeline.",
+                |s| clips_on(s, Instrument::Drums).any(|c| loops(c, 16)),
+                |s| tracks_with(s, Instrument::Drums).next().map(|t| Target::Lane(t.id)),
+            ),
+            info("Boom on the kick, bap on the snare, hats ticking between - slow and laid back. Next: the keys."),
+        ],
+    },
+    Lesson {
+        id: LOFI_KEYS,
+        group: PROJECTS,
+        title: "Lo-fi 2: jazzy keys",
+        steps: &[
+            act(
+                "Add a MIDI track for the keys: \u{201c}+ MIDI track\u{201d}.",
+                "Below the track list.",
+                |s| tracks_with(s, Instrument::Carve).next().is_some(),
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Its sound: open the presets at the top of Carve and pick Lo-fi Keys (the recipe of that name builds it).",
+                "Or step through with the \u{2039} \u{203a} arrows.",
+                |s| is_selected(s, keys_track(s)) && s.synth.name == "Lo-fi Keys",
+                |_| Some(Target::Preset("Lo-fi Keys")),
+            ),
+            act(
+                "Double-click bar 1 of the keys track.",
+                "On its empty lane.",
+                |s| keys_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == 0)),
+                |s| keys_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Four chords, four bars: Pattern + until it says 4 bars.",
+                "Above the grid.",
+                |s| keys_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.content_len() == bars(4))),
+                |_| Some(Target::PatternPlus),
+            ),
+            act(
+                "Bar 1, F major 7: A, C, E and F, stacked on its first square.",
+                "Four clicks in one column. The rows go A, B, C, D, E, F, G from the bottom.",
+                |s| keys_chord(s, 0),
+                |s| keys_chord_target(s, 0),
+            ),
+            act("Bar 2, E minor 7: B, D, E and G.", "Bar 2 starts at the 2 mark.", |s| keys_chord(s, 1), |s| keys_chord_target(s, 1)),
+            act("Bar 3, D minor 7: A, C, D and F.", "Bar 3 starts at the 3 mark.", |s| keys_chord(s, 2), |s| keys_chord_target(s, 2)),
+            act("Bar 4, A minor 7: A, C, E and G.", "Bar 4 starts at the 4 mark.", |s| keys_chord(s, 3), |s| keys_chord_target(s, 3)),
+            act(
+                "Stretch the keys clip to bar 17, level with the drums.",
+                "Drag its right edge.",
+                |s| keys_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| keys_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act("Press Space.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Your turn: a colour note. Lo-fi loves 9ths - a G on the F chord, an E on the D minor, a B on the A \
+                 minor. Stack one on top and listen.",
+                "A 9th is a scale note just past the chord. It adds a soft, unresolved glow - the jazz colour lo-fi borrows.",
+                "Any note of the scale that isn't already in its bar's chord counts.",
+                keys_have_colour,
+                |s| keys_track(s).map(|t| row_or_lane(s, t, 71)).flatten(),
+            ),
+            info(
+                "Four seventh chords sliding down the scale - F, E, D, A - each ringing into the next. \
+                 Next: the bass under them.",
+            ),
+        ],
+    },
+    Lesson {
+        id: LOFI_BASS,
+        group: PROJECTS,
+        title: "Lo-fi 3: the bass",
+        steps: &[
+            act(
+                "One more MIDI track, for the bass.",
+                "\u{201c}+ MIDI track\u{201d}.",
+                |s| tracks_with(s, Instrument::Carve).count() >= 2,
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Preset: Deep Bass.",
+                "The preset name at the top of Carve.",
+                |s| is_selected(s, lofi_bass_track(s)) && s.synth.name == "Deep Bass",
+                |_| Some(Target::Preset("Deep Bass")),
+            ),
+            recipe(
+                "Make it round: Drive down to 0 dB, and Amp Release up to about 700 ms.",
+                "Lo-fi bass is warm, not gritty. Drive adds the edge, so it goes; a longer release lets each note bloom and fade like a plucked upright bass.",
+                "Drive is in the Filter section (under 2 dB). Release is in the Amp envelope (400 to 1200 ms).",
+                |s| is_selected(s, lofi_bass_track(s)) && carve(s).is_some_and(|p| p.filter.drive_db <= 2.0 && (400.0..=1200.0).contains(&p.amp_env.release_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.filter.drive_db <= 2.0, Target::Knob(SynthParam::Drive)),
+                        ((400.0..=1200.0).contains(&p.amp_env.release_ms), Target::Knob(SynthParam::AmpRelease)),
+                    ])
+                },
+            ),
+            act(
+                "Double-click bar 1 of the bass track.",
+                "On its empty lane.",
+                |s| lofi_bass_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == 0)),
+                |s| lofi_bass_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Pattern + until it says 4 bars - one bar per chord.",
+                "Above the grid.",
+                |s| lofi_bass_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.content_len() == bars(4))),
+                |_| Some(Target::PatternPlus),
+            ),
+            act(
+                "Bar 1: F, on beat 1 and again on the \u{201c}and\u{201d} of 3 - right with the kicks.",
+                "F is the sixth row up. The patch plays it an octave lower.",
+                |s| bass_root(s, 0),
+                |s| lofi_bass_track(s).and_then(|t| row_or_lane(s, t, LOFI_BASS_ROOTS[0])),
+            ),
+            act("Bar 2: E, in the same places.", "Bar 2 starts at the 2 mark.", |s| bass_root(s, 1), |s| lofi_bass_track(s).and_then(|t| row_or_lane(s, t, LOFI_BASS_ROOTS[1]))),
+            act("Bar 3: D.", "Bar 3 starts at the 3 mark.", |s| bass_root(s, 2), |s| lofi_bass_track(s).and_then(|t| row_or_lane(s, t, LOFI_BASS_ROOTS[2]))),
+            act("Bar 4: A, the bottom row.", "Bar 4 starts at the 4 mark.", |s| bass_root(s, 3), |s| lofi_bass_track(s).and_then(|t| row_or_lane(s, t, LOFI_BASS_ROOTS[3]))),
+            act(
+                "Stretch the bass clip to bar 17.",
+                "Drag its right edge.",
+                |s| lofi_bass_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| lofi_bass_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act("Press Space: drums, keys and bass.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Your turn: a passing note. On beat 4 of a bar, add a note that steps toward the next bar's root - in \
+                 bar 3, a C walks down to the A.",
+                "A note between two roots walks the bass from one chord to the next instead of jumping - the way a jazz bassist moves.",
+                "Any note that isn't its bar's root counts.",
+                bass_walks,
+                |s| lofi_bass_track(s).and_then(|t| row_or_lane(s, t, 60)),
+            ),
+            info("The bass plays each chord's root with the kick, and walks between them. Last part: an intro, and the mix."),
+        ],
+    },
+    Lesson {
+        id: LOFI_FINISH,
+        group: PROJECTS,
+        title: "Lo-fi 4: intro and mix",
+        steps: &[
+            act(
+                "An intro - the keys alone, then the beat. Click the ruler at bar 5 and press Ctrl+E (\u{2318}E on a Mac): every clip splits there.",
+                "Click the glowing bar first - the split happens at the playhead.",
+                |s| starts_at(s, "Drums", 4),
+                |_| Some(Target::RulerBar(4)),
+            ),
+            act(
+                "Click the Drums piece in bars 1 to 4 and press Delete.",
+                "Just that first piece.",
+                |s| silent_in(s, "Drums", 0, 4) && !silent_in(s, "Drums", 4, 16),
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Same for the Bass piece in bars 1 to 4.",
+                "Click it, then Delete.",
+                |s| silent_in(s, "Bass", 0, 4) && !silent_in(s, "Bass", 4, 16),
+                |s| track_named(s, "Bass").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Let the keys open up as the beat arrives. Click the Keys track's name, then right-click Carve's Cutoff knob and choose Automate.",
+                "A lane appears under the Keys track.",
+                |s| cutoff_lane(s, "Keys").is_some(),
+                |s| match track_named(s, "Keys") {
+                    Some(t) if s.selected_track == Some(t.id) => Some(Target::Knob(SynthParam::Cutoff)),
+                    Some(t) => Some(Target::Lane(t.id)),
+                    None => None,
+                },
+            ),
+            act(
+                "In the new lane, a point low at bar 1 and another high at bar 5 - like the music coming in from another room.",
+                "Click in the lane to add a point; drag a point to move it.",
+                |s| cutoff_lane(s, "Keys").is_some_and(|l| rises(l, 0, 4)),
+                |s| track_named(s, "Keys").map(|t| Target::Automation(t.id)),
+            ),
+            act(
+                "Lo-fi drums sit soft: bring the Drums fader down to about -8 dB.",
+                "The fader is on the right of the track header.",
+                |s| track_named(s, "Drums").is_some_and(|t| (-11.0..=-5.0).contains(&t.gain_db)),
+                |_| None,
+            ),
+            act(
+                "Listen from the top: press Home, then Space.",
+                "Home jumps to the start.",
+                |s| s.playing && s.playhead < bars(2),
+                |_| Some(Target::Play),
+            ),
+            info(
+                "Keys drifting in through a closed filter, then the beat: a lo-fi track. Save it (Ctrl+S, \u{2318}S on a \
+                 Mac) and export it - or carry on to Bollywood lo-fi, which adds a melody from Indian film music.",
+            ),
+        ],
+    },
+    Lesson {
+        id: BOLLY_MELODY,
+        group: PROJECTS,
+        title: "Bollywood lo-fi 1: the melody",
+        steps: &[
+            info(
+                "Bollywood lo-fi: a slow, dusty beat under a melody from Indian film music. Your lo-fi track is the start. \
+                 Its scale, A minor, matches Asavari - one of the ten parent scales (thaats) of Hindustani music.",
+            ),
+            act(
+                "Add a MIDI track for the melody.",
+                "\u{201c}+ MIDI track\u{201d}.",
+                |s| tracks_with(s, Instrument::Carve).count() >= 3,
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Preset: Indian Harp - its bright, ringing pluck is close to a santoor's.",
+                "The preset name at the top of Carve.",
+                |s| is_selected(s, melody_track(s)) && s.synth.name == "Indian Harp",
+                |_| Some(Target::Preset("Indian Harp")),
+            ),
+            act(
+                "The melody comes in with the beat: double-click bar 5 of the new track.",
+                "Bar 5, where the drums start.",
+                |s| melody_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == bars(4))),
+                |s| melody_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Pattern + until it says 4 bars.",
+                "Above the grid.",
+                |s| melody_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.content_len() == bars(4))),
+                |_| Some(Target::PatternPlus),
+            ),
+            act(
+                "Bars 1 and 2: E, D, C, A - then B, C, B, G. Space the notes out; the harp rings on by itself.",
+                "Use the upper octave: E is the 12th row up. Bar 2 starts at the 2 mark.",
+                |s| phrase_has(s, 0, &[76, 74, 72, 69]) && phrase_has(s, 1, &[71, 72, 67]),
+                |s| melody_track(s).and_then(|t| row_or_lane(s, t, 76)),
+            ),
+            act(
+                "Bars 3 and 4: A, C, D, F - then land on E, and let it ring.",
+                "Bar 3 starts at the 3 mark; the E is on bar 4's first square.",
+                |s| phrase_has(s, 2, &[69, 72, 74, 77]) && phrase_has(s, 3, &[76]),
+                |s| melody_track(s).and_then(|t| row_or_lane(s, t, 69)),
+            ),
+            act(
+                "Stretch the melody to bar 17.",
+                "Drag its right edge.",
+                |s| melody_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| melody_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act("Press Space.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Your turn: decorate a note the Indian way. One square before one of your notes, add the note just above it - a quick touch from above.",
+                "Indian melodies rarely land on a note plainly. A grace note from above - a kan - gives the line its sung, curling feel.",
+                "Click the row one above a note, one square to its left.",
+                has_kan,
+                |s| melody_track(s).and_then(|t| row_or_lane(s, t, 71)),
+            ),
+            info("A santoor-like line in Asavari over your lo-fi chords. Last part: the drone that makes it sound Indian."),
+        ],
+    },
+    Lesson {
+        id: BOLLY_DRONE,
+        group: PROJECTS,
+        title: "Bollywood lo-fi 2: the drone",
+        steps: &[
+            act(
+                "Add a MIDI track for a tanpura.",
+                "\u{201c}+ MIDI track\u{201d}.",
+                |s| tracks_with(s, Instrument::Carve).count() >= 4,
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Preset: Tanpura.",
+                "The preset name at the top of Carve. (The Tanpura recipe explains how it's built.)",
+                |s| is_selected(s, drone_track(s)) && s.synth.name == "Tanpura",
+                |_| Some(Target::Preset("Tanpura")),
+            ),
+            act(
+                "Double-click bar 1 of the new track - the drone starts before everything.",
+                "On its empty lane.",
+                |s| drone_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == 0)),
+                |s| drone_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "The tanpura's cycle, one string per beat: E (Pa) on beat 1, A (Sa) on beats 2 and 3, and the low A - the bottom row - on beat 4.",
+                "Sa is the home note, A here; Pa is the fifth above it, E.",
+                tanpura_cycle,
+                |s| drone_track(s).and_then(|t| row_or_lane(s, t, 64)),
+            ),
+            act(
+                "Stretch the drone to bar 17.",
+                "Drag its right edge.",
+                |s| drone_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| drone_track(s).map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Tuck it in: the drone's fader down to about -10 dB - felt more than heard.",
+                "The fader is on the right of the track header.",
+                |s| drone_track(s).is_some_and(|t| (-14.0..=-7.0).contains(&t.gain_db)),
+                |_| None,
+            ),
+            act(
+                "Listen from the top: press Home, then Space.",
+                "Home jumps to the start.",
+                |s| s.playing && s.playhead < bars(2),
+                |_| Some(Target::Play),
+            ),
+            info(
+                "Beat, keys, bass, a santoor-like melody with its kan, and a tanpura holding Sa underneath: Bollywood \
+                 lo-fi, made by you. Save it and export it to play anywhere.",
+            ),
+        ],
+    },
 ];
 
 /// The "and" of every beat.
@@ -1474,7 +1913,8 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
     FIRST_BEAT, BASSLINE, CHORDS, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
-    PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, ARRANGE_HOUSE,
+    PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
+    LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE,
 ];
 
 /// The lesson to take next: the first unfinished one on the path, then
@@ -1559,6 +1999,144 @@ pub fn new_words(lesson: &Lesson, step: usize) -> Vec<(&'static str, &'static st
         .copied()
         .take(3)
         .collect()
+}
+
+
+/// The piano-roll row for `pitch` while `track`'s clip is open in the
+/// editor, else `track`'s lane (double-clicking the clip opens it).
+fn row_or_lane(s: &Snapshot, track: &shared::arrangement::Track, pitch: u8) -> Option<Target> {
+    let open_here = s.open_clip.and_then(|id| s.arrangement.clip(id)).is_some_and(|c| c.track == track.id);
+    Some(if open_here { Target::PianoRollRow(pitch) } else { Target::Lane(track.id) })
+}
+
+fn is_selected(s: &Snapshot, track: Option<&shared::arrangement::Track>) -> bool {
+    track.is_some_and(|t| s.selected_track == Some(t.id))
+}
+
+/// A project part's own Carve track: `name` once it has it (a finished
+/// earlier part), else the first Carve track that isn't one of `taken`.
+fn part_track<'a>(s: &'a Snapshot, name: &str, taken: &[&str]) -> Option<&'a shared::arrangement::Track> {
+    track_named(s, name).or_else(|| tracks_with(s, Instrument::Carve).find(|t| !taken.contains(&t.name.as_str())))
+}
+
+fn keys_track(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    part_track(s, "Keys", &[])
+}
+
+fn lofi_bass_track(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    part_track(s, "Bass", &["Keys"])
+}
+
+fn melody_track(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    part_track(s, "Melody", &["Keys", "Bass"])
+}
+
+fn drone_track(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    part_track(s, "Tanpura", &["Keys", "Bass", "Melody"])
+}
+
+/// A minor (natural): A B C D E F G.
+const A_MINOR: [u8; 7] = [9, 11, 0, 2, 4, 5, 7];
+
+/// Bar `bar` of the keys pattern has all four notes of its chord (any octave).
+fn keys_chord(s: &Snapshot, bar: usize) -> bool {
+    keys_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| LOFI_CHORDS[bar].iter().all(|&p| notes_in_bar(c, bar).any(|n| same_class(n.pitch, p)))))
+}
+
+/// The row of the chord's first missing note (or the keys lane).
+fn keys_chord_target(s: &Snapshot, bar: usize) -> Option<Target> {
+    let t = keys_track(s)?;
+    let clip = clips_of(s, t.id).next();
+    let missing = LOFI_CHORDS[bar]
+        .into_iter()
+        .find(|&p| !clip.is_some_and(|c| notes_in_bar(c, bar).any(|n| same_class(n.pitch, p))))
+        .unwrap_or(LOFI_CHORDS[bar][0]);
+    row_or_lane(s, t, missing)
+}
+
+/// Somewhere in the keys, a scale note that isn't in its bar's chord.
+fn keys_have_colour(s: &Snapshot) -> bool {
+    keys_track(s).is_some_and(|t| {
+        clips_of(s, t.id).any(|c| {
+            (0..4).any(|bar| {
+                notes_in_bar(c, bar).any(|n| {
+                    A_MINOR.contains(&(n.pitch % 12)) && !LOFI_CHORDS[bar].iter().any(|&p| same_class(n.pitch, p))
+                })
+            })
+        })
+    })
+}
+
+/// Bar `bar` of the bass has its root at least once.
+fn bass_root(s: &Snapshot, bar: usize) -> bool {
+    lofi_bass_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| notes_in_bar(c, bar).any(|n| same_class(n.pitch, LOFI_BASS_ROOTS[bar]))))
+}
+
+/// A bass note that isn't its bar's root.
+fn bass_walks(s: &Snapshot) -> bool {
+    lofi_bass_track(s).is_some_and(|t| {
+        clips_of(s, t.id).any(|c| (0..4).any(|bar| notes_in_bar(c, bar).any(|n| !same_class(n.pitch, LOFI_BASS_ROOTS[bar]))))
+    })
+}
+
+/// A drum hit the lo-fi beat didn't ask for: a kick or snare off its
+/// squares, or a clap or open hat anywhere.
+fn lofi_has_extra(s: &Snapshot) -> bool {
+    clips_on(s, Instrument::Drums).any(|c| {
+        let ClipContent::Midi { notes, .. } = &c.content else { return false };
+        notes.iter().any(|n| {
+            let at = n.start % BAR;
+            match n.pitch {
+                KICK => at != 0 && at != 2 * PPQ + PPQ / 2,
+                SNARE => at != PPQ && at != 3 * PPQ,
+                CLOSED_HAT => false,
+                _ => true,
+            }
+        })
+    })
+}
+
+/// Bar `bar` of the melody has every one of `pitches`' note names.
+fn phrase_has(s: &Snapshot, bar: usize, pitches: &[u8]) -> bool {
+    melody_track(s).is_some_and(|t| clips_of(s, t.id).any(|c| pitches.iter().all(|&p| notes_in_bar(c, bar).any(|n| same_class(n.pitch, p)))))
+}
+
+/// A grace note from above: a note one 16th before a lower one.
+fn has_kan(s: &Snapshot) -> bool {
+    melody_track(s).is_some_and(|t| {
+        clips_of(s, t.id).any(|c| {
+            let ClipContent::Midi { notes, .. } = &c.content else { return false };
+            notes.iter().any(|a| notes.iter().any(|b| b.start == a.start + SIXTEENTH && a.pitch > b.pitch))
+        })
+    })
+}
+
+/// The drone's first bar has Pa (E) and Sa (A) at least twice.
+fn tanpura_cycle(s: &Snapshot) -> bool {
+    drone_track(s).is_some_and(|t| {
+        clips_of(s, t.id).any(|c| {
+            notes_in_bar(c, 0).any(|n| same_class(n.pitch, 64)) && notes_in_bar(c, 0).filter(|n| same_class(n.pitch, 57)).count() >= 2
+        })
+    })
+}
+
+/// The named track's Cutoff automation lane.
+fn cutoff_lane<'a>(s: &'a Snapshot, name: &str) -> Option<&'a shared::arrangement::AutomationLane> {
+    let t = track_named(s, name)?;
+    s.arrangement
+        .automation
+        .iter()
+        .find(|l| l.track == t.id && l.target == Some(shared::arrangement::AutomationTarget::Synth(SynthParam::Cutoff)))
+}
+
+/// An electric piano's envelope: a long fade to almost nothing.
+fn struck(p: &SynthState) -> bool {
+    (1000.0..=2500.0).contains(&p.amp_env.decay_ms) && p.amp_env.sustain <= 0.3 && (1000.0..=2500.0).contains(&p.amp_env.release_ms)
+}
+
+/// LFO 2 slowly and slightly on pitch: tape wow.
+fn tape_wobble(p: &SynthState) -> bool {
+    p.lfo2.target == LfoTarget::Pitch && (0.3..=1.0).contains(&lfo_rate_hz(p.lfo2.rate_norm)) && (0.04..=0.15).contains(&p.lfo2.depth)
 }
 
 fn clips_of(s: &Snapshot, track: shared::arrangement::TrackId) -> impl Iterator<Item = &Clip> {
@@ -1870,6 +2448,7 @@ mod tests {
             (RECIPE_TANPURA, "Tanpura"),
             (RECIPE_REED, "Reed"),
             (RECIPE_LEAD, "Lead"),
+            (RECIPE_KEYS, "Lo-fi Keys"),
         ] {
             let build = shared::synth::PRESETS.iter().find(|p| p.0 == preset).unwrap_or_else(|| panic!("no preset {preset}")).1;
             let mut s = start(id);

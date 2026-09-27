@@ -447,6 +447,152 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 }),
             ]
         }
+        RECIPE_KEYS => vec![
+            b(play),
+            b(|s| s.synth.osc1.waveform = Waveform::Sine),
+            b(|s| {
+                s.synth.osc2.waveform = Waveform::Triangle;
+                s.synth.osc2.octave = 1;
+                s.synth.mix.osc2_db = -14.0;
+            }),
+            b(|s| {
+                s.synth.amp_env.decay_ms = 1500.0;
+                s.synth.amp_env.sustain = 0.15;
+                s.synth.amp_env.release_ms = 1500.0;
+            }),
+            b(|s| s.synth.filter.cutoff_hz = 1500.0),
+            b(|s| {
+                knob(s, SynthParam::Lfo2Rate, hz_norm(0.6));
+                s.synth.lfo2.depth = 0.08;
+            }),
+            b(|s| {
+                s.synth.fx.chorus_mix = 0.3;
+                s.synth.fx.reverb_mix = 0.3;
+            }),
+        ],
+        LOFI_BEAT => vec![
+            b(|s| add_track(s, "Drums", Some(Instrument::Drums))),
+            b(|s| draw_clip_at(s, 0)),
+            b(|s| add_notes(s, KICK, &[0, 2 * PPQ + PPQ / 2])),
+            b(|s| add_notes(s, SNARE, &[PPQ, 3 * PPQ])),
+            b(|s| add_notes(s, CLOSED_HAT, &[0, PPQ / 2, PPQ, 3 * PPQ / 2, 2 * PPQ, 5 * PPQ / 2, 3 * PPQ, 7 * PPQ / 2])),
+            b(play),
+            b(|s| add_notes(s, SNARE, &[BAR - PPQ / 4])),
+            b(|s| stretch_to(s, 16)),
+        ],
+        LOFI_KEYS => {
+            let chord = |s: &mut Snapshot, bar: usize| {
+                for p in LOFI_CHORDS[bar] {
+                    add_notes(s, p, &[bar as i64 * BAR]);
+                }
+            };
+            vec![
+                b(|s| add_midi_track(s, "MIDI 1")),
+                b(|s| s.synth = shared::synth::recipes::lofi_keys()),
+                b(|s| draw_clip_at(s, 0)),
+                b(|s| pattern_bars(s, 4)),
+                b(move |s| chord(s, 0)),
+                b(move |s| chord(s, 1)),
+                b(move |s| chord(s, 2)),
+                b(move |s| chord(s, 3)),
+                b(|s| stretch_to(s, 16)),
+                b(play),
+                // A 9th: B on the A minor chord.
+                b(|s| add_notes(s, 71, &[3 * BAR])),
+            ]
+        }
+        LOFI_BASS => {
+            let root = |s: &mut Snapshot, bar: usize| {
+                let at = bar as i64 * BAR;
+                add_notes(s, LOFI_BASS_ROOTS[bar], &[at, at + 2 * PPQ + PPQ / 2]);
+            };
+            vec![
+                b(|s| add_midi_track(s, "MIDI 2")),
+                b(|s| s.synth = shared::synth::recipes::deep_bass()),
+                b(|s| {
+                    s.synth.filter.drive_db = 0.0;
+                    s.synth.amp_env.release_ms = 700.0;
+                }),
+                b(|s| draw_clip_at(s, 0)),
+                b(|s| pattern_bars(s, 4)),
+                b(move |s| root(s, 0)),
+                b(move |s| root(s, 1)),
+                b(move |s| root(s, 2)),
+                b(move |s| root(s, 3)),
+                b(|s| stretch_to(s, 16)),
+                b(play),
+                // A C on beat 4 of bar 3, walking down to the A.
+                b(|s| add_notes(s, 60, &[2 * BAR + 3 * PPQ])),
+            ]
+        }
+        LOFI_FINISH => vec![
+            b(|s| split_all_at(s, 4)),
+            b(|s| delete_piece(s, "Drums", 0)),
+            b(|s| delete_piece(s, "Bass", 0)),
+            b(|s| {
+                let track = s.arrangement.tracks.iter().find(|t| t.name == "Keys").unwrap().id;
+                s.selected_track = Some(track);
+                let id = s.arrangement.alloc_id();
+                s.arrangement.automation.push(shared::arrangement::AutomationLane {
+                    id,
+                    track,
+                    parameter_name: "Carve \u{b7} Cutoff".into(),
+                    display_value: String::new(),
+                    breakpoints: vec![shared::arrangement::Breakpoint { tick: 0, value: 0.5 }],
+                    target: Some(shared::arrangement::AutomationTarget::Synth(SynthParam::Cutoff)),
+                });
+            }),
+            b(|s| {
+                let lane = s.arrangement.automation.last_mut().unwrap();
+                lane.breakpoints = vec![
+                    shared::arrangement::Breakpoint { tick: 0, value: 0.3 },
+                    shared::arrangement::Breakpoint { tick: 4 * BAR, value: lofi_keys_open() },
+                ];
+            }),
+            b(|s| select_gain(s, "Drums", -8.0)),
+            b(|s| {
+                s.playhead = 0;
+                s.playing = true;
+            }),
+        ],
+        BOLLY_MELODY => {
+            let phrase = |s: &mut Snapshot, bars: std::ops::Range<i64>| {
+                for &(at, pitch, _) in BOLLY_PHRASE.iter().filter(|(at, ..)| bars.contains(&(at / 16))) {
+                    add_notes(s, pitch, &[at * SIXTEENTH]);
+                }
+            };
+            vec![
+                b(|s| add_midi_track(s, "MIDI 3")),
+                b(|s| s.synth = shared::synth::recipes::indian_harp()),
+                b(|s| draw_clip_at(s, 4)),
+                b(|s| pattern_bars(s, 4)),
+                b(move |s| phrase(s, 0..2)),
+                b(move |s| phrase(s, 2..4)),
+                b(|s| stretch_to(s, 16)),
+                b(play),
+                // B just before the A on beat 4 of bar 1.
+                b(|s| add_notes(s, 71, &[11 * SIXTEENTH])),
+            ]
+        }
+        BOLLY_DRONE => vec![
+            b(|s| add_midi_track(s, "MIDI 4")),
+            b(|s| s.synth = shared::synth::recipes::tanpura()),
+            b(|s| draw_clip_at(s, 0)),
+            b(|s| {
+                for &(at, pitch, _) in &BOLLY_TANPURA {
+                    add_notes(s, pitch, &[at * SIXTEENTH]);
+                }
+            }),
+            b(|s| stretch_to(s, 16)),
+            b(|s| {
+                let id = s.selected_track.unwrap();
+                s.arrangement.track_mut(id).unwrap().gain_db = -10.0;
+            }),
+            b(|s| {
+                s.playhead = 0;
+                s.playing = true;
+            }),
+        ],
         _ => vec![],
     }
 }

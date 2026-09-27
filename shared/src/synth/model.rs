@@ -278,7 +278,7 @@ pub fn seed_synth() -> SynthState {
 
 /// Carve's factory presets, as listed in the browser: (name, builder).
 /// The last six are the recipe lessons' sounds (see `super::recipes`).
-pub const PRESETS: [(&str, fn() -> SynthState); 9] = [
+pub const PRESETS: [(&str, fn() -> SynthState); 10] = [
     ("Warm Bass", seed_synth),
     ("Deep Rave Bass", deep_rave_bass),
     ("Soft Pad", soft_pad),
@@ -288,6 +288,7 @@ pub const PRESETS: [(&str, fn() -> SynthState); 9] = [
     ("Tanpura", super::recipes::tanpura),
     ("Reed", super::recipes::reed),
     ("Lead", super::recipes::lead),
+    ("Lo-fi Keys", super::recipes::lofi_keys),
 ];
 
 /// A wide, slow pad: detuned saws in 3-voice unison, a slow amp swell and

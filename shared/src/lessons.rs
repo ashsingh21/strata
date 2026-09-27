@@ -5,10 +5,11 @@
 //! lesson 3 with the beat and lesson 2's bassline.
 
 use crate::arrangement::{
-    empty_arrangement, Arrangement, Clip, ClipColor, ClipContent, EffectGraph, Instrument, MidiNote, Ticks, Track,
-    TrackId, TrackKind, DEFAULT_TRACK_HEIGHT, PPQ,
+    empty_arrangement, Arrangement, AutomationLane, AutomationTarget, Breakpoint, Clip, ClipColor, ClipContent,
+    EffectGraph, Instrument, MidiNote, TempoMap, Ticks, TimeSignature, Track, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT,
+    PPQ,
 };
-use crate::drums::{CLAP, KICK, OPEN_HAT};
+use crate::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT, SNARE};
 use crate::project::Project;
 use crate::synth::{
     deep_rave_bass, Envelope, Filter, FilterType, Fx, Lfo, LfoTarget, Mix, Oscillator, SynthState, Unison,
@@ -49,6 +50,37 @@ pub const PROJECT_BASS: &str = "project-bass";
 pub const PROJECT_CHORDS: &str = "project-chords";
 pub const PROJECT_ARRANGE: &str = "project-arrange";
 pub const PROJECT_FINISH: &str = "project-finish";
+/// The lo-fi recipe, and "Lo-fi beat" in four parts, then "Bollywood
+/// lo-fi" in two more on top of it - one chain, each part starting from
+/// the one before.
+pub const RECIPE_KEYS: &str = "recipe-keys";
+pub const LOFI_BEAT: &str = "lofi-beat";
+pub const LOFI_KEYS: &str = "lofi-keys";
+pub const LOFI_BASS: &str = "lofi-bass";
+pub const LOFI_FINISH: &str = "lofi-finish";
+pub const BOLLY_MELODY: &str = "bolly-melody";
+pub const BOLLY_DRONE: &str = "bolly-drone";
+
+const HOUSE_PARTS: [&str; 5] = [PROJECT_GROOVE, PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH];
+const LOFI_PARTS: [&str; 6] = [LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE];
+
+/// Lo-fi's tempo: slow enough to nod to.
+pub const LOFI_BPM: f64 = 80.0;
+/// Fmaj7, Em7, Dm7, Am7 - a slow slide down through A minor, voiced so
+/// every note sits in the piano roll's first two octaves (A3 up).
+pub const LOFI_CHORDS: [[u8; 4]; 4] = [[57, 60, 64, 65], [59, 62, 64, 67], [57, 60, 62, 65], [57, 60, 64, 67]];
+/// The bass follows the chords' roots: F, E, D, A (played an octave down
+/// by the patch).
+pub const LOFI_BASS_ROOTS: [u8; 4] = [65, 64, 62, 57];
+/// The Bollywood lo-fi phrase over those chords, as (16th, pitch, 16ths).
+pub const BOLLY_PHRASE: [(i64, u8, i64); 13] = [
+    (0, 76, 6), (6, 74, 2), (8, 72, 4), (12, 69, 4),
+    (16, 71, 6), (22, 72, 2), (24, 71, 2), (26, 67, 6),
+    (32, 69, 4), (36, 72, 4), (40, 74, 6), (46, 77, 2),
+    (48, 76, 12),
+];
+/// The tanpura's cycle with Sa on A: Pa (E), Sa, Sa, low Sa.
+pub const BOLLY_TANPURA: [(i64, u8, i64); 4] = [(0, 64, 4), (4, 69, 4), (8, 69, 4), (12, 57, 4)];
 
 /// The project's bassline: off-beat roots, one bar each of A, C, D, C.
 pub const PROJECT_BASS_ROOTS: [u8; 4] = [57, 60, 62, 60];
@@ -113,6 +145,12 @@ fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
             notes.extend(steps(&[(16, 53, 15), (16, 57, 15), (16, 60, 15)]));
             ("Chords", notes, 2)
         }
+        // Stabs of Am7 then Fmaj7: short notes, so it's the envelope's
+        // tail - not the note length - that makes them ring.
+        RECIPE_KEYS => ("Chords", steps(&[
+            (0, 57, 2), (0, 60, 2), (0, 64, 2), (0, 67, 2), (6, 57, 2), (6, 60, 2), (6, 64, 2), (6, 67, 2),
+            (16, 57, 2), (16, 60, 2), (16, 64, 2), (16, 65, 2), (22, 57, 2), (22, 60, 2), (22, 64, 2), (22, 65, 2),
+        ]), 2),
         RECIPE_BASS => ("Bassline", steps(&[(2, 45, 1), (6, 45, 1), (10, 45, 1), (14, 57, 1)]), 1),
         // Slow and singing, in A minor pentatonic.
         RECIPE_FLUTE => ("Melody", steps(&[(0, 69, 3), (4, 72, 3), (8, 74, 7), (16, 76, 11), (28, 74, 3)]), 2),
@@ -171,6 +209,12 @@ pub fn starting_project(lesson: &str) -> Project {
         PROJECT_CHORDS => return project_after(2),
         PROJECT_ARRANGE => return project_after(3),
         PROJECT_FINISH => return project_after(4),
+        LOFI_BEAT => return lofi_after(0),
+        LOFI_KEYS => return lofi_after(1),
+        LOFI_BASS => return lofi_after(2),
+        LOFI_FINISH => return lofi_after(3),
+        BOLLY_MELODY => return lofi_after(4),
+        BOLLY_DRONE => return lofi_after(5),
         _ => {}
     }
     if lesson.starts_with("carve-") || lesson.starts_with("recipe-") {
@@ -190,11 +234,133 @@ pub fn starting_project(lesson: &str) -> Project {
     Project { arrangement: arr, instruments, synth: None }
 }
 
-/// The house-track part before `lesson`, whose result it builds on.
+/// The project part before `lesson`, whose result it builds on.
 pub fn previous_part(lesson: &str) -> Option<&'static str> {
-    const PARTS: [&str; 5] = [PROJECT_GROOVE, PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH];
-    let i = PARTS.iter().position(|p| *p == lesson)?;
-    i.checked_sub(1).map(|j| PARTS[j])
+    [&HOUSE_PARTS[..], &LOFI_PARTS[..]].into_iter().find_map(|parts| {
+        let i = parts.iter().position(|p| *p == lesson)?;
+        i.checked_sub(1).map(|j| parts[j])
+    })
+}
+
+/// What a project's Carve tracks are called, in the order its parts add
+/// them - so a learner's own previous part can be renamed to match.
+pub fn part_track_names(lesson: &str) -> &'static [&'static str] {
+    if LOFI_PARTS.contains(&lesson) {
+        &["Keys", "Bass", "Melody", "Tanpura"]
+    } else if HOUSE_PARTS.contains(&lesson) {
+        &["Bass", "Chords"]
+    } else {
+        &[]
+    }
+}
+
+/// The key and scale (a `theory::SCALE_PRESETS` name) the piano roll
+/// should show for `lesson`, so its rows are the notes the steps name.
+pub fn lesson_key(lesson: &str) -> Option<(u8, &'static str)> {
+    Some(match lesson {
+        RECIPE_KEYS | LOFI_BEAT | LOFI_KEYS | LOFI_BASS | LOFI_FINISH | BOLLY_MELODY | BOLLY_DRONE => (9, "Natural minor"),
+        ARRANGE_HOUSE => crate::demo::DemoSong::House.key(),
+        ARRANGE_BHAIRAV => crate::demo::DemoSong::Bhairav.key(),
+        RECIPE_HARP => (9, "Raga Malkauns"),
+        RECIPE_REED => (0, "Raga Bhairav"),
+        RECIPE_TANPURA => return None,
+        _ => (9, "Minor pentatonic"),
+    })
+}
+
+/// The lo-fi chain as it stands after `parts` parts (0 = a blank 80 BPM
+/// project, 4 = the finished lo-fi beat, 6 = the Bollywood lo-fi).
+pub fn lofi_after(parts: usize) -> Project {
+    let mut arr = empty_arrangement();
+    arr.tempo_map = TempoMap::constant(LOFI_BPM, TimeSignature::FOUR_FOUR);
+    let mut instruments = Vec::new();
+    // Part 4 cuts an intro: the keys alone for four bars.
+    let enter = if parts >= 4 { 4 } else { 0 };
+    if parts >= 1 {
+        let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, if parts >= 4 { -8.0 } else { 0.0 });
+        add_clip(&mut arr, drums, "Beat", enter, 16, 1, lofi_beat());
+    }
+    if parts >= 2 {
+        let keys = add_track(&mut arr, "Keys", ClipColor::Violet, Instrument::Carve, 0.0);
+        add_clip(&mut arr, keys, "Chords", 0, 16, 4, lofi_chords());
+        instruments.push((keys, crate::synth::recipes::lofi_keys()));
+        if parts >= 4 {
+            // The intro's filter, opening as the beat arrives.
+            let id = arr.alloc_id();
+            arr.automation.push(AutomationLane {
+                id,
+                track: keys,
+                parameter_name: "Carve \u{b7} Cutoff".into(),
+                display_value: String::new(),
+                breakpoints: vec![Breakpoint { tick: 0, value: 0.3 }, Breakpoint { tick: 4 * BAR, value: lofi_keys_open() }],
+                target: Some(AutomationTarget::Synth(crate::synth::SynthParam::Cutoff)),
+            });
+        }
+    }
+    if parts >= 3 {
+        let bass = add_track(&mut arr, "Bass", ClipColor::Blue, Instrument::Carve, 0.0);
+        add_clip(&mut arr, bass, "Bassline", enter, 16, 4, lofi_bassline());
+        instruments.push((bass, lofi_bass()));
+    }
+    if parts >= 5 {
+        let melody = add_track(&mut arr, "Melody", ClipColor::Amber, Instrument::Carve, -2.0);
+        add_clip(&mut arr, melody, "Phrase", 4, 16, 4, steps(&BOLLY_PHRASE));
+        instruments.push((melody, crate::synth::recipes::indian_harp()));
+    }
+    if parts >= 6 {
+        let drone = add_track(&mut arr, "Tanpura", ClipColor::Teal, Instrument::Carve, -10.0);
+        add_clip(&mut arr, drone, "Drone", 0, 16, 1, steps(&BOLLY_TANPURA));
+        instruments.push((drone, crate::synth::recipes::tanpura()));
+    }
+    Project { arrangement: arr, instruments, synth: None }
+}
+
+/// Where the lo-fi intro's filter ends up: the Lo-fi Keys patch's own
+/// cutoff, so the keys sound as designed once the beat is in.
+pub fn lofi_keys_open() -> f32 {
+    crate::synth::SynthParam::Cutoff.norm(&crate::synth::recipes::lofi_keys())
+}
+
+/// Boom-bap: kick on 1 and the "and" of 3, snare on 2 and 4, soft
+/// closed hats on the eighths.
+pub fn lofi_beat() -> Vec<MidiNote> {
+    let hit = |start, pitch, velocity| MidiNote { start, length: SIXTEENTH, pitch, velocity };
+    let mut notes = vec![hit(0, KICK, 120), hit(2 * PPQ + PPQ / 2, KICK, 105), hit(PPQ, SNARE, 110), hit(3 * PPQ, SNARE, 110)];
+    notes.extend((0..8).map(|i| hit(i * PPQ / 2, CLOSED_HAT, if i % 2 == 0 { 60 } else { 45 })));
+    notes
+}
+
+/// One held chord per bar.
+pub fn lofi_chords() -> Vec<MidiNote> {
+    LOFI_CHORDS
+        .iter()
+        .enumerate()
+        .flat_map(|(bar, chord)| {
+            chord.iter().map(move |&pitch| MidiNote { start: bar as i64 * BAR, length: BAR - SIXTEENTH, pitch, velocity: 85 })
+        })
+        .collect()
+}
+
+/// Each bar's root on beat 1 and on the "and" of 3, with the kicks.
+pub fn lofi_bassline() -> Vec<MidiNote> {
+    LOFI_BASS_ROOTS
+        .iter()
+        .enumerate()
+        .flat_map(|(bar, &pitch)| {
+            let at = bar as i64 * BAR;
+            [(at, 6 * SIXTEENTH), (at + 2 * PPQ + PPQ / 2, 4 * SIXTEENTH)]
+                .map(|(start, length)| MidiNote { start, length, pitch, velocity: 100 })
+        })
+        .collect()
+}
+
+/// Deep Bass made round for lo-fi: no drive, and a release that lets
+/// each note bloom.
+pub fn lofi_bass() -> SynthState {
+    let mut s = crate::synth::recipes::deep_bass();
+    s.filter.drive_db = 0.0;
+    s.amp_env.release_ms = 700.0;
+    s
 }
 
 /// The house-track project as it stands after `parts` parts - what the
@@ -383,7 +549,7 @@ mod tests {
 
     #[test]
     fn carve_lessons_start_on_the_init_patch_with_a_riff() {
-        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED] {
+        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, RECIPE_KEYS] {
             let p = starting_project(id);
             let synth = p.arrangement.tracks.last().unwrap();
             assert_eq!(synth.instrument, Some(Instrument::Carve), "{id}");
@@ -419,6 +585,46 @@ mod tests {
             let name = &after_arrange.arrangement.track(clip.track).unwrap().name;
             if name == "Drums" || name == "Bass" {
                 assert!(clip.end() <= 16 * BAR || clip.start >= 24 * BAR, "{name} plays in the breakdown");
+            }
+        }
+    }
+
+    #[test]
+    fn the_lofi_chain_builds_part_by_part_in_a_minor() {
+        let names = |n| lofi_after(n).arrangement.tracks.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+        assert!(names(0).is_empty());
+        assert_eq!(names(3), ["Drums", "Keys", "Bass"]);
+        assert_eq!(names(6), ["Drums", "Keys", "Bass", "Melody", "Tanpura"]);
+        let p = lofi_after(6);
+        assert_eq!(p.arrangement.tempo_map.bpm_at(0), LOFI_BPM);
+        // Every pitched note is in A natural minor (A B C D E F G), so on a
+        // row the piano roll shows.
+        let minor = [9, 11, 0, 2, 4, 5, 7];
+        for clip in &p.arrangement.clips {
+            let track = p.arrangement.track(clip.track).unwrap();
+            if track.instrument == Some(Instrument::Carve) {
+                assert!(clip.played_notes().iter().all(|n| minor.contains(&(n.pitch % 12))), "{}", track.name);
+                assert!(clip.played_notes().iter().all(|n| n.pitch >= 57), "{} dips below the first row", track.name);
+            }
+        }
+        // The finished beat has its intro: no drums or bass before bar 5.
+        let four = lofi_after(4);
+        for clip in &four.arrangement.clips {
+            let name = &four.arrangement.track(clip.track).unwrap().name;
+            if name == "Drums" || name == "Bass" {
+                assert_eq!(clip.start, 4 * BAR, "{name}");
+            }
+        }
+        assert_eq!(previous_part(BOLLY_MELODY), Some(LOFI_FINISH));
+        assert_eq!(lesson_key(LOFI_KEYS), Some((9, "Natural minor")));
+    }
+
+    #[test]
+    fn every_lesson_key_is_a_real_scale() {
+        for id in LOFI_PARTS.iter().chain(&HOUSE_PARTS).chain(&[RECIPE_HARP, RECIPE_REED, RECIPE_KEYS, FIRST_BEAT, ARRANGE_HOUSE, ARRANGE_BHAIRAV]) {
+            if let Some((root, scale)) = lesson_key(id) {
+                assert!(root < 12, "{id}");
+                assert!(crate::theory::SCALE_PRESETS.iter().any(|p| p.name == scale), "{id}: no scale {scale}");
             }
         }
     }

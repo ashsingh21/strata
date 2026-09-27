@@ -209,9 +209,9 @@ fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
             .class("sm")
             .on_press(move |cx| step(cx, 1));
 
-        // The list, dropping down under the name: a grid three rows high
+        // The list, dropping down under the name: a grid a few rows high
         // rather than a tall column, which the lower panel cut off.
-        const COLUMNS: usize = 3;
+        const COLUMNS: usize = 4;
         VStack::new(cx, move |cx| {
             for row in PRESETS.chunks(COLUMNS) {
                 HStack::new(cx, move |cx| {
@@ -226,6 +226,10 @@ fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
                                 open.set(false);
                             });
                     }
+                    // A short last row keeps to the columns above.
+                    for _ in row.len()..COLUMNS {
+                        Element::new(cx).width(Stretch(1.0));
+                    }
                 })
                 .width(Stretch(1.0))
                 .height(Auto);
@@ -237,7 +241,7 @@ fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
         .position_type(PositionType::Absolute)
         .top(Pixels(tokens::SIZE_CONTROL + 4.0))
         .left(Pixels(0.0))
-        .width(Pixels(420.0))
+        .width(Pixels(520.0))
         .height(Auto);
     })
     .gap(Pixels(2.0))
