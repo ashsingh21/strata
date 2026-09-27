@@ -9,3 +9,16 @@ rust-version = "1.85"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# The audio path (engine DSP, Carve voices, shared playback) runs in a
+# real-time callback: unoptimized, the House demo's drop overran its
+# deadline and crackled in dev builds. Optimize just these (and every
+# dependency) even in dev; the UI crate stays fast to rebuild.
+[profile.dev.package.engine]
+opt-level = 3
+
+[profile.dev.package.shared]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 2
