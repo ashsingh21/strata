@@ -1,4 +1,5 @@
-//! Project management: New/Open/Save/Save As/Rename, plus Ctrl+S. Owns
+//! Project management: New/Open/Save/Save As/Rename, plus Ctrl+S, and the
+//! unsaved-changes prompt before Close/New/Open. Owns
 //! which file (if any) the current project lives at - everything else
 //! (the arrangement, instrument patches) belongs to `TimelineState` and
 //! `SynthModel`; this model only reads them to save, and on New/Open
@@ -49,6 +50,40 @@ fn zenity_pick_file(dir: &Path) -> Option<PathBuf> {
     }
     let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+/// What to do with unsaved changes before a destructive action.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiscardChoice {
+    Save,
+    DontSave,
+    Cancel,
+}
+
+/// "Save changes to X?" - Save / Don't Save / Cancel. Dismissing the
+/// dialog (Esc, the window's X) counts as Cancel, the only safe default:
+/// "Don't Save" is deliberately the extra button, not zenity's cancel
+/// action, so nothing but an explicit click on it discards work. If
+/// zenity can't run at all this falls back to DontSave - i.e. the old
+/// behaviour - rather than making the window impossible to close.
+fn zenity_ask_save(name: &str, action: &str) -> DiscardChoice {
+    let output = std::process::Command::new("zenity")
+        .arg("--question")
+        .arg("--title=Unsaved changes")
+        .arg(format!("--text=Save changes to \u{201c}{name}\u{201d} before {action}?"))
+        .arg("--ok-label=Save")
+        .arg("--cancel-label=Cancel")
+        .arg("--extra-button=Don't Save")
+        .output();
+    match output {
+        Ok(out) if out.status.success() => DiscardChoice::Save,
+        Ok(out) if String::from_utf8_lossy(&out.stdout).trim() == "Don't Save" => DiscardChoice::DontSave,
+        Ok(_) => DiscardChoice::Cancel,
+        Err(e) => {
+            eprintln!("project: couldn't show the unsaved-changes dialog ({e}); continuing without saving");
+            DiscardChoice::DontSave
+        }
+    }
 }
 
 /// The Save As counterpart - see `zenity_pick_file`.
@@ -103,6 +138,23 @@ pub struct ProjectModel {
     /// The project as last saved (or loaded), serialized - the header
     /// compares the live project against it to show "Saved" or "Edited".
     pub saved: Signal<String>,
+    /// An action waiting on the unsaved-changes dialog, or on a Save As
+    /// the dialog's "Save" kicked off - runs once that save succeeds.
+    pending: Option<GuardedAction>,
+    /// A dialog is already up - further close/New/Open requests are
+    /// swallowed rather than stacking a second dialog.
+    asking: bool,
+    /// Set just before re-emitting `WindowClose` once the user has
+    /// decided, so this model lets it through to the window.
+    allow_close: bool,
+}
+
+/// Actions that would throw away unsaved changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuardedAction {
+    Close,
+    New,
+    Open,
 }
 
 pub enum ProjectEvent {
@@ -118,6 +170,8 @@ pub enum ProjectEvent {
     /// that ran it (see `spawn_dialog`) - `None` if the user cancelled.
     OpenPicked(Option<PathBuf>),
     SaveAsPicked(Option<PathBuf>),
+    /// The unsaved-changes dialog's answer for a pending action.
+    DiscardDecided(GuardedAction, DiscardChoice),
 }
 
 /// Runs a (`zenity`) dialog on a background thread and reports whatever
@@ -174,6 +228,9 @@ impl ProjectModel {
             current_path: Signal::new(initial_path),
             display_name,
             saved,
+            pending: None,
+            asking: false,
+            allow_close: false,
         }
     }
 
@@ -199,7 +256,7 @@ impl ProjectModel {
         }
     }
 
-    fn save_to(&mut self, path: PathBuf) {
+    fn save_to(&mut self, path: PathBuf) -> bool {
         let arrangement = self.arrangement.get();
         let patches = self.patches.get();
         match save(&project(&arrangement, &patches), &path) {
@@ -207,33 +264,114 @@ impl ProjectModel {
                 self.current_path.set(Some(path.clone()));
                 self.display_name.set(name_from_path(Some(&path)));
                 self.saved.set(snapshot(&arrangement, &patches));
+                true
             }
-            Err(e) => eprintln!("project: failed to save to {}: {e}", path.display()),
+            Err(e) => {
+                eprintln!("project: failed to save to {}: {e}", path.display());
+                false
+            }
+        }
+    }
+
+    fn is_dirty(&self) -> bool {
+        snapshot(&self.arrangement.get(), &self.patches.get()) != self.saved.get()
+    }
+
+    /// Runs `action` now if there's nothing to lose, otherwise asks first.
+    fn guard(&mut self, cx: &mut EventContext, action: GuardedAction) {
+        if self.asking {
+            return;
+        }
+        if !self.is_dirty() {
+            self.perform(cx, action);
+            return;
+        }
+        self.asking = true;
+        let name = self.display_name.get();
+        let verb = match action {
+            GuardedAction::Close => "closing",
+            GuardedAction::New => "starting a new project",
+            GuardedAction::Open => "opening another project",
+        };
+        cx.spawn(move |proxy| {
+            let choice = zenity_ask_save(&name, verb);
+            let _ = proxy.emit(ProjectEvent::DiscardDecided(action, choice));
+        });
+    }
+
+    fn perform(&mut self, cx: &mut EventContext, action: GuardedAction) {
+        match action {
+            GuardedAction::Close => {
+                self.allow_close = true;
+                cx.emit_to(Entity::root(), WindowEvent::WindowClose);
+            }
+            GuardedAction::New => {
+                cx.emit(TimelineEvent::LoadArrangement(empty_arrangement()));
+                cx.emit(SynthEvent::LoadPatches(BTreeMap::new()));
+                self.current_path.set(None);
+                self.display_name.set(name_from_path(None));
+                self.saved.set(snapshot(&empty_arrangement(), &BTreeMap::new()));
+            }
+            GuardedAction::Open => {
+                spawn_dialog(cx, || zenity_pick_file(&default_projects_dir()), ProjectEvent::OpenPicked)
+            }
         }
     }
 }
 
 impl Model for ProjectModel {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        // The window's close button. This model lives on the root (window)
+        // entity, and Vizia visits an entity's models before its view, so
+        // consuming the event here stops the Window view from closing.
+        event.map(|window_event, meta| {
+            if let WindowEvent::WindowClose = window_event {
+                if !self.allow_close {
+                    meta.consume();
+                    self.guard(cx, GuardedAction::Close);
+                }
+            }
+        });
         event.map(|event, _| match event {
             ProjectEvent::Save => match self.current_path.get() {
-                Some(path) => self.save_to(path),
+                Some(path) => {
+                    self.save_to(path);
+                }
                 None => spawn_save_as_dialog(cx, self.display_name.get()),
             },
             ProjectEvent::SaveAsDialog => spawn_save_as_dialog(cx, self.display_name.get()),
-            ProjectEvent::OpenDialog => {
-                spawn_dialog(cx, || zenity_pick_file(&default_projects_dir()), ProjectEvent::OpenPicked)
-            }
+            ProjectEvent::OpenDialog => self.guard(cx, GuardedAction::Open),
             ProjectEvent::OpenPicked(Some(path)) => self.open(cx, path.clone()),
             ProjectEvent::OpenPicked(None) => {}
-            ProjectEvent::SaveAsPicked(Some(path)) => self.save_to(path.clone()),
-            ProjectEvent::SaveAsPicked(None) => {}
-            ProjectEvent::New => {
-                cx.emit(TimelineEvent::LoadArrangement(empty_arrangement()));
-                cx.emit(SynthEvent::LoadPatches(BTreeMap::new()));
-                self.current_path.set(None);
-                self.display_name.set(name_from_path(None));
-                self.saved.set(snapshot(&empty_arrangement(), &BTreeMap::new()));
+            ProjectEvent::SaveAsPicked(Some(path)) => {
+                let saved = self.save_to(path.clone());
+                if let Some(action) = self.pending.take() {
+                    if saved {
+                        self.perform(cx, action);
+                    }
+                }
+            }
+            // Cancelling the Save As a "Save" answer opened cancels the
+            // action it was saving for, too.
+            ProjectEvent::SaveAsPicked(None) => self.pending = None,
+            ProjectEvent::New => self.guard(cx, GuardedAction::New),
+            ProjectEvent::DiscardDecided(action, choice) => {
+                self.asking = false;
+                match choice {
+                    DiscardChoice::Cancel => {}
+                    DiscardChoice::DontSave => self.perform(cx, *action),
+                    DiscardChoice::Save => match self.current_path.get() {
+                        Some(path) => {
+                            if self.save_to(path) {
+                                self.perform(cx, *action);
+                            }
+                        }
+                        None => {
+                            self.pending = Some(*action);
+                            spawn_save_as_dialog(cx, self.display_name.get());
+                        }
+                    },
+                }
             }
             ProjectEvent::Rename(name) => {
                 let name = name.trim();
