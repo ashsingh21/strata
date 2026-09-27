@@ -85,15 +85,19 @@ impl Builder {
         &self.instruments.iter().find(|(id, _)| *id == track).expect("synth track").1
     }
 
-    fn midi_clip(&mut self, track: TrackId, name: &str, start_bar: i64, end_bar: i64, notes: Vec<MidiNote>) {
+    /// A MIDI clip from `start_bar` to `end_bar` looping `notes`, a pattern
+    /// `pattern_bars` long - the way it'd be made by hand: write the
+    /// pattern once, stretch the clip.
+    fn midi_clip(&mut self, track: TrackId, name: &str, start_bar: i64, end_bar: i64, pattern_bars: i64, notes: Vec<MidiNote>) {
         let id = self.arr.alloc_id();
+        let loop_len = (pattern_bars < end_bar - start_bar).then_some(pattern_bars * BAR);
         self.arr.clips.push(Clip {
             id,
             track,
             start: start_bar * BAR,
             length: (end_bar - start_bar) * BAR,
             name: name.into(),
-            content: ClipContent::Midi { notes, loop_len: None },
+            content: ClipContent::Midi { notes, loop_len },
             recording: false,
             gain_db: 0.0,
         });
@@ -266,11 +270,11 @@ pub fn house_demo() -> Project {
         ("Outro", 56, 64, Parts { kick, clap: false, closed: false, open }),
     ];
     for (name, start, end, parts) in sections {
-        b.midi_clip(drums, name, start, end, repeat(end - start, pattern(parts)));
+        b.midi_clip(drums, name, start, end, 1, repeat(1, pattern(parts)));
     }
     // A clap roll into the drop, getting louder.
     let roll = (0..16).map(|step| (step, CLAP, 1, (40 + step * 3) as u8)).collect::<Vec<_>>();
-    b.midi_clip(drums, "Roll", 39, 40, repeat(1, move |_| roll.clone()));
+    b.midi_clip(drums, "Roll", 39, 40, 1, repeat(1, move |_| roll.clone()));
 
     // -- Carve tracks. -------------------------------------------------
     let bass = b.synth_track("Bass", ClipColor::Blue, -7.0, house_bass());
@@ -283,8 +287,8 @@ pub fn house_demo() -> Project {
         let root = CHORDS[(bar % 4) as usize].0;
         (0..4).map(|beat| (beat * 4 + 2, if beat == 3 { root + 12 } else { root }, 1, if beat == 0 { 118 } else { 96 })).collect()
     };
-    b.midi_clip(bass, "Bassline", 8, 32, repeat(24, bass_bar));
-    b.midi_clip(bass, "Bassline", 40, 64, repeat(24, bass_bar));
+    b.midi_clip(bass, "Bassline", 8, 32, 4, repeat(4, bass_bar));
+    b.midi_clip(bass, "Bassline", 40, 64, 4, repeat(4, bass_bar));
 
     // Stabs: a syncopated chord hit pattern.
     let stab_bar = |bar: i64| {
@@ -294,16 +298,16 @@ pub fn house_demo() -> Project {
             .flat_map(|&(step, len)| chord.iter().map(move |&p| (step, p, len, if step == 2 { 110 } else { 92 })))
             .collect()
     };
-    b.midi_clip(stabs, "Stabs", 16, 40, repeat(24, stab_bar));
-    b.midi_clip(stabs, "Stabs", 40, 56, repeat(16, stab_bar));
+    b.midi_clip(stabs, "Stabs", 16, 40, 4, repeat(4, stab_bar));
+    b.midi_clip(stabs, "Stabs", 40, 56, 4, repeat(4, stab_bar));
 
     // Pad: one held chord per bar, the whole song.
     let pad_bar = |bar: i64| CHORDS[(bar % 4) as usize].2.iter().map(|&p| (0, p, 16, 84)).collect();
-    b.midi_clip(pad, "Pad", 0, BARS, repeat(BARS, pad_bar));
+    b.midi_clip(pad, "Pad", 0, BARS, 4, repeat(4, pad_bar));
 
     // Lead: the hook through the drop.
     let lead_bar = |bar: i64| HOOK[(bar % 4) as usize].iter().map(|&(step, p, len)| (step, p, len, 100)).collect();
-    b.midi_clip(lead, "Hook", 40, 56, repeat(16, lead_bar));
+    b.midi_clip(lead, "Hook", 40, 56, 4, repeat(4, lead_bar));
 
     // -- Effects. ------------------------------------------------------
     add_effect(
@@ -420,5 +424,17 @@ mod tests {
         let back: Project = serde_json::from_str(&json).unwrap();
         assert_eq!(back.arrangement.clips.len(), p.arrangement.clips.len());
         assert_eq!(back.instruments.len(), 4);
+    }
+
+    #[test]
+    fn looped_clips_play_every_hit() {
+        let p = house_demo();
+        let arr = &p.arrangement;
+        let drums = arr.tracks.iter().find(|t| t.name == "Drums").unwrap().id;
+        let hits: usize = arr.clips.iter().filter(|c| c.track == drums).map(|c| c.played_notes().len()).sum();
+        // kick 56 bars x4, clap 40 x2 + 16 roll, closed hats 32 x8, open hats 52 x4
+        assert_eq!(hits, 56 * 4 + 40 * 2 + 16 + 32 * 8 + 52 * 4);
+        let groove = arr.clips.iter().find(|c| c.name == "Groove").unwrap();
+        assert!(matches!(groove.content, ClipContent::Midi { loop_len: Some(l), .. } if l == BAR));
     }
 }
