@@ -67,3 +67,12 @@ pub fn load_lessons_done() -> Vec<String> {
 pub fn save_lessons_done(ids: &[String]) {
     save_key("lessons_done", serde_json::json!(ids));
 }
+
+/// The lower panel's height (see `crate::splitter`), logical pixels.
+pub fn load_lower_panel_height() -> Option<f32> {
+    load_all().get("lower_panel_height")?.as_f64().map(|h| h as f32)
+}
+
+pub fn save_lower_panel_height(height: f32) {
+    save_key("lower_panel_height", serde_json::json!(height));
+}

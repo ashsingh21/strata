@@ -21,6 +21,7 @@ mod project;
 mod recorder;
 mod settings;
 mod sidebar;
+mod splitter;
 mod status;
 mod synth;
 mod timeline;
@@ -242,6 +243,8 @@ fn main() -> Result<(), ApplicationError> {
             piano_roll_open_clip,
         );
         let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model);
+        let lower_panel_height =
+            Signal::new(settings::load_lower_panel_height().unwrap_or(splitter::DEFAULT_PANEL_HEIGHT));
         let lessons_active = lesson_model.active;
         let lessons_done = lesson_model.done;
         lesson_model.build(cx);
@@ -475,10 +478,13 @@ fn main() -> Result<(), ApplicationError> {
                         board_open_track,
                     );
 
-                    Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
+                    // Drag to trade height between the timeline and the panel.
+                    splitter::PanelSplitter::new(cx, lower_panel_height, theme);
 
-                    // The lower panel spans the arrangement's width and sizes to
-                    // its device; the device fills it rather than floating.
+                    // The lower panel spans the arrangement's width, is as
+                    // tall as the divider says, and scrolls when its device
+                    // is taller than that (a laptop screen).
+                    ScrollView::new(cx, move |cx| {
                     VStack::new(cx, move |cx| {
                         Binding::new(cx, board_open_track, move |cx| {
                             // A selection from a previous board (or none
@@ -530,6 +536,11 @@ fn main() -> Result<(), ApplicationError> {
                     .class("lower-panel")
                     .width(Stretch(1.0))
                     .height(Auto);
+                    })
+                    .show_horizontal_scrollbar(false)
+                    .class("lower-scroll")
+                    .width(Stretch(1.0))
+                    .height(lower_panel_height.map(|h| Pixels(*h)));
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
@@ -557,12 +568,12 @@ fn main() -> Result<(), ApplicationError> {
         .width(Stretch(1.0));
     })
     .title("Strata")
-    .inner_size((1600, 1360))
+    .inner_size((1440, 900))
     // The header row is one fixed-content strip (no wrapping); below ~1400px
     // its right end (CPU/Out meters, input device) was cut off, and below
     // ~800px tall the timeline has no room once the 320px Effects Board
     // is open.
-    .min_inner_size(Some((1400, 800)))
+    .min_inner_size(Some((1200, 700)))
     .ignore_default_theme()
     .run()
 }

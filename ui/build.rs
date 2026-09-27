@@ -641,6 +641,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".tl-head-auto.is-orphaned .control", vec![("color", c("ink-faint"))]);
 
     rule(".lower-panel", vec![("background-color", c("bg-000"))]);
+    rule(".lower-scroll", vec![("background-color", c("bg-000"))]);
     rule(".tgroup", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
     rule(".tbtn", vec![("background-color", "transparent".to_string())]);
     rule(".tbtn:hover", vec![("background-color", c("bg-300"))]);
