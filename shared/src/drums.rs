@@ -21,13 +21,13 @@ pub const CLOSED_HAT: u8 = 42;
 pub const OPEN_HAT: u8 = 46;
 
 /// In note order, low to high - the pad panel's left-to-right order and
-/// the step grid's bottom-to-top.
-pub const DRUM_KIT: [DrumPad; 7] = [
-    DrumPad { note: 35, name: "Kick 80s", sample: "drums/kick_80s.wav", chokes: &[] },
+/// the step grid's bottom-to-top. Only samples that are Strata's own (the
+/// repo's tracked, generated one-shots) - never the downloaded packs,
+/// which aren't ours to redistribute (see `.gitignore`).
+pub const DRUM_KIT: [DrumPad; 5] = [
     DrumPad { note: KICK, name: "Kick", sample: "drums/kick.wav", chokes: &[] },
     DrumPad { note: SNARE, name: "Snare", sample: "drums/snare.wav", chokes: &[] },
     DrumPad { note: CLAP, name: "Clap", sample: "drums/clap.wav", chokes: &[] },
-    DrumPad { note: 40, name: "Snare 2", sample: "drums/snare_classic.wav", chokes: &[] },
     DrumPad { note: CLOSED_HAT, name: "Closed Hat", sample: "drums/hihat_closed.wav", chokes: &[OPEN_HAT] },
     DrumPad { note: OPEN_HAT, name: "Open Hat", sample: "drums/hihat_open.wav", chokes: &[] },
 ];
@@ -50,6 +50,17 @@ mod tests {
             for c in pad.chokes {
                 assert!(pad_for_note(*c).is_some(), "{} chokes a missing note {c}", pad.name);
             }
+        }
+    }
+
+    #[test]
+    fn every_sample_is_tracked_in_the_repo() {
+        // A kit sample that's gitignored works here but is missing from
+        // every fresh clone (and may not be ours to ship).
+        let ignore = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.gitignore")).unwrap();
+        for pad in &DRUM_KIT {
+            let file = format!("assets/{}", pad.sample);
+            assert!(!ignore.lines().any(|l| l.trim() == file), "{file} is gitignored");
         }
     }
 
