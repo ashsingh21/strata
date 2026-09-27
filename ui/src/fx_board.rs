@@ -23,6 +23,12 @@ const IO_H: f32 = 40.0;
 /// lines up with this board's layout instead of drifting from it.
 const NODE_SPACING: f32 = 166.0;
 const ROW_Y: f32 = 60.0;
+/// Reserves room left of the first real node for the Source pill and its
+/// cable, so the graph never renders at a negative canvas-local x (which
+/// used to spill the Source node visually into the palette column).
+/// Purely a display-space offset - stored `EffectNode::position` values
+/// stay 0-based; this is added/subtracted at the render boundary only.
+const CANVAS_MARGIN_X: f32 = NODE_SPACING;
 
 #[derive(Clone, Copy)]
 pub struct FxBoardProps {
@@ -48,14 +54,14 @@ fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId
         }
     }
     if id == EffectGraph::SOURCE {
-        return (-NODE_SPACING, ROW_Y + (NODE_H - IO_H) * 0.5);
+        return (0.0, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
     if id == EffectGraph::OUTPUT {
         let max_x = graph.nodes.iter().map(|n| n.position.0).fold(0.0f32, f32::max);
-        let x = if graph.nodes.is_empty() { 0.0 } else { max_x + NODE_SPACING };
+        let x = if graph.nodes.is_empty() { CANVAS_MARGIN_X } else { max_x + CANVAS_MARGIN_X + NODE_SPACING };
         return (x, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
-    graph.node(id).map(|n| n.position).unwrap_or((0.0, ROW_Y))
+    graph.node(id).map(|n| (n.position.0 + CANVAS_MARGIN_X, n.position.1)).unwrap_or((CANVAS_MARGIN_X, ROW_Y))
 }
 
 fn port_out(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNodeId, f32, f32)>) -> (f32, f32) {
@@ -199,10 +205,14 @@ impl View for FxCables {
 
 /// One palette row: `bg-400` while its own effect is the one currently
 /// being dragged (per the FxBoard spec); press-drag-release adds it.
-fn palette_row(cx: &mut Context, label: &'static str, effect: Effect, p: FxBoardProps, palette_drag: Signal<Option<Effect>>) {
+/// Hidden while the search text doesn't match its name - same
+/// `toggle_class("hidden", ...)` idiom `sidebar.rs`'s own search uses.
+fn palette_row(cx: &mut Context, label: &'static str, effect: Effect, p: FxBoardProps, palette_drag: Signal<Option<Effect>>, query: Signal<String>) {
+    let needle = label.to_lowercase();
     Label::new(cx, label)
         .class("side-row")
         .toggle_class("is-on", palette_drag.map(move |d| *d == Some(effect)))
+        .toggle_class("hidden", query.map(move |q| !q.is_empty() && !needle.contains(&q.to_lowercase())))
         .cursor(CursorIcon::Hand)
         .on_mouse_down(move |cx, button| {
             if button == MouseButton::Left {
@@ -331,13 +341,18 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
         // auto-layout push_at_end position "+Effect" already uses) -
         // the gesture itself is what this phase proves.
         let palette_drag: Signal<Option<Effect>> = Signal::new(None);
+        let palette_query: Signal<String> = Signal::new(String::new());
         HStack::new(cx, move |cx| {
             VStack::new(cx, move |cx| {
-                Textbox::new(cx, Signal::new(String::new())).class("search").width(Stretch(1.0));
+                Textbox::new(cx, palette_query)
+                    .placeholder("Search effects")
+                    .on_edit(move |_cx, text| palette_query.set(text))
+                    .class("search")
+                    .width(Stretch(1.0));
                 Label::new(cx, "Dynamics").class("side-head");
-                palette_row(cx, "Compressor", Effect::Compressor(shared::arrangement::CompressorState::default()), p, palette_drag);
+                palette_row(cx, "Compressor", Effect::Compressor(shared::arrangement::CompressorState::default()), p, palette_drag, palette_query);
                 Label::new(cx, "EQ and filter").class("side-head");
-                palette_row(cx, "EQ", Effect::Eq(shared::arrangement::EqState::default()), p, palette_drag);
+                palette_row(cx, "EQ", Effect::Eq(shared::arrangement::EqState::default()), p, palette_drag, palette_query);
             })
             .class("panel")
             .gap(Pixels(tokens::SPACE_1))
@@ -393,7 +408,11 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     }
 
                     for node in graph.nodes.clone() {
-                        let (orig_x, orig_y) = node.position;
+                        // Display-space position (model position plus the
+                        // canvas's left margin) - drag math below stays in
+                        // this space throughout, then converts back to
+                        // model-space only when committing/emitting.
+                        let (orig_x, orig_y) = (node.position.0 + CANVAS_MARGIN_X, node.position.1);
                         let x = Memo::new(move |_| {
                             match drag_state.get() {
                                 Some((id, x, _)) if id == node.id => x,
@@ -438,7 +457,8 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                     Label::new(cx, format!("{:.0} Hz \u{b7} {:+.1} dB", state.freq_hz, state.gain_db)).class("meta");
                                 }
                                 Effect::Compressor(state) => {
-                                    Element::new(cx).class("device").width(Stretch(1.0)).height(Pixels(36.0));
+                                    let state_signal = Memo::new(move |_| state);
+                                    crate::compressor_curve::compressor_curve(cx, state_signal, p.theme);
                                     Label::new(cx, format!("{:.0}:1 \u{b7} {:+.1} dB", state.ratio, state.threshold_db)).class("meta");
                                 }
                             }
@@ -485,8 +505,10 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                     cx.release();
                                     drag_anchor.set(None);
                                     if let Some((_, x, y)) = drag_state.get() {
-                                        // Snap to the 16px dot grid.
-                                        let snapped = ((x / 16.0).round() * 16.0, (y / 16.0).round() * 16.0);
+                                        // Back to model-space (strip the
+                                        // canvas margin) before snapping to
+                                        // the 16px dot grid.
+                                        let snapped = (((x - CANVAS_MARGIN_X) / 16.0).round() * 16.0, (y / 16.0).round() * 16.0);
                                         cx.emit(TimelineEvent::SetEffectNodePosition(p.track, node.id, snapped));
                                     }
                                     drag_state.set(None);
@@ -519,7 +541,11 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                             ("EQ", Effect::Eq(shared::arrangement::EqState::default())),
                         ] {
                             Label::new(cx, label).class("menu-item").class("body").on_press(move |cx| {
-                                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect, Some((x, y))));
+                                // `(x, y)` is the double-click's canvas-local
+                                // (display-space) point - strip the margin
+                                // before storing it as the node's model-space
+                                // position.
+                                cx.emit(TimelineEvent::AddEffectNodeToBoard(p.track, effect, Some((x - CANVAS_MARGIN_X, y))));
                                 search_popover.set(None);
                             });
                         }

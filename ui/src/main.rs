@@ -1,6 +1,7 @@
 mod app;
 mod bpm_field;
 mod canvas_text;
+mod compressor_curve;
 mod compressor_panel;
 mod context_menu;
 mod device_area;
