@@ -155,11 +155,16 @@ impl Model for AppData {
                 self.params.request_stop();
                 self.position.set(Position::default());
                 self.sample_counter.set(0);
+                // The timeline's playhead only follows the engine while
+                // playing, so without this the line stayed wherever it
+                // stopped while the readout said 1.1.1.
+                cx.emit(crate::timeline::state::TimelineEvent::ScrubPlayhead(0));
             }
             AppEvent::Rewind => {
                 self.params.request_stop();
                 self.position.set(Position::default());
                 self.sample_counter.set(0);
+                cx.emit(crate::timeline::state::TimelineEvent::ScrubPlayhead(0));
             }
             AppEvent::Tap => {
                 // Average the last few intervals; a pause over two seconds

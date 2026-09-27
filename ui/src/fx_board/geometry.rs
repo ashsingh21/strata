@@ -23,6 +23,9 @@ const NODE_SPACING: f32 = 166.0;
 /// 0-based (`push_at_end` writes 0), so effect nodes and the Source/Out
 /// pills (centred on this same row) line up and cables run straight.
 pub const ROW_Y: f32 = 60.0;
+/// Breathing room between the canvas's left edge (the palette) and the
+/// Source pill - it used to sit flush against it.
+const SOURCE_X: f32 = 24.0;
 /// Reserves room left of the first real node for the Source pill and its
 /// cable, so the graph never renders at a negative canvas-local x (which
 /// used to spill the Source node visually into the palette column).
@@ -47,7 +50,7 @@ pub fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNo
         }
     }
     if id == EffectGraph::SOURCE {
-        return (0.0, ROW_Y + (NODE_H - IO_H) * 0.5);
+        return (SOURCE_X, ROW_Y + (NODE_H - IO_H) * 0.5);
     }
     if id == EffectGraph::OUTPUT {
         // The gap is measured from the *actual last node in signal-chain
@@ -59,7 +62,7 @@ pub fn io_position(graph: &EffectGraph, id: EffectNodeId, drag: Option<(EffectNo
         let last_x = graph.ordered().last().map(|n| n.position.0);
         let x = match last_x {
             Some(last_x) => last_x + CANVAS_MARGIN_X + NODE_W + OUTPUT_GAP,
-            None => IO_W + OUTPUT_GAP,
+            None => SOURCE_X + IO_W + OUTPUT_GAP,
         };
         return (x, ROW_Y + (NODE_H - IO_H) * 0.5);
     }

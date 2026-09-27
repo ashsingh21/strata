@@ -85,7 +85,7 @@ pub fn effect_panel(
         }
     })
     .class("device")
-    .gap(Pixels(tokens::SPACE_4))
+    .gap(Pixels(tokens::SPACE_3))
     .alignment(Alignment::Center)
     .padding(Pixels(tokens::SPACE_3))
     .width(Stretch(1.0))

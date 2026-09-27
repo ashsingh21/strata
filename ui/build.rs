@@ -569,6 +569,9 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".fx-pip", vec![("background-color", "transparent".to_string()), ("border-color", c("ink-faint"))]);
     rule(".fx-pip.is-on", vec![("background-color", c("ink")), ("border-color", c("ink"))]);
     rule(".menu-item:hover", vec![("background-color", c("bg-300"))]);
+    // The current choice in a menu (time signature, input device).
+    rule(".menu-item.is-on", vec![("background-color", c("active-soft"))]);
+    rule(".menu-item.is-on .body", vec![("color", c("active"))]);
     // `line` (the faint hairline .panel uses against its own bg-100) is
     // nearly invisible on the menu's bg-200: line-control (ink-faint) is
     // the same edge every button and readout already uses, and actually
@@ -595,10 +598,10 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
         ".btn.is-mod",
         vec![("background-color", c("mod-soft")), ("border-color", c("mod")), ("color", c("mod"))],
     );
-    // ...and neutral toggles (Mute, Sync, Click, ...) go bg-400 with ink
-    // text - never an accent, never inverted.
+    // ...and neutral toggles (Mute, Sync, Click, Enabled, an open board...)
+    // use the `active` accent: a grey step was easy to miss.
     for on in [".btn.is-mute", ".btn.is-on"] {
-        rule(on, vec![("background-color", c("bg-400")), ("color", c("ink"))]);
+        rule(on, vec![("background-color", c("active-soft")), ("border-color", c("active")), ("color", c("active"))]);
     }
 
     rule(
@@ -635,7 +638,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".tl-corner", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
     rule(".tl-heads", vec![("border-color", c("line"))]);
     rule(".tl-head", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
-    rule(".tl-head.is-selected", vec![("background-color", c("bg-200"))]);
+    rule(".tl-head.is-selected", vec![("background-color", c("active-soft"))]);
     rule(".tl-head-auto", vec![("background-color", c("bg-000"))]);
     rule(".tl-head-auto.is-orphaned .control", vec![("color", c("ink-faint"))]);
 
@@ -684,7 +687,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".fx-pip.fx-port:hover", vec![("background-color", c("focus")), ("border-color", c("focus"))]);
     // Selection needs to read on the node itself, not just its cables -
     // `focus` is the token's own purpose ("keyboard focus ring").
-    rule(".fx-node.is-sel", vec![("background-color", c("bg-300")), ("border-color", c("focus"))]);
+    rule(".fx-node.is-sel", vec![("background-color", c("active-soft")), ("border-color", c("active"))]);
     rule(".synth-disp", vec![("background-color", c("bg-000"))]);
     rule(".synth-seg", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
     rule(
@@ -692,7 +695,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
         vec![("background-color", "transparent".to_string()), ("color", c("ink-muted"))],
     );
     rule(".synth-seg-btn:hover", vec![("color", c("ink"))]);
-    rule(".synth-seg-btn.is-on", vec![("background-color", c("bg-400")), ("color", c("ink"))]);
+    rule(".synth-seg-btn.is-on", vec![("background-color", c("active-soft")), ("color", c("active"))]);
     rule(".synth-keys", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
     // An LFO pill being dragged: every knob it can land on lights up in mod.
     rule(".knob-col.drop-target", vec![("background-color", c("mod-soft")), ("border-color", c("mod"))]);

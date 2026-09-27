@@ -452,7 +452,9 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
             })
             .class("panel")
             .padding(Pixels(tokens::SPACE_2))
-            .width(Pixels(248.0))
+            // Wide enough for the Compressor's five knob columns - at 248px
+            // the last one (Makeup) was cut off.
+            .width(Pixels(312.0))
             .height(Stretch(1.0));
         })
         .width(Stretch(1.0))
