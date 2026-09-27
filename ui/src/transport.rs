@@ -247,9 +247,13 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         // Project and what's happening to it.
         let status = Memo::new(move |_| {
             let arr = props.arrangement.get();
-            if record_armed.get() && playing.get() {
-                if let Some(track) = arr.tracks.iter().find(|t| t.arm) {
-                    return format!("Recording to {}", track.name);
+            if record_armed.get() {
+                match arr.tracks.iter().find(|t| t.arm) {
+                    Some(track) if playing.get() => return format!("Recording to {}", track.name),
+                    Some(_) => {}
+                    // Record on with no track armed records nothing - say
+                    // so, instead of silently playing back.
+                    None => return "Arm a track to record".to_string(),
                 }
             }
             props.save_status.get()
