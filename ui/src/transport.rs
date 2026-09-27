@@ -540,7 +540,10 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .height(Pixels(4.0));
         Label::new(cx, cpu.map(|c| format!("{:.0}%", c * 100.0))).class("value").font_size(12.0).width(Pixels(32.0));
 
-        // Output level: signal up to -12 dB, warn above.
+        // Output level: signal up to -12 dB, warn above. Labelled like CPU
+        // beside it - unlabelled, a bare bar and "-inf" didn't say what
+        // they measured.
+        Label::new(cx, "Out").class("label").font_size(12.0);
         let out_db = props.output_db;
         let fraction = out_db.map(|db| ((db + 60.0) / 60.0).clamp(0.0, 1.0));
         HStack::new(cx, move |cx| {
