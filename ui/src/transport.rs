@@ -508,7 +508,14 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             });
             // The tooltip says the part the menu doesn't: a new choice only
             // applies after a restart.
-            with_tip(Button::new(cx, move |cx| Label::new(cx, device_label)), "Recording input device - applies on next launch")
+            // Capped with an ellipsis: device names are arbitrary OS strings,
+            // and an uncapped one widened the header past the window edge.
+            with_tip(
+                Button::new(cx, move |cx| {
+                    Label::new(cx, device_label).text_wrap(false).text_overflow(TextOverflow::Ellipsis).max_width(Pixels(140.0))
+                }),
+                "Recording input device - applies on next launch",
+            )
                 .class("btn")
                 .class("quiet")
                 .on_press(move |_cx| menus.toggle(input_device_menu_open));

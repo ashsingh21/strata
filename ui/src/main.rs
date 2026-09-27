@@ -493,6 +493,11 @@ fn main() -> Result<(), ApplicationError> {
     })
     .title("Strata")
     .inner_size((1600, 1360))
+    // The header row is one fixed-content strip (no wrapping); below ~1400px
+    // its right end (CPU/Out meters, input device) was cut off, and below
+    // ~800px tall the timeline has no room once the 320px Effects Board
+    // is open.
+    .min_inner_size(Some((1400, 800)))
     .ignore_default_theme()
     .run()
 }
