@@ -414,9 +414,23 @@ pub fn automation_header<'a>(
         live.unwrap_or_else(|| lane.display_value.clone())
     });
 
-    VStack::new(cx, move |cx| {
-        Label::new(cx, name).class("control");
-        Label::new(cx, value).class("meta");
+    // The owning track's colour strip, same as its header's, so a lane
+    // reads as part of that track.
+    let color = arrangement.map(move |arr| {
+        let track = arr.automation_lane(lane_id).and_then(|l| arr.track(l.track));
+        clip_color_to_rgb(track.map(|t| t.color).unwrap_or(ClipColor::Coral))
+    });
+
+    HStack::new(cx, move |cx| {
+        Element::new(cx).class("track-color-bar").background_color(color).width(Pixels(4.0)).height(Stretch(1.0));
+        VStack::new(cx, move |cx| {
+            Label::new(cx, name).class("control");
+            Label::new(cx, value).class("meta");
+        })
+        .gap(Pixels(2.0))
+        .padding_left(Pixels(tokens::SPACE_6 - 4.0))
+        .alignment(Alignment::Left)
+        .height(Stretch(1.0));
     })
     .class("tl-head-auto")
     .toggle_class("is-orphaned", orphaned)
@@ -426,7 +440,6 @@ pub fn automation_header<'a>(
             cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target: ContextMenuTarget::AutomationLane { lane: lane_id }, x, y }));
         }
     })
-    .gap(Pixels(2.0))
     .width(Pixels(crate::timeline::HEAD_WIDTH))
     .height(Pixels(crate::timeline::LANE_AUTO_HEIGHT))
 }

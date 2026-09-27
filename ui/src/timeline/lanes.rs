@@ -703,11 +703,10 @@ impl LaneArea {
                 RowKind::Track(_) => {
                     self.draw_grid(canvas, &palette, row_rect, &transform, ticks_per_bar, ticks_per_beat);
                 }
+                // Same gridded ground as a track row: a lane is part of its
+                // track's timeline, not a separate black strip.
                 RowKind::Automation(_) => {
-                    let mut bg = vg::Paint::default();
-                    bg.set_color(palette.bg_000);
-                    bg.set_anti_alias(true);
-                    canvas.draw_path(&vg::Path::rect(row_rect, None), &bg);
+                    self.draw_grid(canvas, &palette, row_rect, &transform, ticks_per_bar, ticks_per_beat);
                 }
             }
 
@@ -934,25 +933,52 @@ impl LaneArea {
                 vg::Point::new(x, y)
             };
 
-            let mut path = vg::PathBuilder::new();
-            for (i, bp) in lane.breakpoints.iter().enumerate() {
-                let (tick, value) = live_breakpoint(&self.drag, lane_id, bp);
-                let p = value_at(tick, value);
-                if i == 0 {
-                    path.move_to(p);
-                } else {
-                    path.line_to(p);
-                }
+            // Drawn in the owning track's colour, and extended flat to both
+            // edges (the value holds before the first point and after the
+            // last), so it's clear which track it belongs to and what value
+            // applies everywhere on the timeline.
+            let color = clip_color_to_rgb(arr.track(lane.track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Coral));
+            let points: Vec<vg::Point> = lane
+                .breakpoints
+                .iter()
+                .map(|bp| {
+                    let (tick, value) = live_breakpoint(&self.drag, lane_id, bp);
+                    value_at(tick, value)
+                })
+                .collect();
+            let (left, right) = (bounds.x, bounds.x + bounds.w);
+            let first = points[0];
+            let last = points[points.len() - 1];
+
+            let mut fill_path = vg::PathBuilder::new();
+            fill_path.move_to(vg::Point::new(left, y0 + row.height));
+            fill_path.line_to(vg::Point::new(left, first.y));
+            for p in &points {
+                fill_path.line_to(*p);
             }
+            fill_path.line_to(vg::Point::new(right, last.y));
+            fill_path.line_to(vg::Point::new(right, y0 + row.height));
+            fill_path.close();
+            let mut fill_paint = vg::Paint::default();
+            fill_paint.set_color(Color::rgba(color.r(), color.g(), color.b(), 46));
+            fill_paint.set_anti_alias(true);
+            canvas.draw_path(&fill_path.detach(), &fill_paint);
+
+            let mut path = vg::PathBuilder::new();
+            path.move_to(vg::Point::new(left, first.y));
+            for p in &points {
+                path.line_to(*p);
+            }
+            path.line_to(vg::Point::new(right, last.y));
             let mut line_paint = vg::Paint::default();
-            line_paint.set_color(palette.ink_muted);
+            line_paint.set_color(color);
             line_paint.set_style(vg::PaintStyle::Stroke);
             line_paint.set_stroke_width(1.5);
             line_paint.set_anti_alias(true);
             canvas.draw_path(&path.detach(), &line_paint);
 
             let mut bp_paint = vg::Paint::default();
-            bp_paint.set_color(palette.ink);
+            bp_paint.set_color(color);
             bp_paint.set_anti_alias(true);
             for bp in lane.breakpoints.iter() {
                 let (tick, value) = live_breakpoint(&self.drag, lane_id, bp);

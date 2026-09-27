@@ -355,7 +355,6 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 }}
 .tl-head-auto {{
   height: {lane_auto}px;
-  padding-left: {space6}px;
 }}
 
 /* Devices: one flat panel, sections split by hairlines, never boxed. */
@@ -504,7 +503,6 @@ scrollview > scroll-content {{
         space1 = space("space-1"),
         space2 = space("space-2"),
         space3 = space("space-3"),
-        space6 = space("space-6"),
         ruler = space("size-ruler"),
         lane = space("size-lane"),
         lane_auto = space("size-lane-auto"),
