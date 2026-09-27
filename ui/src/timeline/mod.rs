@@ -178,7 +178,18 @@ pub fn timeline_view(
             VStack::new(cx, move |cx| {
                 Ruler::new(cx, arrangement, transform, playhead, theme, loop_on)
                     .height(Pixels(tokens::SIZE_RULER))
-                    .width(Stretch(1.0));
+                    .width(Stretch(1.0))
+                    .tooltip(|cx| {
+                        Tooltip::new(cx, |cx| {
+                            Label::new(
+                                cx,
+                                "Click: move the playhead \u{b7} Drag: set a loop region \u{b7} \
+                                 Click the loop bar: loop on/off \u{b7} Right-click: add a marker or remove the loop",
+                            );
+                        })
+                        .placement(Placement::Bottom)
+                        .arrow(false)
+                    });
 
                 // PlayheadOverlay stacked on LaneArea rather than drawn as
                 // part of it, so moving the playhead during playback doesn't

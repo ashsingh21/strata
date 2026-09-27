@@ -162,7 +162,13 @@ impl View for Ruler {
             }
 
             WindowEvent::MouseUp(button) if *button == MouseButton::Left => {
+                let current = self.arrangement.get().loop_range;
                 match self.drag {
+                    // A click on the loop bar (no drag) turns looping on
+                    // or off; dragging it moves it.
+                    Some(Drag::LoopMiddle { .. }) if self.loop_preview.is_none() || self.loop_preview == current => {
+                        cx.emit(crate::app::AppEvent::ToggleLoop);
+                    }
                     Some(Drag::LoopStart) | Some(Drag::LoopEnd) | Some(Drag::LoopMiddle { .. }) => {
                         if let Some(range) = self.loop_preview.take() {
                             cx.emit(TimelineEvent::SetLoopRange(Some(range)));
@@ -176,6 +182,11 @@ impl View for Ruler {
                         if let Some(range) = self.loop_preview.take() {
                             if range.end > range.start {
                                 cx.emit(TimelineEvent::SetLoopRange(Some(range)));
+                                // Drawing a loop means you want it to
+                                // loop (as drawing a cycle does in Logic).
+                                if !self.loop_on.get() {
+                                    cx.emit(crate::app::AppEvent::ToggleLoop);
+                                }
                             }
                         }
                     }
@@ -273,13 +284,25 @@ impl View for Ruler {
         if let Some(range) = loop_range {
             let x0 = (bounds.x as f64 + transform.tick_to_x(range.start)) as f32;
             let x1 = (bounds.x as f64 + transform.tick_to_x(range.end)) as f32;
+            // On: a solid bar in the loop colour. Off: just its outline, so
+            // a kept-but-inactive range can't be mistaken for looping.
             let mut loop_paint = vg::Paint::default();
-            loop_paint.set_color(if self.loop_on.get() { palette.md } else { palette.ink_faint });
             loop_paint.set_anti_alias(true);
-            canvas.draw_path(
-                &vg::Path::rect(vg::Rect::new(x0, bounds.y, x1, bounds.y + LOOP_BAR_HEIGHT), None),
-                &loop_paint,
-            );
+            if self.loop_on.get() {
+                loop_paint.set_color(palette.md);
+                canvas.draw_path(
+                    &vg::Path::rect(vg::Rect::new(x0, bounds.y, x1, bounds.y + LOOP_BAR_HEIGHT), None),
+                    &loop_paint,
+                );
+            } else {
+                loop_paint.set_color(palette.ink_muted);
+                loop_paint.set_style(vg::PaintStyle::Stroke);
+                loop_paint.set_stroke_width(1.0);
+                canvas.draw_path(
+                    &vg::Path::rect(vg::Rect::new(x0 + 0.5, bounds.y + 0.5, x1 - 0.5, bounds.y + LOOP_BAR_HEIGHT - 0.5), None),
+                    &loop_paint,
+                );
+            }
         }
 
         for marker in &arr.markers {
