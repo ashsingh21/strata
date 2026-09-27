@@ -86,6 +86,9 @@ pub struct TimelineState {
     /// Whether Copy/Cut has put anything aside - so a context menu on
     /// empty space knows whether to offer Paste.
     pub clipboard_nonempty: Signal<bool>,
+    /// Audio sources that failed to load (missing or unreadable file) -
+    /// their clips say so instead of waiting forever on a waveform.
+    pub missing_sources: Signal<HashSet<Arc<str>>>,
     /// The lane area's on-screen size in px, reported by `LaneArea`: what
     /// scrolling is clamped against, and what Follow keeps the playhead in.
     viewport: (f64, f64),
@@ -211,6 +214,7 @@ impl TimelineState {
             renaming_marker: Signal::new(None),
             renaming_track: Signal::new(None),
             clipboard_nonempty: Signal::new(false),
+            missing_sources: Signal::new(HashSet::new()),
             viewport: (ASSUMED_LANE_WIDTH, 400.0),
             command_stack: CommandStack::new(),
             record_armed,
@@ -423,6 +427,8 @@ pub enum TimelineEvent {
     SyncPlayhead { ticks: Ticks, playing: bool },
 
     PeaksLoaded { source: Arc<str>, peaks: Arc<PeakPyramid> },
+    /// A source's file couldn't be read (see `peaks_loader`).
+    SourceMissing(Arc<str>),
 
     /// Emitted by Carve whenever every held note comes back up (or a rest
     /// is played via Space): commits `pitches` (possibly empty, for a
@@ -1224,7 +1230,17 @@ impl Model for TimelineState {
                 self.clipboard_nonempty.set(false);
                 self.context_menu.set(None);
             }
+            TimelineEvent::SourceMissing(source) => {
+                self.missing_sources.update(|m| {
+                    m.insert(source.clone());
+                });
+            }
             TimelineEvent::PeaksLoaded { source, peaks } => {
+                if self.missing_sources.get().contains(source) {
+                    self.missing_sources.update(|m| {
+                        m.remove(source);
+                    });
+                }
                 self.with_arrangement(|arr, _| {
                     for clip in &mut arr.clips {
                         if let ClipContent::Audio { source: clip_source, peaks: slot, .. } =

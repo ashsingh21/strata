@@ -133,6 +133,7 @@ pub struct LaneArea {
     recording_preview: Signal<Option<RecordingPreview>>,
     live_peaks: Signal<Arc<[f32]>>,
     tool: Signal<TimelineTool>,
+    missing_sources: Signal<std::collections::HashSet<Arc<str>>>,
     /// Set from `on_mouse_move` whenever the cursor is over a clip's
     /// trim edge (and back to `Default` when it isn't) - purely a visual
     /// hint before any drag starts; the actual edge hit-test at drag time
@@ -154,6 +155,7 @@ impl LaneArea {
         recording_preview: Signal<Option<RecordingPreview>>,
         live_peaks: Signal<Arc<[f32]>>,
         tool: Signal<TimelineTool>,
+        missing_sources: Signal<std::collections::HashSet<Arc<str>>>,
     ) -> Handle<'_, Self> {
         // Deliberately not bound to `playhead`: it changes every frame
         // during playback, and redrawing every clip/waveform/grid line
@@ -179,6 +181,7 @@ impl LaneArea {
             recording_preview,
             live_peaks,
             tool,
+            missing_sources,
             hover_cursor,
             drag: None,
             last_click: None,
@@ -191,6 +194,7 @@ impl LaneArea {
         .bind(theme, |mut h| h.needs_redraw())
         .bind(recording_preview, |mut h| h.needs_redraw())
         .bind(live_peaks, |mut h| h.needs_redraw())
+        .bind(missing_sources, |mut h| h.needs_redraw())
         .cursor(hover_cursor)
     }
 }
@@ -1225,6 +1229,25 @@ impl LaneArea {
                 paint.set_color(tokens::ON_CLIP);
                 paint.set_anti_alias(true);
                 canvas.draw_path(&path.detach(), &paint);
+            }
+            ClipContent::Audio { peaks: None, source, .. } if self.missing_sources.get().contains(source) => {
+                // The file couldn't be read: say so, rather than showing
+                // the loading placeholder forever.
+                let mut paint = vg::Paint::default();
+                paint.set_color(tokens::ON_CLIP);
+                paint.set_anti_alias(true);
+                let font = crate::canvas_text::canvas_font(11.0);
+                let file = source.rsplit('/').next().unwrap_or(source);
+                // Longest message that fits whole: the file name if there's
+                // room, else just the fact (short one-shot clips are narrow).
+                let max = x1 - x0 - 8.0;
+                let full = format!("File missing: {file}");
+                let label = [full.as_str(), "Missing", "!"]
+                    .into_iter()
+                    .find(|l| font.measure_str(l, None).0 <= max);
+                if let Some(label) = label {
+                    canvas.draw_str(label, vg::Point::new(x0 + 4.0, mid + 4.0), &font, &paint);
+                }
             }
             ClipContent::Audio { peaks: None, .. } => {
                 // Not loaded yet: a thin centre line as a placeholder.

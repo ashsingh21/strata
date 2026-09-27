@@ -49,6 +49,7 @@ pub fn timeline_view(
     playhead: Signal<Ticks>,
     recording_preview: Signal<Option<crate::recorder::RecordingPreview>>,
     live_peaks: Signal<std::sync::Arc<[f32]>>,
+    missing_sources: Signal<std::collections::HashSet<std::sync::Arc<str>>>,
     tool: Signal<TimelineTool>,
     selected_track: Signal<Option<shared::arrangement::TrackId>>,
     loop_on: Signal<bool>,
@@ -179,7 +180,7 @@ pub fn timeline_view(
                 // force a full redraw of every clip/waveform/grid line every
                 // frame - see PlayheadOverlay's own doc comment.
                 ZStack::new(cx, move |cx| {
-                    LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview, live_peaks, tool)
+                    LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview, live_peaks, tool, missing_sources)
                         .position_type(PositionType::Absolute)
                         .height(Stretch(1.0))
                         .width(Stretch(1.0));

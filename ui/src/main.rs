@@ -136,6 +136,7 @@ fn main() -> Result<(), ApplicationError> {
         let tl_drums_menu_open = timeline_state.drums_menu_open;
         let tl_context_menu = timeline_state.context_menu;
         let tl_clipboard_nonempty = timeline_state.clipboard_nonempty;
+        let tl_missing_sources = timeline_state.missing_sources;
         let tl_renaming_marker = timeline_state.renaming_marker;
         let tl_renaming_track = timeline_state.renaming_track;
 
@@ -433,6 +434,7 @@ fn main() -> Result<(), ApplicationError> {
                         tl_playhead,
                         recording_preview,
                         live_peaks,
+                        tl_missing_sources,
                         tl_tool,
                         selected_track,
                         loop_on,
