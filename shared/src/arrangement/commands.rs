@@ -100,6 +100,24 @@ pub enum Command {
 impl Command {
     /// Applies this command to `arr` and returns its inverse.
     pub fn apply(self, arr: &mut Arrangement) -> Command {
+        // A note edit to a linked clip is made in every clip it's linked
+        // to. Syncing after the edit (and after its undo, which is itself
+        // one of these commands) keeps the whole group identical.
+        let edited_notes = match &self {
+            Command::AddMidiNote { clip, .. } | Command::RemoveMidiNote { clip, .. } | Command::SetNoteVelocity { clip, .. } => {
+                Some(*clip)
+            }
+            Command::ReplaceClip { clip } => Some(clip.id),
+            _ => None,
+        };
+        let inverse = self.apply_one(arr);
+        if let Some(clip) = edited_notes {
+            arr.sync_links(clip);
+        }
+        inverse
+    }
+
+    fn apply_one(self, arr: &mut Arrangement) -> Command {
         match self {
             Command::Batch(cmds) => {
                 // Applied in the given order (later commands may depend on
@@ -174,6 +192,7 @@ impl Command {
                             .map(|n| MidiNote { start: n.start - left_length, ..n })
                             .collect(),
                         loop_len: None,
+                        link: None,
                     },
                 };
                 let left_notes: Option<Vec<MidiNote>> = matches!(original.content, ClipContent::Midi { .. })
@@ -192,11 +211,13 @@ impl Command {
 
                 let clip = arr.clip_mut(clip_id).unwrap();
                 clip.length = left_length;
-                if let (Some(notes), ClipContent::Midi { notes: dst, loop_len }) =
+                if let (Some(notes), ClipContent::Midi { notes: dst, loop_len, link }) =
                     (left_notes, &mut clip.content)
                 {
                     *dst = notes;
                     *loop_len = None;
+                    // Its notes no longer match the rest of its group.
+                    *link = None;
                 }
                 arr.clips.push(right_clip);
 
@@ -259,6 +280,10 @@ impl Command {
                 copy.id = new_id;
                 copy.start += offset;
                 copy.recording = false;
+                // A plain duplicate is independent (see "Duplicate linked").
+                if let ClipContent::Midi { link, .. } = &mut copy.content {
+                    *link = None;
+                }
                 arr.clips.push(copy);
                 Command::DeleteClip { clip: new_id }
             }
@@ -688,7 +713,7 @@ mod tests {
             start: 0,
             length: PPQ * 16,
             name: "Beat".into(),
-            content: ClipContent::Midi { notes, loop_len: Some(PPQ * 4) },
+            content: ClipContent::Midi { notes, loop_len: Some(PPQ * 4), link: None },
             recording: false,
             gain_db: 0.0,
         });
@@ -741,6 +766,61 @@ mod tests {
         assert!(matches!(after.content, ClipContent::Midi { loop_len: Some(_), .. }));
     }
 
+    /// Clip 1 (the looping beat) and a linked copy, clip 2, four bars later.
+    fn linked_pair(arr: &mut Arrangement) {
+        let id = looping_clip(arr);
+        if let ClipContent::Midi { link, .. } = &mut arr.clip_mut(id).unwrap().content {
+            *link = Some(99);
+        }
+        let mut copy = arr.clip(id).unwrap().clone();
+        copy.id = 2;
+        copy.start = PPQ * 16;
+        arr.clips.push(copy);
+    }
+
+    fn note_count(arr: &Arrangement, clip: ClipId) -> usize {
+        match &arr.clip(clip).unwrap().content {
+            ClipContent::Midi { notes, .. } => notes.len(),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn editing_a_linked_clip_edits_every_copy_and_undo_too() {
+        let mut arr = test_arrangement();
+        linked_pair(&mut arr);
+        let mut stack = CommandStack::new();
+        let snare = MidiNote { start: PPQ, length: PPQ / 4, pitch: 38, velocity: 100 };
+        stack.do_command(Command::AddMidiNote { clip: 2, note: snare }, &mut arr);
+        assert_eq!((note_count(&arr, 1), note_count(&arr, 2)), (5, 5));
+        stack.do_command(Command::SetNoteVelocity { clip: 1, start: PPQ, pitch: 38, velocity: 40 }, &mut arr);
+        let velocity = |c| match &arr.clip(c).unwrap().content {
+            ClipContent::Midi { notes, .. } => notes.iter().find(|n| n.pitch == 38).unwrap().velocity,
+            _ => 0,
+        };
+        assert_eq!((velocity(1), velocity(2)), (40, 40));
+        assert!(stack.undo(&mut arr));
+        assert!(stack.undo(&mut arr));
+        assert_eq!((note_count(&arr, 1), note_count(&arr, 2)), (4, 4));
+        // Positions stay each clip's own.
+        assert_eq!(arr.clip(2).unwrap().start, PPQ * 16);
+    }
+
+    #[test]
+    fn plain_duplicates_and_split_halves_are_independent() {
+        let mut arr = test_arrangement();
+        linked_pair(&mut arr);
+        let mut stack = CommandStack::new();
+        stack.do_command(Command::DuplicateClip { clip: 1, new_id: 3, offset: PPQ * 64 }, &mut arr);
+        stack.do_command(Command::AddMidiNote { clip: 3, note: MidiNote { start: 0, length: 1, pitch: 50, velocity: 1 } }, &mut arr);
+        assert_eq!((note_count(&arr, 1), note_count(&arr, 3)), (4, 5));
+        stack.do_command(Command::SplitClip { clip: 2, at: PPQ * 20, new_id: 4 }, &mut arr);
+        assert!(matches!(arr.clip(2).unwrap().content, ClipContent::Midi { link: None, .. }));
+        stack.do_command(Command::AddMidiNote { clip: 1, note: MidiNote { start: 0, length: 1, pitch: 51, velocity: 1 } }, &mut arr);
+        assert_eq!(note_count(&arr, 2), 4, "split half no longer follows its old group");
+        assert_eq!(arr.link_count(99), 1);
+    }
+
     #[test]
     fn replace_clip_undoes_to_the_old_clip() {
         let mut arr = test_arrangement();
@@ -764,7 +844,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Step".into(),
-            content: ClipContent::Midi { notes: vec![], loop_len: None },
+            content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
         });
@@ -891,7 +971,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Velocity".into(),
-            content: ClipContent::Midi { notes: vec![], loop_len: None },
+            content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
         });

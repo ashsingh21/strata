@@ -81,9 +81,16 @@ pub fn context_menu_view(
         VStack::new(cx, move |cx| match m.target {
             ContextMenuTarget::Clip(clip_id) => {
                 let is_midi = arr.clip(clip_id).map(|c| matches!(c.content, ClipContent::Midi { .. })).unwrap_or(false);
+                let is_linked = arr.clip(clip_id).is_some_and(|c| c.link().is_some());
                 item_with_shortcut(cx, "Cut", "Ctrl+X", |cx| cx.emit(TimelineEvent::Cut));
                 item_with_shortcut(cx, "Copy", "Ctrl+C", |cx| cx.emit(TimelineEvent::Copy));
                 item_with_shortcut(cx, "Duplicate", "Ctrl+D", |cx| cx.emit(TimelineEvent::DuplicateSelected));
+                if is_midi {
+                    item_with_shortcut(cx, "Duplicate linked", "Ctrl+Shift+D", |cx| cx.emit(TimelineEvent::DuplicateLinked));
+                }
+                if is_linked {
+                    item(cx, "Unlink", |cx| cx.emit(TimelineEvent::UnlinkSelected));
+                }
                 if arr.loop_range.is_some() {
                     item(cx, "Repeat to fill loop", |cx| cx.emit(TimelineEvent::RepeatToFillLoop));
                 }

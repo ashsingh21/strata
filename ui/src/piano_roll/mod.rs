@@ -104,13 +104,18 @@ pub fn piano_roll_view(
                 let bars_of = |t: Ticks| (t as f64 / (PPQ * 4) as f64).ceil().max(1.0) as i64;
                 let plural = |n: i64| if n == 1 { "bar" } else { "bars" };
                 let bars = bars_of(clip.length);
-                match &clip.content {
+                let linked = clip
+                    .link()
+                    .map(|l| format!(" \u{b7} linked \u{d7}{}", arr.link_count(l)))
+                    .unwrap_or_default();
+                let base = match &clip.content {
                     ClipContent::Midi { loop_len: Some(len), .. } if *len < clip.length => {
                         let repeats = (clip.length as f64 / *len as f64).ceil() as i64;
                         format!("{track} \u{b7} MIDI \u{b7} {bars} {}, loops \u{d7}{repeats}", plural(bars))
                     }
                     _ => format!("{track} \u{b7} MIDI \u{b7} {bars} {}", plural(bars)),
-                }
+                };
+                format!("{base}{linked}")
             });
             Label::new(cx, meta_text).class("value");
 

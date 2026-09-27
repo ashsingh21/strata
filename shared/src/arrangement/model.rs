@@ -11,6 +11,8 @@ use super::time::{TempoMap, Ticks};
 
 pub type TrackId = u32;
 pub type ClipId = u32;
+/// Groups linked MIDI clips (see `ClipContent::Midi::link`).
+pub type LinkId = u32;
 pub type AutomationLaneId = u32;
 pub type MarkerId = u32;
 
@@ -544,6 +546,11 @@ pub enum ClipContent {
         /// play once. `default` so older projects load.
         #[serde(default)]
         loop_len: Option<Ticks>,
+        /// Clips sharing a link id are copies of one pattern: a note edit
+        /// in any of them (or a change of pattern length) is made in all.
+        /// Each keeps its own position and length. `None`: independent.
+        #[serde(default)]
+        link: Option<LinkId>,
     },
 }
 
@@ -568,6 +575,30 @@ impl Clip {
         self.start + self.length
     }
 
+    /// This clip's link id, if it's a linked MIDI clip.
+    pub fn link(&self) -> Option<LinkId> {
+        match self.content {
+            ClipContent::Midi { link, .. } => link,
+            ClipContent::Audio { .. } => None,
+        }
+    }
+
+    /// The same clip, no longer linked to anything.
+    pub fn unlinked(mut self) -> Clip {
+        if let ClipContent::Midi { link, .. } = &mut self.content {
+            *link = None;
+        }
+        self
+    }
+
+    /// The same clip, in link group `id` (MIDI only).
+    pub fn linked_to(mut self, id: LinkId) -> Clip {
+        if let ClipContent::Midi { link, .. } = &mut self.content {
+            *link = Some(id);
+        }
+        self
+    }
+
     /// A MIDI clip's pattern length: its loop length, or the whole clip.
     pub fn content_len(&self) -> Ticks {
         match &self.content {
@@ -582,13 +613,13 @@ impl Clip {
     /// beat out to 16 bars repeats it. `None` for anything else (audio,
     /// or not getting longer): a plain trim.
     pub fn extended_as_loop(&self, length: Ticks) -> Option<Clip> {
-        let ClipContent::Midi { notes, loop_len } = &self.content else { return None };
+        let ClipContent::Midi { notes, loop_len, link } = &self.content else { return None };
         if length <= self.length {
             return None;
         }
         let mut clip = self.clone();
         clip.length = length;
-        clip.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(loop_len.unwrap_or(self.length)) };
+        clip.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(loop_len.unwrap_or(self.length)), link: *link };
         Some(clip)
     }
 
@@ -596,7 +627,7 @@ impl Clip {
     /// pattern repeated across the clip if it loops, and nothing past the
     /// clip's end (a note running over it is shortened). Empty for audio.
     pub fn played_notes(&self) -> Vec<MidiNote> {
-        let ClipContent::Midi { notes, loop_len } = &self.content else { return Vec::new() };
+        let ClipContent::Midi { notes, loop_len, .. } = &self.content else { return Vec::new() };
         let period = loop_len.map(|l| l.max(1)).unwrap_or(self.length.max(1));
         let mut out = Vec::new();
         let mut offset = 0;
@@ -741,6 +772,27 @@ impl Arrangement {
 
     pub fn clip_mut(&mut self, id: ClipId) -> Option<&mut Clip> {
         self.clips.iter_mut().find(|c| c.id == id)
+    }
+
+    /// Copies `from`'s pattern (notes and loop length) to every other clip
+    /// linked to it. Positions and lengths stay each clip's own.
+    pub fn sync_links(&mut self, from: ClipId) {
+        let Some(ClipContent::Midi { notes, loop_len, link: Some(link) }) = self.clip(from).map(|c| c.content.clone()) else {
+            return;
+        };
+        for clip in self.clips.iter_mut().filter(|c| c.id != from) {
+            if let ClipContent::Midi { notes: n, loop_len: l, link: Some(k) } = &mut clip.content {
+                if *k == link {
+                    *n = notes.clone();
+                    *l = loop_len;
+                }
+            }
+        }
+    }
+
+    /// How many clips share `link`.
+    pub fn link_count(&self, link: LinkId) -> usize {
+        self.clips.iter().filter(|c| matches!(c.content, ClipContent::Midi { link: Some(k), .. } if k == link)).count()
     }
 
     pub fn clips_on_track(&self, track: TrackId) -> impl Iterator<Item = &Clip> {

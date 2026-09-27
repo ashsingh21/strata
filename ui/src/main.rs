@@ -326,6 +326,10 @@ fn main() -> Result<(), ApplicationError> {
                 KeymapEntry::new(5u8, |cx| cx.emit(TimelineEvent::Redo)),
             ),
             (
+                KeyChord::new(Modifiers::CTRL | Modifiers::SHIFT, Code::KeyD),
+                KeymapEntry::new(26u8, |cx| cx.emit(TimelineEvent::DuplicateLinked)),
+            ),
+            (
                 KeyChord::new(Modifiers::CTRL, Code::KeyE),
                 KeymapEntry::new(6u8, |cx| cx.emit(TimelineEvent::SplitAtPlayhead)),
             ),

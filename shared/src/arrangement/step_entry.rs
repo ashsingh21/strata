@@ -40,7 +40,7 @@ pub fn step_entry_commit(
             start: playhead,
             length: step,
             name: "Step".into(),
-            content: ClipContent::Midi { notes: Vec::new(), loop_len: None },
+            content: ClipContent::Midi { notes: Vec::new(), loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
         };

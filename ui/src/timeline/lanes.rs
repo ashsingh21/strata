@@ -1151,8 +1151,24 @@ impl LaneArea {
         let font = crate::canvas_text::canvas_font(11.0);
         // Ellipsized to the clip's own width - short one-shot clips used to
         // spill their names across their neighbours ("Kic Kic Kic Kick").
-        if let Some(label) = crate::canvas_text::fit_text(&clip.name, &font, x1 - x0 - 8.0) {
+        // Linked clips: a small chain-link badge at the header's right,
+        // when there's room - the name gives way to it.
+        let linked = clip.link().is_some() && x1 - x0 >= 24.0;
+        let badge_w = if linked { 16.0 } else { 0.0 };
+        if let Some(label) = crate::canvas_text::fit_text(&clip.name, &font, x1 - x0 - 8.0 - badge_w) {
             canvas.draw_str(&label, vg::Point::new(x0 + 4.0, y0 + 10.0), &font, &text_paint);
+        }
+        if linked {
+            let mut ring = vg::Paint::default();
+            ring.set_color(tokens::ON_CLIP);
+            ring.set_style(vg::PaintStyle::Stroke);
+            ring.set_stroke_width(1.2);
+            ring.set_anti_alias(true);
+            let cy = y0 + 7.0;
+            for cx in [x1 - 13.0, x1 - 8.0] {
+                let rect = vg::RRect::new_rect_xy(vg::Rect::new(cx - 3.5, cy - 2.5, cx + 3.5, cy + 2.5), 2.5, 2.5);
+                canvas.draw_rrect(rect, &ring);
+            }
         }
 
         if y1 > header_bottom {

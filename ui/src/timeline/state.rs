@@ -318,7 +318,8 @@ impl TimelineState {
                         .filter_map(|c| {
                             let track = retarget.unwrap_or(c.track);
                             arr.track(track)?;
-                            let mut clip = c.clone();
+                            // Pasted copies are independent, as in other DAWs.
+                            let mut clip = c.clone().unlinked();
                             clip.id = arr.alloc_id();
                             clip.track = track;
                             clip.start += playhead;
@@ -404,6 +405,11 @@ pub enum TimelineEvent {
     SplitAtPlayhead,
     DeleteSelected,
     DuplicateSelected,
+    /// Duplicates the selected MIDI clips as linked copies: editing the
+    /// notes of any of them edits them all.
+    DuplicateLinked,
+    /// Makes the selected clips independent of their link groups.
+    UnlinkSelected,
     RepeatToFillLoop,
     TapDrumPad(usize),
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -570,7 +576,7 @@ impl Model for TimelineState {
             TimelineEvent::SetPatternBars { clip, bars } => {
                 let arr = self.arrangement.get();
                 let Some(old) = arr.clip(*clip) else { return };
-                let ClipContent::Midi { notes, .. } = &old.content else { return };
+                let ClipContent::Midi { notes, link, .. } = &old.content else { return };
                 let bar = arr.tempo_map.time_signature_at(old.start).ticks_per_bar();
                 let len = (*bars).max(1) * bar;
                 if old.content_len() == len {
@@ -578,7 +584,7 @@ impl Model for TimelineState {
                 }
                 let mut new = old.clone();
                 new.length = new.length.max(len);
-                new.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(len) };
+                new.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(len), link: *link };
                 self.do_command(Command::ReplaceClip { clip: Box::new(new) });
             }
             TimelineEvent::SplitAtPlayhead => {
@@ -658,6 +664,53 @@ impl Model for TimelineState {
                     self.selection.set(Selection { clips: new_selection, ..Default::default() });
                 }
             }
+            TimelineEvent::DuplicateLinked => {
+                let selection = self.selection.get();
+                let mut new_selection = HashSet::new();
+                self.with_arrangement(|arr, stack| {
+                    let mut commands = Vec::new();
+                    for &id in &selection.clips {
+                        let Some(source) = arr.clip(id).cloned() else { continue };
+                        if !matches!(source.content, ClipContent::Midi { .. }) {
+                            continue;
+                        }
+                        // Start a link group if the source isn't in one yet.
+                        let link = match source.link() {
+                            Some(link) => link,
+                            None => {
+                                let link = arr.alloc_id();
+                                commands.push(Command::ReplaceClip { clip: Box::new(source.clone().linked_to(link)) });
+                                link
+                            }
+                        };
+                        let mut copy = source.clone().linked_to(link);
+                        copy.id = arr.alloc_id();
+                        copy.start = source.end();
+                        new_selection.insert(copy.id);
+                        commands.push(Command::InsertClip { clip: Box::new(copy) });
+                    }
+                    if !commands.is_empty() {
+                        stack.do_command(Command::Batch(commands), arr);
+                    }
+                });
+                if !new_selection.is_empty() {
+                    self.selection.set(Selection { clips: new_selection, ..Default::default() });
+                }
+            }
+            TimelineEvent::UnlinkSelected => {
+                let arr = self.arrangement.get();
+                let commands: Vec<Command> = self
+                    .selection
+                    .get()
+                    .clips
+                    .iter()
+                    .filter_map(|&id| arr.clip(id).filter(|c| c.link().is_some()).cloned())
+                    .map(|c| Command::ReplaceClip { clip: Box::new(c.unlinked()) })
+                    .collect();
+                if !commands.is_empty() {
+                    self.do_command(Command::Batch(commands));
+                }
+            }
             TimelineEvent::RepeatToFillLoop => {
                 let selection = self.selection.get();
                 let arr = self.arrangement.get();
@@ -702,7 +755,7 @@ impl Model for TimelineState {
                             // and over - reads as mechanical/looped even
                             // though each hit *within* one repeat still
                             // varies. Each copy gets its own fresh nudge.
-                            let mut new_clip = clip.clone();
+                            let mut new_clip = clip.clone().unlinked();
                             new_clip.id = new_id;
                             new_clip.start = clip.start + pattern_length * i;
                             new_clip.gain_db = random_gain_variation_db();
@@ -776,7 +829,7 @@ impl Model for TimelineState {
                         start: snapped_start,
                         length: snapped_end - snapped_start,
                         name: "Clip".to_string(),
-                        content: ClipContent::Midi { notes: vec![], loop_len: None },
+                        content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
                         recording: false,
                         gain_db: 0.0,
                     };

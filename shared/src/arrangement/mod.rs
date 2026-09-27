@@ -18,7 +18,7 @@ pub use commands::{Command, CommandStack};
 pub use model::{
     DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent,
-    ClipId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
+    ClipId, LinkId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
     Effect, EffectSlot, EffectNode, EffectNodeId, EffectEdge, EffectGraph, CompressorState, EqState,
     EffectParam, ModTarget,
 };
