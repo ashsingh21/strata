@@ -6,7 +6,7 @@ use shared::arrangement::{Clip, ClipContent, Instrument, Ticks, PPQ};
 use shared::drums::{CLAP, KICK, OPEN_HAT};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
-    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD,
+    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED,
 };
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
 
@@ -749,6 +749,218 @@ pub const LESSONS: &[Lesson] = &[
         ],
     },
     Lesson {
+        id: RECIPE_TANPURA,
+        group: RECIPES,
+        title: "Tanpura",
+        steps: &[
+            act(
+                "Press Space. The tanpura plucks its four strings in turn - Pa, Sa, Sa, low Sa - over and over, under the whole performance.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            recipe(
+                "Pluck and ring: Amp Attack under 10 ms, Decay near the top (over 1.5 s), Sustain about 40%, Release over 1.5 s.",
+                "A tanpura string is plucked and then rings for seconds. With long decay and release, each string is still sounding when the next is plucked - so the four blur into one continuous drone instead of four notes.",
+                "Attack is already short. Decay and Release: drag them nearly all the way up.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        p.amp_env.attack_ms < 10.0
+                            && p.amp_env.decay_ms >= 1500.0
+                            && (0.3..=0.6).contains(&p.amp_env.sustain)
+                            && p.amp_env.release_ms >= 1500.0
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.amp_env.attack_ms < 10.0, Target::Knob(SynthParam::AmpAttack)),
+                        (p.amp_env.decay_ms >= 1500.0, Target::Knob(SynthParam::AmpDecay)),
+                        ((0.3..=0.6).contains(&p.amp_env.sustain), Target::Knob(SynthParam::AmpSustain)),
+                        (p.amp_env.release_ms >= 1500.0, Target::Knob(SynthParam::AmpRelease)),
+                    ])
+                },
+            ),
+            recipe(
+                "Deep and round: Cutoff about 700 Hz, Resonance about 40%.",
+                "A tanpura is dark and warm, not bright. The resonance picks out a narrow band of harmonics at the cutoff - the band the next step will set in motion.",
+                "Cutoff 450 Hz to 1.1 kHz; Resonance 30 to 55%.",
+                |s| carve(s).is_some_and(|p| (450.0..=1100.0).contains(&p.filter.cutoff_hz) && (0.3..=0.55).contains(&p.filter.resonance)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((450.0..=1100.0).contains(&p.filter.cutoff_hz), Target::Knob(SynthParam::Cutoff)),
+                        ((0.3..=0.55).contains(&p.filter.resonance), Target::Knob(SynthParam::Resonance)),
+                    ])
+                },
+            ),
+            recipe(
+                "The jawari bloom: Env amount about +2 oct, Filter Attack about 500 ms, Filter Decay over 1.2 s.",
+                "A tanpura's bridge (the jawari) is curved, so the string buzzes against it and its upper harmonics swell a moment after the pluck. A slow filter attack does the same thing: every note starts dark and blooms bright.",
+                "Env amount +1.5 to +3 oct; Filter Attack 300 to 900 ms; Filter Decay over 1.2 s.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        (1.5..=3.0).contains(&p.filter.env_amount_oct)
+                            && (300.0..=900.0).contains(&p.filter_env.attack_ms)
+                            && p.filter_env.decay_ms >= 1200.0
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((1.5..=3.0).contains(&p.filter.env_amount_oct), Target::Knob(SynthParam::EnvAmount)),
+                        ((300.0..=900.0).contains(&p.filter_env.attack_ms), Target::Knob(SynthParam::FilterAttack)),
+                        (p.filter_env.decay_ms >= 1200.0, Target::Knob(SynthParam::FilterDecay)),
+                    ])
+                },
+            ),
+            recipe(
+                "The buzz: Drive past 6 dB.",
+                "That jawari buzz is the string rattling against wood - a gentle distortion. Drive adds the same rasp of extra harmonics.",
+                "Drive is in the Filter section.",
+                |s| carve(s).is_some_and(|p| p.filter.drive_db > 6.0),
+                |_| Some(Target::Knob(SynthParam::Drive)),
+            ),
+            recipe(
+                "The swirl: drag LFO 1 onto Cutoff, then set its Rate under 0.5 Hz and Depth about 30%.",
+                "Listen to a real tanpura and its overtones seem to rotate slowly, even between plucks. A slow LFO sweeping the filter keeps the harmonics moving the same way.",
+                "Press on \u{201c}LFO 1\u{201d}, drop it on Cutoff, then Rate and Depth under LFO 1.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        p.lfo1.target == LfoTarget::Cutoff && lfo_rate_hz(p.lfo1.rate_norm) < 0.5 && (0.15..=0.5).contains(&p.lfo1.depth)
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.lfo1.target == LfoTarget::Cutoff, Target::LfoPill(1)),
+                        (lfo_rate_hz(p.lfo1.rate_norm) < 0.5, Target::Knob(SynthParam::Lfo1Rate)),
+                        ((0.15..=0.5).contains(&p.lfo1.depth), Target::Knob(SynthParam::Lfo1Depth)),
+                    ])
+                },
+            ),
+            recipe(
+                "Strings and a room: Chorus mix about 30%, Reverb mix about 45%, Reverb Size above 80%.",
+                "The four strings are never perfectly in tune with one another; chorus adds that gentle beating. A large reverb gives the drone the resonant space it's usually heard in.",
+                "Chorus 20 to 45%; Reverb 30 to 60%; Size over 80%.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        (0.2..=0.45).contains(&p.fx.chorus_mix) && (0.3..=0.6).contains(&p.fx.reverb_mix) && p.fx.reverb_size > 0.8
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((0.2..=0.45).contains(&p.fx.chorus_mix), Target::Knob(SynthParam::ChorusMix)),
+                        ((0.3..=0.6).contains(&p.fx.reverb_mix), Target::Knob(SynthParam::ReverbMix)),
+                        (p.fx.reverb_size > 0.8, Target::Knob(SynthParam::ReverbSize)),
+                    ])
+                },
+            ),
+            info(
+                "A tanpura: long-ringing plucks that overlap into a drone, a bloom and buzz from the jawari, and a slow \
+                 swirl of overtones. It's tuned to Sa and Pa, so it sits under any raag - try it under the Bhairav rave demo.",
+            ),
+        ],
+    },
+    Lesson {
+        id: RECIPE_REED,
+        group: RECIPES,
+        title: "Reed (shehnai)",
+        steps: &[
+            act(
+                "Press Space: Raag Bhairav's signature phrase, Ga ma dha Pa, Ga ma re Sa - on a plain saw for now.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            recipe(
+                "The reed: Oscillator 1 to the square, and Osc 2 (a saw) up to about -9 dB.",
+                "A reed is a thin tongue snapping open and shut, and that on-off motion makes strong odd harmonics - a square wave's recipe. The saw underneath adds the even ones, for a richer, more complex reed.",
+                "Osc 1 wave: square. Mixer Osc 2: above -12 dB.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Square && p.mix.osc2_db > -12.0),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.osc1.waveform == Waveform::Square, Target::OscWave(1)),
+                        (p.mix.osc2_db > -12.0, Target::Knob(SynthParam::Osc2Level)),
+                    ])
+                },
+            ),
+            recipe(
+                "The nasal honk: filter type BP (band-pass), Cutoff about 1.7 kHz, Resonance about 40%.",
+                "A shehnai's narrow bore amplifies one band of frequencies, around 1-2 kHz, and that band is the honk. A band-pass filter keeps just that band - cutting both the lows and the highs, as if the sound came through a narrow pipe.",
+                "BP on the filter's type switch; Cutoff 1.2 to 2.5 kHz; Resonance 25 to 55%.",
+                |s| {
+                    carve(s).is_some_and(|p| {
+                        p.filter.filter_type == FilterType::Bp
+                            && (1200.0..=2500.0).contains(&p.filter.cutoff_hz)
+                            && (0.25..=0.55).contains(&p.filter.resonance)
+                    })
+                },
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.filter.filter_type == FilterType::Bp, Target::FilterType),
+                        ((1200.0..=2500.0).contains(&p.filter.cutoff_hz), Target::Knob(SynthParam::Cutoff)),
+                        ((0.25..=0.55).contains(&p.filter.resonance), Target::Knob(SynthParam::Resonance)),
+                    ])
+                },
+            ),
+            recipe(
+                "Breath: Noise to about -32 dB.",
+                "Air forced through a reed always hisses a little; a touch of noise under the tone is that breath.",
+                "Between -40 and -24 dB, in the Mixer.",
+                |s| carve(s).is_some_and(|p| (-40.0..=-24.0).contains(&p.mix.noise_db)),
+                |_| Some(Target::Knob(SynthParam::NoiseLevel)),
+            ),
+            recipe(
+                "Let it speak: Amp Attack about 35 ms.",
+                "A reed needs a moment of breath pressure before it starts to vibrate, so notes begin with a soft push rather than a click.",
+                "Between 20 and 80 ms.",
+                |s| carve(s).is_some_and(|p| (20.0..=80.0).contains(&p.amp_env.attack_ms)),
+                |_| Some(Target::Knob(SynthParam::AmpAttack)),
+            ),
+            recipe(
+                "Meend: switch to Mono and set Glide to about 70 ms.",
+                "Shehnai players slide between notes - meend - instead of jumping. Mono with glide does exactly that. Listen to the fall from re to Sa at the end of the phrase: in Bhairav that slide is the signature.",
+                "Mono at the top right of Carve; Glide 40 to 150 ms, under Output.",
+                |s| carve(s).is_some_and(|p| p.voice_mode == VoiceMode::Mono && (40.0..=150.0).contains(&p.output.glide_ms)),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.voice_mode == VoiceMode::Mono, Target::VoiceMode),
+                        ((40.0..=150.0).contains(&p.output.glide_ms), Target::Knob(SynthParam::Glide)),
+                    ])
+                },
+            ),
+            recipe(
+                "Vibrato: LFO 2 (on Pitch) at about 5.5 Hz, Depth about 15%.",
+                "Reed players shape held notes with breath vibrato, a little over five wobbles a second - it's what makes a line sound sung rather than typed.",
+                "Rate 4 to 7 Hz, Depth 10 to 35%, under LFO 2.",
+                |s| carve(s).is_some_and(vibrato),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        ((4.0..=7.0).contains(&lfo_rate_hz(p.lfo2.rate_norm)), Target::Knob(SynthParam::Lfo2Rate)),
+                        ((0.1..=0.35).contains(&p.lfo2.depth), Target::Knob(SynthParam::Lfo2Depth)),
+                    ])
+                },
+            ),
+            recipe(
+                "A hall to play in: Reverb mix about 30%.",
+                "The shehnai is an outdoor, ceremonial instrument that carries far; reverb gives it the space it's meant to fill.",
+                "Between 20 and 45%.",
+                |s| carve(s).is_some_and(|p| (0.2..=0.45).contains(&p.fx.reverb_mix)),
+                |_| Some(Target::Knob(SynthParam::ReverbMix)),
+            ),
+            info(
+                "A reed: square and saw for the vibrating tongue, a band-pass filter for the nasal bore, breath, a soft \
+                 attack, meend and vibrato. Widen the filter (LP 24, higher cutoff) and it becomes a clarinet or a sax.",
+            ),
+        ],
+    },
+    Lesson {
         id: RECIPE_LEAD,
         group: RECIPES,
         title: "Lead melody",
@@ -1219,6 +1431,72 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn recipe_tanpura_can_be_done_step_by_step() {
+        walk(
+            RECIPE_TANPURA,
+            &[
+                &play,
+                &|s| {
+                    s.synth.amp_env.attack_ms = 2.0;
+                    s.synth.amp_env.decay_ms = 1900.0;
+                    s.synth.amp_env.sustain = 0.4;
+                    s.synth.amp_env.release_ms = 1800.0;
+                },
+                &|s| {
+                    s.synth.filter.cutoff_hz = 700.0;
+                    s.synth.filter.resonance = 0.4;
+                },
+                &|s| {
+                    s.synth.filter.env_amount_oct = 2.0;
+                    s.synth.filter_env.attack_ms = 500.0;
+                    s.synth.filter_env.decay_ms = 1500.0;
+                },
+                &|s| s.synth.filter.drive_db = 8.0,
+                &|s| {
+                    s.synth.lfo1.target = LfoTarget::Cutoff;
+                    knob(s, SynthParam::Lfo1Rate, hz_norm(0.3));
+                    s.synth.lfo1.depth = 0.3;
+                },
+                &|s| {
+                    s.synth.fx.chorus_mix = 0.3;
+                    s.synth.fx.reverb_mix = 0.45;
+                    s.synth.fx.reverb_size = 0.85;
+                },
+            ],
+        );
+    }
+
+    #[test]
+    fn recipe_reed_can_be_done_step_by_step() {
+        walk(
+            RECIPE_REED,
+            &[
+                &play,
+                &|s| {
+                    s.synth.osc1.waveform = Waveform::Square;
+                    s.synth.mix.osc2_db = -9.0;
+                },
+                &|s| {
+                    s.synth.filter.filter_type = FilterType::Bp;
+                    s.synth.filter.cutoff_hz = 1700.0;
+                    s.synth.filter.resonance = 0.4;
+                },
+                &|s| s.synth.mix.noise_db = -32.0,
+                &|s| s.synth.amp_env.attack_ms = 35.0,
+                &|s| {
+                    s.synth.voice_mode = VoiceMode::Mono;
+                    s.synth.output.glide_ms = 70.0;
+                },
+                &|s| {
+                    knob(s, SynthParam::Lfo2Rate, hz_norm(5.5));
+                    s.synth.lfo2.depth = 0.15;
+                },
+                &|s| s.synth.fx.reverb_mix = 0.3,
+            ],
+        );
     }
 
     #[test]

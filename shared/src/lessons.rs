@@ -37,6 +37,8 @@ pub const RECIPE_FLUTE: &str = "recipe-flute";
 pub const RECIPE_HARP: &str = "recipe-harp";
 pub const RECIPE_LEAD: &str = "recipe-lead";
 pub const RECIPE_PAD: &str = "recipe-pad";
+pub const RECIPE_TANPURA: &str = "recipe-tanpura";
+pub const RECIPE_REED: &str = "recipe-reed";
 
 /// Carve lessons loop their riff this long, so there's time to turn knobs.
 const CARVE_BARS: i64 = 64;
@@ -106,6 +108,15 @@ fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
                 (8, 62, 1), (9, 60, 1), (10, 57, 6),
                 (16, 57, 3), (20, 60, 2), (22, 62, 2), (24, 65, 7),
             ]),
+            2,
+        ),
+        // The tanpura's cycle: Pa, Sa, Sa, then low Sa - one string per
+        // beat, each left to ring into the next (Sa on C).
+        RECIPE_TANPURA => ("Tanpura cycle", steps(&[(0, 55, 4), (4, 60, 4), (8, 60, 4), (12, 48, 4)]), 1),
+        // Raag Bhairav's pakad with Sa on C5: Ga ma dha Pa, Ga ma re Sa.
+        RECIPE_REED => (
+            "Pakad",
+            steps(&[(0, 76, 3), (4, 77, 3), (8, 80, 6), (14, 79, 2), (16, 76, 3), (20, 77, 3), (24, 73, 5), (29, 72, 3)]),
             2,
         ),
         RECIPE_LEAD => (
@@ -232,7 +243,7 @@ mod tests {
 
     #[test]
     fn carve_lessons_start_on_the_init_patch_with_a_riff() {
-        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD] {
+        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED] {
             let p = starting_project(id);
             let synth = p.arrangement.tracks.last().unwrap();
             assert_eq!(synth.instrument, Some(Instrument::Carve), "{id}");
