@@ -33,24 +33,24 @@ pub enum Command {
     /// `EffectGraph::push_at_end` would otherwise pick - used when the
     /// node's coming from an explicit drop point (dragged from the
     /// palette), not a generic "+Effect" add.
-    AddEffectNode { track: TrackId, effect: Effect, position: Option<(f32, f32)> },
+    AddEffectNode { track: Option<TrackId>, effect: Effect, position: Option<(f32, f32)> },
     /// Removes an effect node, reconnecting its neighbours - inverse
     /// carries the exact removed node and its two edges so undo restores
     /// precisely where it was, not just "a node with this effect".
-    RemoveEffectNode { track: TrackId, node: EffectNodeId },
+    RemoveEffectNode { track: Option<TrackId>, node: EffectNodeId },
     /// The literal inverse of `RemoveEffectNode` - never emitted directly
     /// by UI code, only produced as another command's undo.
-    ReinsertEffectNode { track: TrackId, node: EffectNode, inbound: EffectEdge, outbound: EffectEdge },
-    SetEffectEnabled { track: TrackId, node: EffectNodeId, enabled: bool },
+    ReinsertEffectNode { track: Option<TrackId>, node: EffectNode, inbound: EffectEdge, outbound: EffectEdge },
+    SetEffectEnabled { track: Option<TrackId>, node: EffectNodeId, enabled: bool },
     /// Cosmetic (canvas position only) but still undoable, same as any
     /// other edit here.
-    SetEffectNodePosition { track: TrackId, node: EffectNodeId, position: (f32, f32) },
+    SetEffectNodePosition { track: Option<TrackId>, node: EffectNodeId, position: (f32, f32) },
     /// The board's port-drag rewire: moves `node` to just before
     /// `before` in the chain (see `EffectGraph::move_before`'s own doc
     /// comment for why that's the right primitive while the graph stays
     /// linear). Inverse moves it back to just before its own
     /// pre-rewire successor, which restores the exact prior adjacency.
-    RewireEffect { track: TrackId, node: EffectNodeId, before: EffectNodeId },
+    RewireEffect { track: Option<TrackId>, node: EffectNodeId, before: EffectNodeId },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
@@ -274,43 +274,43 @@ impl Command {
             }
 
             Command::AddEffectNode { track, effect, position } => {
-                let t = arr.track_mut(track).expect("AddEffectNode: unknown track");
-                let node = t.fx.push_at_end(effect);
+                let fx = arr.fx_mut(track).expect("AddEffectNode: unknown track");
+                let node = fx.push_at_end(effect);
                 if let Some(pos) = position {
-                    t.fx.set_position(node, pos);
+                    fx.set_position(node, pos);
                 }
                 Command::RemoveEffectNode { track, node }
             }
 
             Command::RemoveEffectNode { track, node } => {
-                let t = arr.track_mut(track).expect("RemoveEffectNode: unknown track");
-                let (node, inbound, outbound) = t.fx.remove(node).expect("RemoveEffectNode: unknown node");
+                let fx = arr.fx_mut(track).expect("RemoveEffectNode: unknown track");
+                let (node, inbound, outbound) = fx.remove(node).expect("RemoveEffectNode: unknown node");
                 Command::ReinsertEffectNode { track, node, inbound, outbound }
             }
 
             Command::ReinsertEffectNode { track, node, inbound, outbound } => {
-                let t = arr.track_mut(track).expect("ReinsertEffectNode: unknown track");
+                let fx = arr.fx_mut(track).expect("ReinsertEffectNode: unknown track");
                 let id = node.id;
-                t.fx.reinsert(node, inbound, outbound);
+                fx.reinsert(node, inbound, outbound);
                 Command::RemoveEffectNode { track, node: id }
             }
 
             Command::SetEffectEnabled { track, node, enabled } => {
-                let t = arr.track_mut(track).expect("SetEffectEnabled: unknown track");
-                let previous = t.fx.set_enabled(node, enabled);
+                let fx = arr.fx_mut(track).expect("SetEffectEnabled: unknown track");
+                let previous = fx.set_enabled(node, enabled);
                 Command::SetEffectEnabled { track, node, enabled: previous }
             }
 
             Command::SetEffectNodePosition { track, node, position } => {
-                let t = arr.track_mut(track).expect("SetEffectNodePosition: unknown track");
-                let previous = t.fx.set_position(node, position);
+                let fx = arr.fx_mut(track).expect("SetEffectNodePosition: unknown track");
+                let previous = fx.set_position(node, position);
                 Command::SetEffectNodePosition { track, node, position: previous }
             }
 
             Command::RewireEffect { track, node, before } => {
-                let t = arr.track_mut(track).expect("RewireEffect: unknown track");
-                let old_before = t.fx.successor_of(node).expect("RewireEffect: node has no successor");
-                t.fx.move_before(node, before);
+                let fx = arr.fx_mut(track).expect("RewireEffect: unknown track");
+                let old_before = fx.successor_of(node).expect("RewireEffect: node has no successor");
+                fx.move_before(node, before);
                 Command::RewireEffect { track, node, before: old_before }
             }
 

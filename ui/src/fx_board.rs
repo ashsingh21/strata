@@ -28,10 +28,13 @@ const ROW_Y: f32 = 60.0;
 pub struct FxBoardProps {
     pub theme: Signal<ThemeId>,
     pub arrangement: Signal<Arrangement>,
-    pub track: TrackId,
-    /// Cleared (`None`) to close the board - the lower panel falls back
-    /// to the device area.
-    pub board_open_track: Signal<Option<TrackId>>,
+    /// `Some(id)` for a track's board, `None` for the master bus's -
+    /// the same convention `Arrangement::fx`/`fx_mut` use.
+    pub track: Option<TrackId>,
+    /// Cleared to close the board - the lower panel falls back to the
+    /// device area. `Some(None)` is the master board open; `None` is
+    /// no board open at all.
+    pub board_open_track: Signal<Option<Option<TrackId>>>,
 }
 
 /// A node's position, honoring a live drag preview for whichever node
@@ -100,7 +103,7 @@ fn node_size(id: EffectNodeId) -> (f32, f32) {
 /// matching the FxBoard spec.
 struct FxCables {
     arrangement: Signal<Arrangement>,
-    track: TrackId,
+    track: Option<TrackId>,
     theme: Signal<ThemeId>,
     selected: Signal<Option<EffectNodeId>>,
     drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
@@ -111,7 +114,7 @@ impl FxCables {
     fn new(
         cx: &mut Context,
         arrangement: Signal<Arrangement>,
-        track: TrackId,
+        track: Option<TrackId>,
         theme: Signal<ThemeId>,
         selected: Signal<Option<EffectNodeId>>,
         drag_state: Signal<Option<(EffectNodeId, f32, f32)>>,
@@ -132,8 +135,7 @@ impl View for FxCables {
         let bounds = cx.bounds();
         let palette = self.theme.get().palette();
         let arr = self.arrangement.get();
-        let Some(track) = arr.track(self.track) else { return };
-        let graph = &track.fx;
+        let Some(graph) = arr.fx(self.track) else { return };
         let selected = self.selected.get();
         let drag = self.drag_state.get();
 
@@ -256,8 +258,8 @@ fn output_port(cx: &mut Context, p: FxBoardProps, node: EffectNodeId, x: f32, y:
             cx.release();
             wire_drag.set(None);
             let arr = p.arrangement.get();
-            let Some(track) = arr.track(p.track) else { return };
-            if let Some(target) = nearest_input_port(&track.fx, local_x, local_y) {
+            let Some(fx) = arr.fx(p.track) else { return };
+            if let Some(target) = nearest_input_port(fx, local_x, local_y) {
                 if target != node {
                     cx.emit(TimelineEvent::RewireEffect(p.track, node, target));
                 }
@@ -277,12 +279,17 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
     // (source node, live cursor x, live cursor y - both canvas-local)
     // while dragging a wire from that node's output port.
     let wire_drag: Signal<Option<(EffectNodeId, f32, f32)>> = Signal::new(None);
-    let track_name = p.arrangement.map(move |arr| arr.track(p.track).map(|t| t.name.clone()).unwrap_or_default());
-    let track_color = p.arrangement.map(move |arr| arr.track(p.track).map(|t| t.color).unwrap_or(ClipColor::Violet));
+    let track_name = p.arrangement.map(move |arr| match p.track {
+        Some(id) => arr.track(id).map(|t| t.name.clone()).unwrap_or_default(),
+        None => "Master".to_string(),
+    });
+    let track_color = p.arrangement.map(move |arr| {
+        p.track.and_then(|id| arr.track(id)).map(|t| t.color).unwrap_or(ClipColor::Violet)
+    });
     let all_bypassed = p.arrangement.map(move |arr| {
-        arr.track(p.track)
-            .map(|t| {
-                let nodes = t.fx.ordered();
+        arr.fx(p.track)
+            .map(|fx| {
+                let nodes = fx.ordered();
                 !nodes.is_empty() && nodes.iter().all(|n| !n.enabled)
             })
             .unwrap_or(false)
@@ -295,7 +302,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                 .class("swatch")
                 .background_color(track_color.map(|c| crate::timeline::header::clip_color_to_rgb(*c)));
             Label::new(cx, track_name).class("title");
-            Label::new(cx, "Effects").class("meta");
+            Label::new(cx, if p.track.is_some() { "Effects" } else { "Main out" }).class("meta");
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
             Button::new(cx, |cx| Label::new(cx, "Bypass all")).class("btn").class("sm").on_press(move |cx| {
                 cx.emit(TimelineEvent::SetChainBypassed(p.track, !all_bypassed.get()));
@@ -356,13 +363,22 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
 
                 Binding::new(cx, p.arrangement, move |cx| {
                     let arr = p.arrangement.get();
-                    let Some(track) = arr.track(p.track) else { return };
-                    let graph = &track.fx;
+                    let Some(graph) = arr.fx(p.track) else { return };
+                    let source_meta = match p.track {
+                        Some(id) => arr.track(id).and_then(|t| t.instrument).map(|i| i.name()).unwrap_or("\u{2014}"),
+                        None => "Mix",
+                    };
 
                     for id in [EffectGraph::SOURCE, EffectGraph::OUTPUT] {
                         let (x, y) = io_position(graph, id, None);
                         let label = if id == EffectGraph::SOURCE { "Source" } else { "Out" };
-                        let meta = if id == EffectGraph::SOURCE { track.instrument.map(|i| i.name()).unwrap_or("\u{2014}") } else { "to mixer" };
+                        let meta = if id == EffectGraph::SOURCE {
+                            source_meta
+                        } else if p.track.is_some() {
+                            "to mixer"
+                        } else {
+                            "Main out"
+                        };
                         VStack::new(cx, move |cx| {
                             Label::new(cx, label).class("meta");
                             Label::new(cx, meta).class("meta");
@@ -529,13 +545,14 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                         return;
                     };
                     let arr = p.arrangement.get();
-                    let Some(track) = arr.track(p.track) else { return };
-                    let Some(node) = track.fx.node(node_id) else { return };
+                    let Some(fx) = arr.fx(p.track) else { return };
+                    let Some(node) = fx.node(node_id) else { return };
+                    let color = p.track.and_then(|id| arr.track(id)).map(|t| t.color).unwrap_or(ClipColor::Violet);
                     match node.effect {
                         Effect::Compressor(_) => {
-                            crate::compressor_panel::compressor_panel(cx, p.theme, p.arrangement, p.track, track.color)
+                            crate::compressor_panel::compressor_panel(cx, p.theme, p.arrangement, p.track, color)
                         }
-                        Effect::Eq(_) => crate::eq_panel::eq_panel(cx, p.theme, p.arrangement, p.track, track.color),
+                        Effect::Eq(_) => crate::eq_panel::eq_panel(cx, p.theme, p.arrangement, p.track, color),
                     }
                 });
             })

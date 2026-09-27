@@ -121,8 +121,10 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                 let color = arr.track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Violet);
                 let kind = arr.track(track).and_then(|t| t.fx.node(node)).map(|n| n.effect);
                 match kind {
-                    Some(Effect::Compressor(_)) => compressor_panel::compressor_panel(cx, p.theme, p.arrangement, track, color),
-                    Some(Effect::Eq(_)) => crate::eq_panel::eq_panel(cx, p.theme, p.arrangement, track, color),
+                    Some(Effect::Compressor(_)) => {
+                        compressor_panel::compressor_panel(cx, p.theme, p.arrangement, Some(track), color)
+                    }
+                    Some(Effect::Eq(_)) => crate::eq_panel::eq_panel(cx, p.theme, p.arrangement, Some(track), color),
                     None => {}
                 }
             }

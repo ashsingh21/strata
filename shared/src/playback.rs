@@ -62,9 +62,24 @@ pub struct PlaybackClip {
 /// capacity array would avoid it, but isn't worth the complexity at this
 /// project's scale; this is a deliberate, bounded exception to the audio
 /// callback's usual no-alloc rule, not an oversight.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct PlaybackPlan {
     pub clips: Vec<PlaybackClip>,
+    /// The master bus's own effect chain - applied once, after every
+    /// track's own chain and fader have summed into the final mix,
+    /// before the output meter. Same fixed-array shape as a track's.
+    pub master_effect_count: u8,
+    pub master_effects: [EffectUnitState; MAX_EFFECTS_PER_CHAIN],
+}
+
+impl Default for PlaybackPlan {
+    fn default() -> Self {
+        Self {
+            clips: Vec::new(),
+            master_effect_count: 0,
+            master_effects: [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN],
+        }
+    }
 }
 
 /// Converts a track's `EffectGraph` (ordered, source-to-output) into the
@@ -74,10 +89,10 @@ pub struct PlaybackPlan {
 /// toggling it on/off later doesn't shift every other slot's index -
 /// same "always run the same unit, never branch on enabled at the DSP
 /// level" reasoning the old always-concrete `CompressorState` had.
-pub fn build_effect_units(track: &crate::arrangement::Track) -> (u8, [EffectUnitState; MAX_EFFECTS_PER_CHAIN]) {
+pub fn build_effect_units(fx: &crate::arrangement::EffectGraph) -> (u8, [EffectUnitState; MAX_EFFECTS_PER_CHAIN]) {
     let mut effects = [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN];
     let mut count = 0usize;
-    for node in track.fx.ordered() {
+    for node in fx.ordered() {
         if count >= MAX_EFFECTS_PER_CHAIN {
             break;
         }
@@ -118,7 +133,7 @@ impl PlaybackPlan {
                     .position(|t| t.id == clip.track)
                     .unwrap_or(0)
                     .min(MAX_BUS_TRACKS - 1) as u8;
-                let (effect_count, effects) = build_effect_units(track);
+                let (effect_count, effects) = build_effect_units(&track.fx);
                 Some(PlaybackClip {
                     track: clip.track,
                     source: source.clone(),
@@ -133,7 +148,8 @@ impl PlaybackPlan {
                 })
             })
             .collect();
-        Self { clips }
+        let (master_effect_count, master_effects) = build_effect_units(&arrangement.master_effects);
+        Self { clips, master_effect_count, master_effects }
     }
 }
 

@@ -147,7 +147,7 @@ pub fn track_header<'a>(
     selected_track: Signal<Option<TrackId>>,
     renaming_track: Signal<Option<TrackId>>,
     track_id: TrackId,
-    board_open_track: Signal<Option<TrackId>>,
+    board_open_track: Signal<Option<Option<TrackId>>>,
 ) -> Handle<'a, impl View> {
     let name = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.name.clone()).unwrap_or_default()
@@ -169,7 +169,7 @@ pub fn track_header<'a>(
     });
     let has_effects = effect_nodes.map(|nodes| !nodes.is_empty());
     let all_bypassed = effect_nodes.map(|nodes| !nodes.is_empty() && nodes.iter().all(|n| !n.enabled));
-    let board_open = Memo::new(move |_| board_open_track.get() == Some(track_id));
+    let board_open = Memo::new(move |_| board_open_track.get() == Some(Some(track_id)));
     // The fader's own drag position is committed to the arrangement only
     // on release (see the `Fader::on_release` wiring below - committing on
     // every intermediate move would rebuild this whole header list mid-
@@ -266,12 +266,12 @@ pub fn track_header<'a>(
                 .toggle_class("is-on", board_open)
                 .on_press(move |cx| {
                     if cx.modifiers().alt() {
-                        cx.emit(TimelineEvent::SetChainBypassed(track_id, !all_bypassed.get()));
+                        cx.emit(TimelineEvent::SetChainBypassed(Some(track_id), !all_bypassed.get()));
                     } else if board_open.get() {
                         board_open_track.set(None);
                     } else {
                         cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
-                        board_open_track.set(Some(track_id));
+                        board_open_track.set(Some(Some(track_id)));
                     }
                 });
 

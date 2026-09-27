@@ -441,26 +441,29 @@ pub enum TimelineEvent {
     /// Replaces the track's Compressor's whole config - not undoable
     /// (like `SetTrackHeight`/gain, a knob-drag preference, not an edit
     /// worth a history entry), and a no-op if the track has none.
-    SetCompressorState(TrackId, CompressorState),
+    SetCompressorState(Option<TrackId>, CompressorState),
     /// Same shape as the Compressor trio above, for the EQ.
     AddEqEffect(TrackId),
     RemoveEqEffect(TrackId),
-    SetEqState(TrackId, EqState),
+    SetEqState(Option<TrackId>, EqState),
     /// Flips one effect slot's own enabled bit (the `TrackHeaderFx` pip).
-    ToggleEffectEnabled(TrackId, EffectNodeId),
-    /// Bypasses (`true`) or restores (`false`) every effect on the
-    /// track at once - the header's Alt-click "bypass all".
-    SetChainBypassed(TrackId, bool),
+    /// `None` targets the master bus's own chain (the pinned row's pips).
+    ToggleEffectEnabled(Option<TrackId>, EffectNodeId),
+    /// Bypasses (`true`) or restores (`false`) every effect at once -
+    /// the header's Alt-click "bypass all". `None` is master.
+    SetChainBypassed(Option<TrackId>, bool),
     /// Removes a specific effect node by id - the FxBoard's own delete
     /// (unlike `RemoveCompressorEffect`/`RemoveEqEffect`, which look a
     /// node up by *type*, the board always knows exactly which node).
-    RemoveEffectNodeFromBoard(TrackId, EffectNodeId),
+    /// `None` is master.
+    RemoveEffectNodeFromBoard(Option<TrackId>, EffectNodeId),
     /// Appends a new effect node of the given kind - the FxBoard's own
     /// add (from the palette or the empty-canvas search popover).
-    AddEffectNodeToBoard(TrackId, Effect, Option<(f32, f32)>),
-    SetEffectNodePosition(TrackId, EffectNodeId, (f32, f32)),
-    /// The board's port-drag rewire: node, before.
-    RewireEffect(TrackId, EffectNodeId, EffectNodeId),
+    /// `None` is master.
+    AddEffectNodeToBoard(Option<TrackId>, Effect, Option<(f32, f32)>),
+    SetEffectNodePosition(Option<TrackId>, EffectNodeId, (f32, f32)),
+    /// The board's port-drag rewire: node, before. `None` is master.
+    RewireEffect(Option<TrackId>, EffectNodeId, EffectNodeId),
     /// Drag on a track header's resize handle: absolute new height in px
     /// (clamped by the handler), not undoable - a view preference, like
     /// mute or gain.
@@ -831,7 +834,7 @@ impl Model for TimelineState {
                 if let Some(t) = arr.track(*track) {
                     if !t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Compressor(_))) {
                         self.do_command(Command::AddEffectNode {
-                            track: *track,
+                            track: Some(*track),
                             effect: Effect::Compressor(CompressorState::default()),
                             position: None,
                         });
@@ -842,14 +845,14 @@ impl Model for TimelineState {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
                     if let Some(node) = t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))) {
-                        self.do_command(Command::RemoveEffectNode { track: *track, node: node.id });
+                        self.do_command(Command::RemoveEffectNode { track: Some(*track), node: node.id });
                     }
                 }
             }
             TimelineEvent::SetCompressorState(track, state) => {
                 self.with_arrangement(|arr, _| {
-                    if let Some(t) = arr.track_mut(*track) {
-                        if let Some(node) = t.fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Compressor(_))) {
+                    if let Some(fx) = arr.fx_mut(*track) {
+                        if let Some(node) = fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Compressor(_))) {
                             node.effect = Effect::Compressor(*state);
                         }
                     }
@@ -860,7 +863,7 @@ impl Model for TimelineState {
                 if let Some(t) = arr.track(*track) {
                     if !t.fx.ordered().iter().any(|n| matches!(n.effect, Effect::Eq(_))) {
                         self.do_command(Command::AddEffectNode {
-                            track: *track,
+                            track: Some(*track),
                             effect: Effect::Eq(EqState::default()),
                             position: None,
                         });
@@ -871,14 +874,14 @@ impl Model for TimelineState {
                 let arr = self.arrangement.get();
                 if let Some(t) = arr.track(*track) {
                     if let Some(node) = t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Eq(_))) {
-                        self.do_command(Command::RemoveEffectNode { track: *track, node: node.id });
+                        self.do_command(Command::RemoveEffectNode { track: Some(*track), node: node.id });
                     }
                 }
             }
             TimelineEvent::SetEqState(track, state) => {
                 self.with_arrangement(|arr, _| {
-                    if let Some(t) = arr.track_mut(*track) {
-                        if let Some(node) = t.fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Eq(_))) {
+                    if let Some(fx) = arr.fx_mut(*track) {
+                        if let Some(node) = fx.nodes.iter_mut().find(|n| matches!(n.effect, Effect::Eq(_))) {
                             node.effect = Effect::Eq(*state);
                         }
                     }
@@ -886,17 +889,16 @@ impl Model for TimelineState {
             }
             TimelineEvent::ToggleEffectEnabled(track, node) => {
                 let arr = self.arrangement.get();
-                if let Some(t) = arr.track(*track) {
-                    if let Some(n) = t.fx.node(*node) {
+                if let Some(fx) = arr.fx(*track) {
+                    if let Some(n) = fx.node(*node) {
                         self.do_command(Command::SetEffectEnabled { track: *track, node: *node, enabled: !n.enabled });
                     }
                 }
             }
             TimelineEvent::SetChainBypassed(track, bypassed) => {
                 let arr = self.arrangement.get();
-                if let Some(t) = arr.track(*track) {
-                    let commands = t
-                        .fx
+                if let Some(fx) = arr.fx(*track) {
+                    let commands = fx
                         .ordered()
                         .iter()
                         .map(|n| Command::SetEffectEnabled { track: *track, node: n.id, enabled: !bypassed })

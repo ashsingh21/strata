@@ -54,7 +54,7 @@ pub fn timeline_view(
     loop_on: Signal<bool>,
     renaming_marker: Signal<Option<shared::arrangement::MarkerId>>,
     renaming_track: Signal<Option<shared::arrangement::TrackId>>,
-    board_open_track: Signal<Option<shared::arrangement::TrackId>>,
+    board_open_track: Signal<Option<Option<shared::arrangement::TrackId>>>,
 ) {
     HStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
@@ -142,6 +142,36 @@ pub fn timeline_view(
             .overflow(Overflow::Hidden)
             .width(Pixels(HEAD_WIDTH))
             .height(Stretch(1.0));
+
+            // The master row, pinned under the track list (outside the
+            // scroll viewport above, so it's always visible) - same
+            // "board open" mechanism as a track's own FX pip, scoped to
+            // the master bus (`board_open_track`'s outer `None` means
+            // closed, `Some(None)` means master's board is open).
+            HStack::new(cx, move |cx| {
+                Label::new(cx, "Master").class("title");
+                Label::new(cx, "Main out").class("meta");
+                Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+                let master_open = Memo::new(move |_| board_open_track.get() == Some(None));
+                Button::new(cx, |cx| Label::new(cx, "FX"))
+                    .class("btn")
+                    .class("sm")
+                    .toggle_class("is-on", master_open)
+                    .on_press(move |cx| {
+                        if master_open.get() {
+                            board_open_track.set(None);
+                        } else {
+                            board_open_track.set(Some(None));
+                        }
+                        let _ = cx;
+                    });
+            })
+            .class("transport")
+            .gap(Pixels(tokens::SPACE_2))
+            .padding(Pixels(tokens::SPACE_2))
+            .alignment(Alignment::Left)
+            .width(Pixels(HEAD_WIDTH))
+            .height(Pixels(tokens::SIZE_TOOLBAR));
         })
         .width(Pixels(HEAD_WIDTH))
         .height(Stretch(1.0));

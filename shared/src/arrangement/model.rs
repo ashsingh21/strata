@@ -499,6 +499,12 @@ pub struct Arrangement {
     pub automation: Vec<AutomationLane>,
     pub loop_range: Option<LoopRange>,
     pub markers: Vec<Marker>,
+    /// The master bus's own effect chain - runs after every track's own
+    /// chain and fader, on the final mixed signal, before the main
+    /// output meter. `default` so projects saved before master effects
+    /// existed still load.
+    #[serde(default)]
+    pub master_effects: EffectGraph,
     next_id: u32,
 }
 
@@ -511,7 +517,26 @@ impl Arrangement {
             automation: Vec::new(),
             loop_range: None,
             markers: Vec::new(),
+            master_effects: EffectGraph::new(),
             next_id: 1,
+        }
+    }
+
+    /// The effect chain a board or command targets - `Some(id)` for a
+    /// track, `None` for the master bus. A thin indirection so the same
+    /// `Command`/`TimelineEvent` shapes work for both without a second,
+    /// duplicated set of "Master*" variants.
+    pub fn fx(&self, track: Option<TrackId>) -> Option<&EffectGraph> {
+        match track {
+            Some(id) => self.track(id).map(|t| &t.fx),
+            None => Some(&self.master_effects),
+        }
+    }
+
+    pub fn fx_mut(&mut self, track: Option<TrackId>) -> Option<&mut EffectGraph> {
+        match track {
+            Some(id) => self.track_mut(id).map(|t| &mut t.fx),
+            None => Some(&mut self.master_effects),
         }
     }
 
@@ -688,5 +713,37 @@ mod effect_graph_tests {
         assert_eq!(ordered.len(), 2);
         assert!(ordered[0].enabled);
         assert!(!ordered[1].enabled);
+    }
+
+    #[test]
+    fn arrangement_fx_targets_track_or_master_by_none() {
+        let mut arr = Arrangement::new(crate::arrangement::TempoMap::constant(
+            120.0,
+            crate::arrangement::TimeSignature::FOUR_FOUR,
+        ));
+        let track_id = arr.alloc_id();
+        arr.tracks.push(Track {
+            id: track_id,
+            name: "Track".into(),
+            color: ClipColor::Amber,
+            kind: TrackKind::Audio,
+            mute: false,
+            solo: false,
+            arm: false,
+            gain_db: 0.0,
+            height: 56.0,
+            instrument: None,
+            fx: EffectGraph::new(),
+            effect_slots: vec![],
+            effects: vec![],
+        });
+
+        arr.fx_mut(Some(track_id)).unwrap().push_at_end(compressor());
+        arr.fx_mut(None).unwrap().push_at_end(compressor());
+
+        assert_eq!(arr.fx(Some(track_id)).unwrap().ordered().len(), 1);
+        assert_eq!(arr.fx(None).unwrap().ordered().len(), 1);
+        assert_eq!(arr.master_effects.ordered().len(), 1, "None should target the real master_effects field");
+        assert!(arr.fx(Some(track_id + 100)).is_none(), "an unknown track id should be None, not master");
     }
 }

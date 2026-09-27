@@ -427,7 +427,7 @@ impl Model for SynthModel {
                         let owning_track = track.and_then(|t| arr.track(t));
                         snapshot.gain_db = owning_track.map(|t| t.gain_db).unwrap_or(0.0);
                         if let Some(t) = owning_track {
-                            let (count, effects) = shared::playback::build_effect_units(t);
+                            let (count, effects) = shared::playback::build_effect_units(&t.fx);
                             snapshot.effect_count = count;
                             snapshot.effects = effects;
                         }

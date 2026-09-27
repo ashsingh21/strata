@@ -45,15 +45,15 @@ pub fn compressor_panel(
     cx: &mut Context,
     theme: Signal<ThemeId>,
     arrangement: Signal<Arrangement>,
-    track_id: TrackId,
+    track: Option<TrackId>,
     track_color: ClipColor,
 ) {
     TRACK_COLOR.set(track_color);
 
     let state = arrangement.map(move |arr| {
-        arr.track(track_id)
-            .and_then(|t| {
-                t.fx.ordered().iter().find_map(|n| match n.effect {
+        arr.fx(track)
+            .and_then(|fx| {
+                fx.ordered().iter().find_map(|n| match n.effect {
                     Effect::Compressor(c) => Some(c),
                     _ => None,
                 })
@@ -61,11 +61,11 @@ pub fn compressor_panel(
             .unwrap_or_default()
     });
     let node_id = arrangement.map(move |arr| {
-        arr.track(track_id).and_then(|t| t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))).map(|n| n.id))
+        arr.fx(track).and_then(|fx| fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))).map(|n| n.id))
     });
     let enabled = arrangement.map(move |arr| {
-        arr.track(track_id)
-            .and_then(|t| t.fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))).map(|n| n.enabled))
+        arr.fx(track)
+            .and_then(|fx| fx.ordered().iter().find(|n| matches!(n.effect, Effect::Compressor(_))).map(|n| n.enabled))
             .unwrap_or(true)
     });
 
@@ -75,28 +75,28 @@ pub fn compressor_panel(
         .toggle_class("is-on", enabled)
         .on_press(move |cx| {
             if let Some(id) = node_id.get() {
-                cx.emit(TimelineEvent::ToggleEffectEnabled(track_id, id));
+                cx.emit(TimelineEvent::ToggleEffectEnabled(track, id));
             }
         });
 
     HStack::new(cx, move |cx| {
-        knob_col(cx, theme, state, track_id, "Threshold", lin(-60.0, 0.0, -18.0), |s| lin(-60.0, 0.0, s.threshold_db), |s, p| {
+        knob_col(cx, theme, state, track, "Threshold", lin(-60.0, 0.0, -18.0), |s| lin(-60.0, 0.0, s.threshold_db), |s, p| {
             s.threshold_db = inv_lin(-60.0, 0.0, p);
         }, |s| format!("{:+.1} dB", s.threshold_db));
 
-        knob_col(cx, theme, state, track_id, "Ratio", lin(1.0, 20.0, 4.0), |s| lin(1.0, 20.0, s.ratio), |s, p| {
+        knob_col(cx, theme, state, track, "Ratio", lin(1.0, 20.0, 4.0), |s| lin(1.0, 20.0, s.ratio), |s, p| {
             s.ratio = inv_lin(1.0, 20.0, p);
         }, |s| format!("{:.1}:1", s.ratio));
 
-        knob_col(cx, theme, state, track_id, "Attack", lin(0.1, 100.0, 10.0), |s| lin(0.1, 100.0, s.attack_ms), |s, p| {
+        knob_col(cx, theme, state, track, "Attack", lin(0.1, 100.0, 10.0), |s| lin(0.1, 100.0, s.attack_ms), |s, p| {
             s.attack_ms = inv_lin(0.1, 100.0, p);
         }, |s| format!("{:.1} ms", s.attack_ms));
 
-        knob_col(cx, theme, state, track_id, "Release", lin(10.0, 1000.0, 150.0), |s| lin(10.0, 1000.0, s.release_ms), |s, p| {
+        knob_col(cx, theme, state, track, "Release", lin(10.0, 1000.0, 150.0), |s| lin(10.0, 1000.0, s.release_ms), |s, p| {
             s.release_ms = inv_lin(10.0, 1000.0, p);
         }, |s| format!("{:.0} ms", s.release_ms));
 
-        knob_col(cx, theme, state, track_id, "Makeup", lin(0.0, 24.0, 0.0), |s| lin(0.0, 24.0, s.makeup_db), |s, p| {
+        knob_col(cx, theme, state, track, "Makeup", lin(0.0, 24.0, 0.0), |s| lin(0.0, 24.0, s.makeup_db), |s, p| {
             s.makeup_db = inv_lin(0.0, 24.0, p);
         }, |s| format!("{:+.1} dB", s.makeup_db));
     })
@@ -113,7 +113,7 @@ fn knob_col(
     cx: &mut Context,
     theme: Signal<ThemeId>,
     state: Memo<CompressorState>,
-    track_id: TrackId,
+    track: Option<TrackId>,
     label: &'static str,
     default_pos: f32,
     to_pos: impl Fn(CompressorState) -> f32 + Copy + 'static,
@@ -126,7 +126,7 @@ fn knob_col(
         Knob::plain(cx, pos, default_pos, theme, move |cx, p| {
             let mut updated = state.get();
             apply(&mut updated, p);
-            cx.emit(TimelineEvent::SetCompressorState(track_id, updated));
+            cx.emit(TimelineEvent::SetCompressorState(track, updated));
         })
         .accent(compressor_accent)
         .size(Pixels(tokens::SIZE_KNOB));

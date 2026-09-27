@@ -108,7 +108,9 @@ fn main() -> Result<(), ApplicationError> {
         let viewing_effect: Signal<Option<shared::arrangement::EffectNodeId>> = Signal::new(None);
         // Which track's Effects Board is open in the lower panel, if any
         // - takes over from `device_area` there while set.
-        let board_open_track: Signal<Option<shared::arrangement::TrackId>> = Signal::new(None);
+        // `Some(None)` is the master board open, `Some(Some(id))` is
+        // track `id`'s, `None` is no board open at all.
+        let board_open_track: Signal<Option<Option<shared::arrangement::TrackId>>> = Signal::new(None);
         let mut timeline_state =
             TimelineState::new(record_armed, playing, piano_roll_open_clip, piano_roll_selected, selected_track);
         let tl_arrangement = timeline_state.arrangement;

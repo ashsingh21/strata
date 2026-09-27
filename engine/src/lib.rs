@@ -252,6 +252,9 @@ where
     // per Carve slot - audio clips have no engine "slot" of their own
     // otherwise.
     let mut bus_effects: Vec<EffectChain> = (0..MAX_BUS_TRACKS).map(|_| EffectChain::new(sample_rate)).collect();
+    // The master bus's own chain - one instance, applied once to the
+    // final mix, after every track's own chain/fader, before metering.
+    let mut master_effects = EffectChain::new(sample_rate);
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -294,6 +297,7 @@ where
                             chain.set_state(clip.effect_count, &clip.effects);
                         }
                     }
+                    master_effects.set_state(current_plan.master_effect_count, &current_plan.master_effects);
                 }
                 // Ordered: each newly decoded source matters.
                 while let Ok(decoded) = decoded_sources.pop() {
@@ -315,6 +319,7 @@ where
                     &slot_gain,
                     &mut slot_effects,
                     &mut bus_effects,
+                    &mut master_effects,
                     &mut synth_telemetry,
                     &mut click_phase,
                     &mut click_env,
@@ -343,6 +348,7 @@ fn write_block<T>(
     slot_gain: &[f32],
     slot_effects: &mut [EffectChain],
     bus_effects: &mut [EffectChain],
+    master_effects: &mut EffectChain,
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
     click_phase: &mut f32,
     click_env: &mut f32,
@@ -412,8 +418,7 @@ fn write_block<T>(
         } else {
             (0.0, 0.0)
         };
-        let out_l = synth_l + click + clip_l;
-        let out_r = synth_r + click + clip_r;
+        let (out_l, out_r) = master_effects.process(synth_l + click + clip_l, synth_r + click + clip_r);
 
         peak_l = peak_l.max(out_l.abs());
         peak_r = peak_r.max(out_r.abs());
