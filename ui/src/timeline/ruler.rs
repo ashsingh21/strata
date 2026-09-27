@@ -3,6 +3,7 @@
 //! only the visible tick range.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::{snap, Arrangement, LoopRange, Ticks, ViewTransform};
@@ -95,8 +96,8 @@ impl View for Ruler {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|window_event, _| match window_event {
             WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
-                let bounds = cx.bounds();
-                let x = cx.mouse().cursor_x as f64 - bounds.x as f64;
+                let bounds = cx.lbounds();
+                let x = cx.lmouse().0 as f64 - bounds.x as f64;
                 let transform = self.transform.get();
                 let tick = transform.x_to_tick(x);
 
@@ -128,8 +129,8 @@ impl View for Ruler {
             }
 
             WindowEvent::MouseDown(button) if *button == MouseButton::Right => {
-                let bounds = cx.bounds();
-                let x = cx.mouse().cursor_x as f64 - bounds.x as f64;
+                let bounds = cx.lbounds();
+                let x = cx.lmouse().0 as f64 - bounds.x as f64;
                 let transform = self.transform.get();
                 let arr = self.arrangement.get();
 
@@ -145,20 +146,20 @@ impl View for Ruler {
                 };
                 cx.emit(TimelineEvent::OpenContextMenu(ContextMenu {
                     target,
-                    x: cx.mouse().cursor_x,
-                    y: cx.mouse().cursor_y,
+                    x: cx.lmouse().0,
+                    y: cx.lmouse().1,
                 }));
             }
 
             WindowEvent::MouseMove(x, _) => {
                 if self.drag.is_none() {
-                    let local_x = *x as f64 - cx.bounds().x as f64;
+                    let local_x = crate::hidpi::l(cx, *x) as f64 - cx.lbounds().x as f64;
                     let icon = self.cursor_at(local_x);
                     self.set_cursor(cx, icon);
                 }
                 if let Some(drag) = self.drag {
-                    let bounds = cx.bounds();
-                    let local_x = *x as f64 - bounds.x as f64;
+                    let bounds = cx.lbounds();
+                    let local_x = crate::hidpi::l(cx, *x) as f64 - bounds.x as f64;
                     let transform = self.transform.get();
                     let bypass = cx.modifiers().alt();
                     let tick = snap(transform.x_to_tick(local_x), shared::arrangement::SnapGrid::Sixteenth, bypass);
@@ -226,7 +227,7 @@ impl View for Ruler {
                 self.drag = None;
                 self.loop_preview = None;
                 cx.release();
-                let local_x = cx.mouse().cursor_x as f64 - cx.bounds().x as f64;
+                let local_x = cx.lmouse().0 as f64 - cx.lbounds().x as f64;
                 let icon = self.cursor_at(local_x);
                 self.set_cursor(cx, icon);
             }
@@ -239,7 +240,8 @@ impl View for Ruler {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let arr = self.arrangement.get();
         let transform = self.transform.get();

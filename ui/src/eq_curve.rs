@@ -5,6 +5,7 @@
 //! uses for Carve's own envelope/filter displays).
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::EqState;
@@ -58,7 +59,8 @@ impl EqCurve {
 
 impl View for EqCurve {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let state = self.state.get();
         let sample_rate = 48_000.0;

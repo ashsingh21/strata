@@ -5,6 +5,7 @@
 //! heavier/brighter, matching the FxBoard spec.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::{Arrangement, EffectGraph, EffectNodeId, TrackId};
@@ -43,7 +44,8 @@ impl FxCables {
 
 impl View for FxCables {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
 
         // A dot grid at the same 16px spacing nodes snap to on drag-release

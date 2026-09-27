@@ -5,6 +5,7 @@
 //! size). Out-of-scale semitones get a thin tick instead of a pad.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::synth::SynthState;
@@ -64,8 +65,8 @@ impl View for Spacing {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|window_event, _| {
             if let WindowEvent::MouseDown(MouseButton::Left) = window_event {
-                let bounds = cx.bounds();
-                let lx = cx.mouse().cursor_x;
+                let bounds = cx.lbounds();
+                let lx = cx.lmouse().0;
                 let key = self.key.get();
                 for offset in self.scale_offsets() {
                     let x = self.pad_x(bounds, offset);
@@ -80,7 +81,8 @@ impl View for Spacing {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let key = self.key.get();
         let held = self.synth_state.get().held_notes.clone();

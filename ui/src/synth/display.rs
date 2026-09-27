@@ -5,6 +5,7 @@
 //! grid-beat/line.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::synth::{envelope_points, filter_response_points, waveform_points, SynthState};
@@ -80,7 +81,8 @@ impl WaveDisplay {
 
 impl View for WaveDisplay {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let osc = (self.extract)(&self.state.get());
 
@@ -121,7 +123,8 @@ impl FilterDisplay {
 
 impl View for FilterDisplay {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let state = self.state.get();
         let filter = state.filter;
@@ -235,7 +238,8 @@ impl EnvelopeDisplay {
 
 impl View for EnvelopeDisplay {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let env = (self.extract)(&self.state.get());
         let keypoints = envelope_points(env);
@@ -289,7 +293,8 @@ impl LfoScope {
 
 impl View for LfoScope {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let state = self.state.get();
         let depth = (self.lfo)(&state).depth.clamp(0.0, 1.0);

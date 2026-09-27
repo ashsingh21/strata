@@ -5,6 +5,7 @@
 //! a click-to-toggle latch.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::synth::SynthState;
@@ -72,9 +73,9 @@ impl View for Keyboard {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|window_event, _| match window_event {
             WindowEvent::MouseDown(MouseButton::Left) => {
-                let bounds = cx.bounds();
-                let lx = cx.mouse().cursor_x - bounds.x;
-                let ly = cx.mouse().cursor_y - bounds.y;
+                let bounds = cx.lbounds();
+                let lx = cx.lmouse().0 - bounds.x;
+                let ly = cx.lmouse().1 - bounds.y;
                 if let Some(note) = Self::note_at(bounds, lx, ly) {
                     self.pressed = Some(note);
                     cx.capture();
@@ -92,7 +93,8 @@ impl View for Keyboard {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let held = &self.state.get().held_notes;
         let white_w = bounds.w / WHITE_KEYS as f32;

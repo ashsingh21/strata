@@ -5,6 +5,7 @@
 //! field for that).
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use crate::tokens::ThemeId;
@@ -67,7 +68,8 @@ impl<V: SignalGet<f64> + Copy + 'static> View for BpmField<V> {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let text = format!("{:.2}", self.value.get());
         let font = crate::canvas_text::canvas_font(13.0);

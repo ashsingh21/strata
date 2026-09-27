@@ -15,6 +15,7 @@ mod cables;
 mod geometry;
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 
 use shared::arrangement::{Arrangement, ClipColor, Effect, EffectGraph, EffectNodeId, TrackId};
 
@@ -96,7 +97,7 @@ fn output_port(cx: &mut Context, p: FxBoardProps, node: EffectNodeId, x: f32, y:
         })
         .on_mouse_move(move |cx, mx, my| {
             if wire_drag.get().is_some_and(|(id, ..)| id == node) {
-                let bounds = cx.bounds();
+                let bounds = cx.lbounds();
                 let origin_x = bounds.x - (x - 5.0);
                 let origin_y = bounds.y - (y - 5.0);
                 wire_drag.set(Some((node, mx - origin_x, my - origin_y)));
@@ -231,8 +232,8 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     .width(Stretch(1.0))
                     .height(Stretch(1.0))
                     .on_double_click(move |cx, _| {
-                        let bounds = cx.bounds();
-                        let local = (cx.mouse().cursor_x - bounds.x, cx.mouse().cursor_y - bounds.y);
+                        let bounds = cx.lbounds();
+                        let local = (cx.lmouse().0 - bounds.x, cx.lmouse().1 - bounds.y);
                         search_popover.set(Some(local));
                     });
 
@@ -365,8 +366,8 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                 cx.capture();
                                 drag_anchor.set(Some((
                                     node.id,
-                                    cx.mouse().cursor_x,
-                                    cx.mouse().cursor_y,
+                                    cx.lmouse().0,
+                                    cx.lmouse().1,
                                     orig_x,
                                     orig_y,
                                 )));

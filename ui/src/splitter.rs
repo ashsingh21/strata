@@ -5,6 +5,7 @@
 //! sliver; now the panel is as tall as you make it and scrolls inside.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use crate::tokens::ThemeId;
@@ -40,8 +41,7 @@ impl PanelSplitter {
 
     /// The tallest the panel may be for the window's current height.
     fn max_height(cx: &mut EventContext) -> f32 {
-        let scale = cx.scale_factor().max(0.1);
-        let window_h = cx.with_current(Entity::root(), |cx| cx.bounds().h) / scale;
+        let window_h = cx.with_current(Entity::root(), |cx| cx.lbounds().h);
         (window_h - MIN_ABOVE).max(MIN_PANEL_HEIGHT)
     }
 }
@@ -55,14 +55,14 @@ impl View for PanelSplitter {
         event.map(|window_event, _| match window_event {
             WindowEvent::MouseDown(MouseButton::Left) => {
                 self.dragging = true;
-                self.last_y = cx.mouse().cursor_y;
+                self.last_y = cx.lmouse().1;
                 cx.capture();
                 cx.needs_redraw();
             }
             WindowEvent::MouseMove(_, y) if self.dragging => {
-                // Mouse positions are physical pixels; the height is logical.
-                let delta = (*y - self.last_y) / cx.scale_factor().max(0.1);
-                self.last_y = *y;
+                let y = crate::hidpi::l(cx, *y);
+                let delta = y - self.last_y;
+                self.last_y = y;
                 let max = Self::max_height(cx);
                 // Dragging up makes the panel taller.
                 let next = (self.height.get() - delta).clamp(MIN_PANEL_HEIGHT, max);
@@ -95,7 +95,8 @@ impl View for PanelSplitter {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let b = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let b = cx.lbounds();
         let p = self.theme.get().palette();
         // A hairline across, and a short grip in the middle that brightens
         // on hover so the drag is discoverable.

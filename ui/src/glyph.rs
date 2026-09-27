@@ -4,6 +4,7 @@
 //! fallback font drew ▶ as a colour emoji.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use crate::tokens::{Palette, ThemeId};
@@ -61,7 +62,8 @@ impl<M: SignalGet<bool> + Copy + 'static> View for Glyph<M> {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let b = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let b = cx.lbounds();
         let color = (self.color)(&self.theme.get().palette(), self.on.get());
         // All geometry is drawn in a 12-unit box, scaled to fill whatever
         // size the caller gave it (the default is a 12px box, so `unit`

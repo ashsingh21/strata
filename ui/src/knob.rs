@@ -10,6 +10,7 @@
 //! strip, in which case it takes that track's `clip-*-line` colour (see
 //! [`KnobAccentExt::accent`]) - one muted hue per device, no glow, no gradient.
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use crate::tokens::{Palette, ThemeId};
@@ -145,7 +146,7 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Vie
             WindowEvent::MouseLeave => self.hovered_since = None,
             WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
                 self.is_dragging = true;
-                self.prev_drag_y = cx.mouse().left.pos_down.1;
+                self.prev_drag_y = crate::hidpi::l(cx, cx.mouse().left.pos_down.1);
                 self.continuous = self.value.get();
                 cx.capture();
                 cx.focus_with_visibility(false);
@@ -157,6 +158,7 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Vie
             }
 
             WindowEvent::MouseMove(_, y) => {
+                let y = &crate::hidpi::l(cx, *y);
                 if self.is_dragging {
                     let mut delta = (*y - self.prev_drag_y) * DRAG_SCALAR;
                     self.prev_drag_y = *y;
@@ -197,7 +199,8 @@ impl<V: SignalGet<f32> + Copy + 'static, M: SignalGet<f32> + Copy + 'static> Vie
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let value = self.value.get().clamp(0.0, 1.0);
 

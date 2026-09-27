@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::{
@@ -220,7 +221,8 @@ impl View for LaneArea {
                 self.on_right_click(cx);
             }
             WindowEvent::MouseMove(x, y) => {
-                self.on_mouse_move(cx, *x, *y);
+                let (x, y) = (crate::hidpi::l(cx, *x), crate::hidpi::l(cx, *y));
+                self.on_mouse_move(cx, x, y);
             }
             WindowEvent::MouseUp(button) if *button == MouseButton::Left => {
                 self.on_mouse_up(cx);
@@ -229,7 +231,7 @@ impl View for LaneArea {
                 self.on_scroll(cx, *x, *y);
             }
             WindowEvent::GeometryChanged(_) => {
-                let b = cx.bounds();
+                let b = cx.lbounds();
                 cx.emit(TimelineEvent::SetViewport { width: b.w as f64, height: b.h as f64 });
             }
             _ => {}
@@ -237,6 +239,7 @@ impl View for LaneArea {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let _hidpi = crate::hidpi::scale(cx, canvas);
         self.draw_impl(cx, canvas);
         self.draw_scrollbars(cx, canvas);
     }
@@ -252,15 +255,15 @@ struct ClipFrame<'a> {
 
 impl LaneArea {
     fn local_pos(&self, cx: &EventContext) -> (f32, f32) {
-        let bounds = cx.bounds();
-        (cx.mouse().cursor_x - bounds.x, cx.mouse().cursor_y - bounds.y)
+        let bounds = cx.lbounds();
+        (cx.lmouse().0 - bounds.x, cx.lmouse().1 - bounds.y)
     }
 
     fn on_mouse_down(&mut self, cx: &mut EventContext) {
         let (lx, ly) = self.local_pos(cx);
         // Scrollbar thumbs sit on top of everything along the edges.
         {
-            let b = cx.bounds();
+            let b = cx.lbounds();
             let (cw, ch) = self.content_size();
             let t = self.transform.get();
             let on_right = lx >= b.w - THUMB_GRAB_PX && thumb(b.h, ch, t.scroll_y as f32).is_some();
@@ -454,7 +457,7 @@ impl LaneArea {
         let rows = build_rows(&arr);
         let y_scrolled = ly + transform.scroll_y as f32;
         let tick = transform.x_to_tick(lx as f64);
-        let (window_x, window_y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+        let (window_x, window_y) = (cx.lmouse().0, cx.lmouse().1);
 
         let Some(row_index) = row_at_y(&rows, y_scrolled) else { return };
         let RowKind::Track(track_id) = rows[row_index].kind else { return };
@@ -497,7 +500,7 @@ impl LaneArea {
 
     fn on_mouse_move(&mut self, cx: &mut EventContext, x: f32, y: f32) {
         if self.drag.is_none() {
-            let bounds = cx.bounds();
+            let bounds = cx.lbounds();
             let (lx, ly) = (x - bounds.x, y - bounds.y);
             let icon = if self.edge_hover_at(lx, ly) { CursorIcon::EwResize } else { CursorIcon::Default };
             if self.hover_cursor.get() != icon {
@@ -515,7 +518,7 @@ impl LaneArea {
             }
         }
         if let Some(Drag::ScrollThumb { .. }) = self.drag {
-            let b = cx.bounds();
+            let b = cx.lbounds();
             let (cw, ch) = self.content_size();
             let Some(Drag::ScrollThumb { vertical, last }) = &mut self.drag else { return };
             let (pos, track, content) = if *vertical { (y - b.y, b.h, ch) } else { (x - b.x, b.w, cw) };
@@ -532,7 +535,7 @@ impl LaneArea {
             return;
         }
         let Some(drag) = &mut self.drag else { return };
-        let bounds = cx.bounds();
+        let bounds = cx.lbounds();
         let (lx, ly) = (x - bounds.x, y - bounds.y);
         let transform = self.transform.get();
         let arr = self.arrangement.get();
@@ -694,7 +697,7 @@ impl LaneArea {
     }
 
     fn draw_impl(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let arr = self.arrangement.get();
         let transform = self.transform.get();
@@ -1417,7 +1420,7 @@ impl LaneArea {
     /// Thin thumbs along the right and bottom edges, only when there's
     /// more to see in that direction.
     fn draw_scrollbars(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let b = cx.bounds();
+        let b = cx.lbounds();
         let palette = self.theme.get().palette();
         let t = self.transform.get();
         let (cw, ch) = self.content_size();
@@ -1491,7 +1494,8 @@ impl PlayheadOverlay {
 
 impl View for PlayheadOverlay {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let transform = self.transform.get();
         let playhead_x = bounds.x + transform.tick_to_x(self.playhead.get()) as f32;

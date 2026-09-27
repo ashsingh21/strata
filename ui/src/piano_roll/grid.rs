@@ -13,6 +13,7 @@
 use std::collections::HashSet;
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::{Arrangement, ClipId, MidiNote, SnapGrid, Ticks, DEFAULT_VELOCITY, PPQ};
@@ -208,15 +209,15 @@ impl View for Grid {
             | WindowEvent::MouseDoubleClick(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 let Some((clip_id, _clip_start, clip_length, notes)) = self.clip_info() else { return };
-                let bounds = cx.bounds();
+                let bounds = cx.lbounds();
                 let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums());
                 if rows.is_empty() || clip_length <= 0 {
                     return;
                 }
                 cx.focus_with_visibility(false);
 
-                let lx = cx.mouse().cursor_x - bounds.x - LABEL_W;
-                let ly = cx.mouse().cursor_y - bounds.y - RULER_H;
+                let lx = cx.lmouse().0 - bounds.x - LABEL_W;
+                let ly = cx.lmouse().1 - bounds.y - RULER_H;
                 if lx < 0.0 || ly < 0.0 {
                     return;
                 }
@@ -233,7 +234,7 @@ impl View for Grid {
                         .filter(|(_, d)| *d <= STEM_GRAB_PX)
                         .min_by(|a, b| a.1.total_cmp(&b.1));
                     if let Some((note, _)) = nearest {
-                        let velocity = Self::velocity_at(lane_top, cx.mouse().cursor_y);
+                        let velocity = Self::velocity_at(lane_top, cx.lmouse().1);
                         self.vel_drag = Some(((note.start, note.pitch), velocity));
                         cx.capture();
                         cx.needs_redraw();
@@ -281,8 +282,8 @@ impl View for Grid {
                 if let Some((key, _)) = self.vel_drag {
                     let Some((_, _, _, notes)) = self.clip_info() else { return };
                     let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums());
-                    let lane_top = cx.bounds().y + RULER_H + rows.len() as f32 * ROW_H;
-                    self.vel_drag = Some((key, Self::velocity_at(lane_top, *y)));
+                    let lane_top = cx.lbounds().y + RULER_H + rows.len() as f32 * ROW_H;
+                    self.vel_drag = Some((key, Self::velocity_at(lane_top, crate::hidpi::l(cx, *y))));
                     cx.needs_redraw();
                 }
             }
@@ -299,7 +300,8 @@ impl View for Grid {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let p: Palette = self.theme.get().palette();
         let Some((_clip_id, clip_start, clip_length, notes)) = self.clip_info() else { return };
         if clip_length <= 0 {

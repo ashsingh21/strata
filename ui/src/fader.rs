@@ -3,6 +3,7 @@
 //! Used by the timeline's track headers.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use crate::tokens::ThemeId;
@@ -80,7 +81,7 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
     }
 
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        let height = cx.bounds().h.max(1.0);
+        let height = cx.lbounds().h.max(1.0);
 
         let move_value = |fader: &mut Self, cx: &mut EventContext, new_value: f32| {
             fader.continuous = new_value.clamp(0.0, 1.0);
@@ -92,7 +93,7 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
         event.map(|window_event, _| match window_event {
             WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
                 self.is_dragging = true;
-                self.prev_drag_y = cx.mouse().left.pos_down.1;
+                self.prev_drag_y = crate::hidpi::l(cx, cx.mouse().left.pos_down.1);
                 self.continuous = self.value.get();
                 cx.capture();
                 cx.focus_with_visibility(false);
@@ -107,6 +108,7 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
             }
 
             WindowEvent::MouseMove(_, y) => {
+                let y = &crate::hidpi::l(cx, *y);
                 if self.is_dragging {
                     let mut delta = (*y - self.prev_drag_y) / (height * DRAG_SCALAR_DIVISOR);
                     self.prev_drag_y = *y;
@@ -143,7 +145,8 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         // While dragging, follow the live local value rather than the
         // external signal - the external commit may be deferred to

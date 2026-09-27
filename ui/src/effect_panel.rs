@@ -8,6 +8,7 @@
 use std::cell::Cell;
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 
 use shared::arrangement::{Arrangement, AutomationTarget, ClipColor, Effect, EffectNodeId, EffectParam, Ticks, TrackId};
 
@@ -136,7 +137,7 @@ fn param_knob(
     // automation isn't supported (lanes belong to tracks).
     .on_mouse_down(move |cx, button| {
         if let (MouseButton::Right, Some(track)) = (button, track) {
-            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            let (x, y) = (cx.lmouse().0, cx.lmouse().1);
             cx.emit(TimelineEvent::OpenContextMenu(ContextMenu {
                 target: ContextMenuTarget::Param { track, target: AutomationTarget::Effect { node, param }, current: None },
                 x,

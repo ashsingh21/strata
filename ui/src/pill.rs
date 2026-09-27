@@ -2,6 +2,7 @@
 //! `mod` text and border on a `mod-soft` ground, with a tiny sine glyph.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use crate::tokens::ThemeId;
@@ -18,7 +19,8 @@ impl SineGlyph {
 
 impl View for SineGlyph {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
 
         let mut path = vg::PathBuilder::new();

@@ -11,6 +11,7 @@ pub mod state;
 
 use crate::lessons::LessonTargetExt;
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 
 use std::cell::Cell;
 
@@ -149,7 +150,7 @@ fn knob(
     // Right-click: "Automate Carve · <param>" on the selected track.
     .on_mouse_down(move |cx, button| {
         if button == MouseButton::Right {
-            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            let (x, y) = (cx.lmouse().0, cx.lmouse().1);
             cx.emit(SynthEvent::OpenAutomateMenu { param, x, y });
         }
     })

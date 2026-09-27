@@ -11,6 +11,7 @@ mod effect_panel;
 mod fader;
 mod fx_board;
 mod glyph;
+mod hidpi;
 mod interval_input;
 mod knob;
 mod lessons;

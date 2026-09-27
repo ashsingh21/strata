@@ -2,6 +2,7 @@
 //! stylesheet, reusing the milestone-1 M/S/Arm buttons and colour swatch.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::{
@@ -56,7 +57,7 @@ impl<V: SignalGet<f32> + Copy + 'static> View for TrackResizeHandle<V> {
         event.map(|window_event, _| match window_event {
             WindowEvent::MouseDown(button) if *button == MouseButton::Left => {
                 self.is_dragging = true;
-                self.prev_drag_y = cx.mouse().left.pos_down.1;
+                self.prev_drag_y = crate::hidpi::l(cx, cx.mouse().left.pos_down.1);
                 cx.capture();
                 cx.focus_with_visibility(false);
             }
@@ -65,6 +66,7 @@ impl<V: SignalGet<f32> + Copy + 'static> View for TrackResizeHandle<V> {
                 cx.release();
             }
             WindowEvent::MouseMove(_, y) => {
+                let y = &crate::hidpi::l(cx, *y);
                 if self.is_dragging {
                     let delta = *y - self.prev_drag_y;
                     self.prev_drag_y = *y;
@@ -93,7 +95,8 @@ impl<V: SignalGet<f32> + Copy + 'static> View for TrackResizeHandle<V> {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         // A short grip mark, centred - brighter on hover/drag so the drag
         // affordance is a glance away rather than printed as a hint.
@@ -376,7 +379,7 @@ pub fn track_header<'a>(
     .on_mouse_down(move |cx, button| {
         if button == MouseButton::Right {
             cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
-            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            let (x, y) = (cx.lmouse().0, cx.lmouse().1);
             cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target: ContextMenuTarget::Track(track_id), x, y }));
         }
     })
@@ -436,7 +439,7 @@ pub fn automation_header<'a>(
     .toggle_class("is-orphaned", orphaned)
     .on_mouse_down(move |cx, button| {
         if button == MouseButton::Right {
-            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            let (x, y) = (cx.lmouse().0, cx.lmouse().1);
             cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target: ContextMenuTarget::AutomationLane { lane: lane_id }, x, y }));
         }
     })

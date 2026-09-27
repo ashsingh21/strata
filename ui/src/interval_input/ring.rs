@@ -4,6 +4,7 @@
 //! with the recognized chord name in the centre.
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::synth::SynthState;
@@ -60,9 +61,9 @@ impl View for Ring {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|window_event, _| {
             if let WindowEvent::MouseDown(MouseButton::Left) = window_event {
-                let bounds = cx.bounds();
-                let mx = cx.mouse().cursor_x;
-                let my = cx.mouse().cursor_y;
+                let bounds = cx.lbounds();
+                let mx = cx.lmouse().0;
+                let my = cx.lmouse().1;
                 let key = self.key.get();
                 for rel in 0u8..12 {
                     let p = self.node_pos(bounds, rel);
@@ -77,7 +78,8 @@ impl View for Ring {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let key = self.key.get();
         let mask = self.scale_mask.get();

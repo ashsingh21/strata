@@ -5,6 +5,7 @@
 //! `eq_curve.rs` already uses for the EQ's frequency-response curve).
 
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::CompressorState;
@@ -35,7 +36,8 @@ impl CompressorCurve {
 
 impl View for CompressorCurve {
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
         let state = self.state.get();
 

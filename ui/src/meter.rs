@@ -5,6 +5,7 @@
 //! fill fractions.
 //!
 use vizia::prelude::*;
+use crate::hidpi::Logical;
 use vizia::vg;
 
 use crate::tokens::ThemeId;
@@ -67,7 +68,8 @@ impl<L: SignalGet<f32> + Copy + 'static> View for Meter<L> {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
-        let bounds = cx.bounds();
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let bounds = cx.lbounds();
         let palette = self.theme.get().palette();
 
         let channels = [
