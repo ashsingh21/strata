@@ -38,6 +38,8 @@ pub struct FxBoardProps {
     /// The board's selected node - owned by `TimelineState` so Delete can
     /// remove it (see `TimelineState::fx_selected`).
     pub selected: Signal<Option<(Option<TrackId>, EffectNodeId)>>,
+    /// Where automated knobs are shown at (see `effect_panel`).
+    pub playhead: Signal<shared::arrangement::Ticks>,
 }
 
 /// One palette row: `bg-400` while its own effect is the one currently
@@ -445,7 +447,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                     let Some(fx) = arr.fx(p.track) else { return };
                     let Some(node) = fx.node(node_id) else { return };
                     let color = p.track.and_then(|id| arr.track(id)).map(|t| t.color).unwrap_or(ClipColor::Violet);
-                    crate::effect_panel::effect_panel(cx, p.theme, p.arrangement, p.track, node.id, color);
+                    crate::effect_panel::effect_panel(cx, p.theme, p.arrangement, p.track, node.id, color, p.playhead);
                 });
             })
             .class("panel")

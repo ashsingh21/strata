@@ -464,6 +464,7 @@ fn main() -> Result<(), ApplicationError> {
                                         track,
                                         board_open_track,
                                         selected: tl_fx_selected,
+                                        playhead: tl_playhead,
                                     },
                                 );
                                 return;

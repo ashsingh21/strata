@@ -59,7 +59,7 @@ fn draw_signal(canvas: &Canvas, bounds: BoundingBox, palette: &crate::tokens::Pa
 /// they change (no need to animate: the shape only depends on waveform +
 /// pulse-width/shape, not on a running phase).
 pub struct WaveDisplay {
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     extract: fn(&SynthState) -> shared::synth::Oscillator,
 }
@@ -67,7 +67,7 @@ pub struct WaveDisplay {
 impl WaveDisplay {
     pub fn new(
         cx: &mut Context,
-        state: Signal<SynthState>,
+        state: Memo<SynthState>,
         theme: Signal<ThemeId>,
         extract: fn(&SynthState) -> shared::synth::Oscillator,
     ) -> Handle<'_, Self> {
@@ -106,12 +106,12 @@ impl View for WaveDisplay {
 /// The filter's magnitude response, with a dashed mod band showing the
 /// cutoff's modulation range and a cutoff marker + readout.
 pub struct FilterDisplay {
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
 }
 
 impl FilterDisplay {
-    pub fn new(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) -> Handle<'_, Self> {
+    pub fn new(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) -> Handle<'_, Self> {
         Self { state, theme }
             .build(cx, |_| {})
             .bind(state, |mut h| h.needs_redraw())
@@ -214,7 +214,7 @@ fn format_hz(hz: f32) -> String {
 /// alternative input method the spec allows but this milestone doesn't
 /// wire; the knobs below each display are the editing path).
 pub struct EnvelopeDisplay {
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     extract: fn(&SynthState) -> shared::synth::Envelope,
 }
@@ -222,7 +222,7 @@ pub struct EnvelopeDisplay {
 impl EnvelopeDisplay {
     pub fn new(
         cx: &mut Context,
-        state: Signal<SynthState>,
+        state: Memo<SynthState>,
         theme: Signal<ThemeId>,
         extract: fn(&SynthState) -> shared::synth::Envelope,
     ) -> Handle<'_, Self> {
@@ -265,7 +265,7 @@ impl View for EnvelopeDisplay {
 /// a marker riding it at the LFO's real current phase (reported by the
 /// engine) - so the marker's speed is the Rate and its swing the Depth.
 pub struct LfoScope {
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     phase: Signal<f32>,
     lfo: fn(&SynthState) -> &shared::synth::Lfo,
@@ -274,7 +274,7 @@ pub struct LfoScope {
 impl LfoScope {
     pub fn new(
         cx: &mut Context,
-        state: Signal<SynthState>,
+        state: Memo<SynthState>,
         theme: Signal<ThemeId>,
         phase: Signal<f32>,
         lfo: fn(&SynthState) -> &shared::synth::Lfo,

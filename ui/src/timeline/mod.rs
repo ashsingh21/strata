@@ -101,7 +101,7 @@ pub fn timeline_view(
                 Binding::new(cx, arrangement, move |cx| {
                     let arr = arrangement.get();
                     for track in arr.tracks.clone() {
-                        track_header(cx, arrangement, theme, selected_track, renaming_track, track.id, board_open_track);
+                        track_header(cx, arrangement, theme, selected_track, renaming_track, track.id, board_open_track, playhead);
                         for lane in arr.automation.iter().filter(|a| a.track == track.id) {
                             automation_header(cx, arrangement, playhead, lane.id);
                         }

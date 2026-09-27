@@ -30,7 +30,7 @@ fn black_note_after(white_index: usize) -> Option<u8> {
 }
 
 pub struct Keyboard {
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     /// The note the mouse button is currently down on, if any - released
     /// on `MouseUp` regardless of where the cursor ends up, via
@@ -39,7 +39,7 @@ pub struct Keyboard {
 }
 
 impl Keyboard {
-    pub fn new(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) -> Handle<'_, Self> {
+    pub fn new(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) -> Handle<'_, Self> {
         Self { state, theme, pressed: None }
             .build(cx, |_| {})
             .bind(state, |mut h| h.needs_redraw())

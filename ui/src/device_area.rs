@@ -106,6 +106,9 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                     cx,
                     p.theme,
                     p.synth_state,
+                    p.arrangement,
+                    p.selected_track,
+                    p.playhead,
                     p.lfo_phases,
                     p.octave_shift,
                     p.meter_l,
@@ -120,7 +123,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                 let color = arr.track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Violet);
                 let kind = arr.track(track).and_then(|t| t.fx.node(node)).map(|n| n.effect);
                 if kind.is_some() {
-                    crate::effect_panel::effect_panel(cx, p.theme, p.arrangement, Some(track), node, color);
+                    crate::effect_panel::effect_panel(cx, p.theme, p.arrangement, Some(track), node, color, p.playhead);
                 }
             }
             Panel::NoInstrument(track) => empty_state(cx, "No instrument on this track", move |cx| {

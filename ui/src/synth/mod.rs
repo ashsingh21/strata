@@ -20,7 +20,7 @@ use crate::knob::{Knob, KnobAccentExt};
 use crate::status::StatusEvent;
 use crate::pill::modulator_pill;
 use crate::tokens::{self, ThemeId};
-use shared::arrangement::ClipColor;
+use shared::arrangement::{Arrangement, AutomationTarget, ClipColor, Ticks, TrackId};
 use display::{EnvelopeDisplay, FilterDisplay, LfoScope, WaveDisplay};
 use keyboard::Keyboard;
 use segmented::segmented;
@@ -80,6 +80,10 @@ thread_local! {
     /// light up as a drop target and accept the drop, without threading one
     /// more argument through every section builder.
     static LFO_DRAG: Cell<Option<Signal<Option<usize>>>> = const { Cell::new(None) };
+    /// The selected track's automated Carve params - set by `synth_view`,
+    /// read by `knob` (same pattern as LFO_DRAG, since knob's callers don't
+    /// carry the arrangement).
+    static AUTOMATED: Cell<Option<Memo<Vec<SynthParam>>>> = const { Cell::new(None) };
 }
 
 /// A knob bound to a physical value via a `to_pos`/`apply` mapping pair
@@ -94,7 +98,7 @@ thread_local! {
 #[allow(clippy::too_many_arguments)]
 fn knob(
     cx: &mut Context,
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     size: KnobSize,
     slot: f32,
@@ -109,6 +113,9 @@ fn knob(
     let apply = move |s: &mut SynthState, p: f32| param.apply_norm(s, p);
     let pos = state.map(move |s| to_pos(s));
     let text = state.map(move |s| true_minus(param.format(s)));
+    // An automated knob follows its lane (`state` already has it applied)
+    // and is read-only - a drag would only be overridden by the lane.
+    let automated = Memo::new(move |_| AUTOMATED.get().is_some_and(|a| a.get().contains(&param)));
     let column = VStack::new(cx, move |cx| {
         VStack::new(cx, move |cx| {
             let on_change = move |cx: &mut EventContext, p: f32| {
@@ -129,12 +136,14 @@ fn knob(
             }
         })
         .alignment(Alignment::BottomCenter)
+        .pointer_events(automated.map(|a| if *a { PointerEvents::None } else { PointerEvents::Auto }))
         .width(Auto)
         .height(Pixels(slot));
         Label::new(cx, label).class(if size == KnobSize::Lg { "label-lg" } else { "label" });
         Label::new(cx, text).class("value");
     })
     .class("knob-col")
+    .toggle_class("is-automated", automated)
     // Right-click: "Automate Carve · <param>" on the selected track.
     .on_mouse_down(move |cx, button| {
         if button == MouseButton::Right {
@@ -205,7 +214,7 @@ fn knob_row(cx: &mut Context, content: impl FnOnce(&mut Context)) {
     HStack::new(cx, content).gap(Stretch(1.0)).width(Stretch(1.0)).height(Auto);
 }
 
-fn waveform_seg(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>, is_osc1: bool) {
+fn waveform_seg(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>, is_osc1: bool) {
     let waves = [Waveform::Sine, Waveform::Triangle, Waveform::Saw, Waveform::Square];
     let icons = [GlyphKind::Sine, GlyphKind::Triangle, GlyphKind::Saw, GlyphKind::Square];
     let selected = move |i: usize| {
@@ -245,7 +254,7 @@ const ROW1_HEIGHT: f32 = 252.0;
 const ROW2_HEIGHT: f32 = 218.0;
 const ROW_SLOT: f32 = tokens::SIZE_KNOB;
 
-fn osc1_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn osc1_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Oscillator 1", move |cx| waveform_seg(cx, state, theme, true), move |cx| {
         WaveDisplay::new(cx, state, theme, |s| s.osc1).width(Stretch(1.0)).height(Pixels(44.0)).class("synth-disp");
         knob_row(cx, move |cx| {
@@ -258,7 +267,7 @@ fn osc1_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Theme
     .width(Pixels(OSC_WIDTH));
 }
 
-fn osc2_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn osc2_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(
         cx,
         "Oscillator 2",
@@ -284,7 +293,7 @@ fn osc2_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Theme
     .width(Pixels(OSC_WIDTH + 44.0));
 }
 
-fn mix_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn mix_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Mixer", |_| {}, move |cx| {
         let db_knob = |cx: &mut Context, param: SynthParam, default_db: f32| {
             knob(cx, state, theme, KnobSize::Md, ROW_SLOT, param, lin_inv(default_db, -60.0, 0.0), None);
@@ -305,7 +314,7 @@ fn mix_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeI
     .width(Auto);
 }
 
-fn filter_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn filter_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(
         cx,
         "Filter",
@@ -334,7 +343,7 @@ fn filter_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<The
     )
     .width(Stretch(1.0));
 }
-fn adsr_knobs(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>, params: [SynthParam; 4]) {
+fn adsr_knobs(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>, params: [SynthParam; 4]) {
     knob_row(cx, move |cx| {
         for param in params {
             // Default (double-click) = the value the section opened with.
@@ -343,7 +352,7 @@ fn adsr_knobs(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId
     });
 }
 
-fn filter_env_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn filter_env_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Filter envelope", |_| {}, move |cx| {
         EnvelopeDisplay::new(cx, state, theme, |s| s.filter_env)
             .width(Stretch(1.0))
@@ -357,7 +366,7 @@ fn filter_env_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal
     .width(Stretch(1.0));
 }
 
-fn amp_env_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn amp_env_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Amp envelope", |_| {}, move |cx| {
         EnvelopeDisplay::new(cx, state, theme, |s| s.amp_env)
             .width(Stretch(1.0))
@@ -375,7 +384,7 @@ fn amp_env_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<Th
 /// `lfo`/`lfo_mut` pick LFO 1 or 2 out of the state.
 fn lfo_column(
     cx: &mut Context,
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     lfo: fn(&SynthState) -> &shared::synth::Lfo,
     params: (SynthParam, SynthParam),
@@ -410,7 +419,7 @@ fn lfo_column(
 
 fn mod_section(
     cx: &mut Context,
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     lfo_phases: (Signal<f32>, Signal<f32>),
 ) {
@@ -449,7 +458,7 @@ fn mod_section(
     .width(Pixels(300.0));
 }
 
-fn unison_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn unison_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Unison", |_| {}, move |cx| {
         HStack::new(cx, move |cx| {
             knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::UnisonVoices, 0.0, None);
@@ -463,7 +472,7 @@ fn unison_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<The
     .width(Auto);
 }
 
-fn fx_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId>) {
+fn fx_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Effects", |_| {}, move |cx| {
         HStack::new(cx, move |cx| {
             knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::ChorusMix, 0.0, None);
@@ -483,7 +492,7 @@ fn fx_section(cx: &mut Context, state: Signal<SynthState>, theme: Signal<ThemeId
 
 fn out_section(
     cx: &mut Context,
-    state: Signal<SynthState>,
+    state: Memo<SynthState>,
     theme: Signal<ThemeId>,
     meter_l: Signal<f32>,
     meter_r: Signal<f32>,
@@ -511,7 +520,10 @@ fn out_section(
 pub fn synth_view(
     cx: &mut Context,
     theme: Signal<ThemeId>,
-    state: Signal<SynthState>,
+    patch: Signal<SynthState>,
+    arrangement: Signal<Arrangement>,
+    track: Signal<Option<TrackId>>,
+    playhead: Signal<Ticks>,
     lfo_phases: (Signal<f32>, Signal<f32>),
     octave_shift: Signal<i8>,
     meter_l: Signal<f32>,
@@ -522,6 +534,28 @@ pub fn synth_view(
 ) {
     LFO_DRAG.set(Some(lfo_drag));
     TRACK_COLOR.set(track_color);
+    // What the panel shows: the patch as it sounds at the playhead, i.e.
+    // with this track's Carve automation applied. Knobs, displays and the
+    // keyboard all read this; edits still go to the patch via SynthEvent.
+    let state = Memo::new(move |_| {
+        let mut shown = patch.get();
+        if let Some(track) = track.get() {
+            arrangement.get().apply_synth_automation(track, playhead.get(), &mut shown);
+        }
+        shown
+    });
+    let automated = Memo::new(move |_| {
+        let arr = arrangement.get();
+        arr.automation
+            .iter()
+            .filter(|l| Some(l.track) == track.get())
+            .filter_map(|l| match l.target {
+                Some(AutomationTarget::Synth(param)) => Some(param),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    });
+    AUTOMATED.set(Some(automated));
     VStack::new(cx, move |cx| {
         HStack::new(cx, move |cx| {
             Element::new(cx).class("swatch").background_color(crate::timeline::header::clip_color_to_rgb(track_color));

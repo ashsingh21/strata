@@ -186,6 +186,7 @@ pub fn track_header<'a>(
     renaming_track: Signal<Option<TrackId>>,
     track_id: TrackId,
     board_open_track: Signal<Option<Option<TrackId>>>,
+    playhead: Signal<shared::arrangement::Ticks>,
 ) -> Handle<'a, impl View> {
     let name = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.name.clone()).unwrap_or_default()
@@ -209,13 +210,26 @@ pub fn track_header<'a>(
     // readout still track the live drag instead of only updating at the
     // end of it.
     let gain_preview: Signal<Option<f32>> = Signal::new(None);
-    let gain_text = arrangement.map(move |arr| {
+    // A Track Gain lane drives the fader: it shows the automated gain at
+    // the playhead and is read-only (a drag would only be overridden).
+    let gain_lane = arrangement.map(move |arr| {
+        arr.automation
+            .iter()
+            .find(|l| l.track == track_id && l.target == Some(shared::arrangement::AutomationTarget::TrackGain))
+            .map(|l| l.id)
+    });
+    let automated = gain_lane.map(|l| l.is_some());
+    let shown_gain_db = Memo::new(move |_| {
+        let arr = arrangement.get();
         let committed = arr.track(track_id).map(|t| t.gain_db).unwrap_or(0.0);
-        format!("{:+.1} dB", gain_preview.get().unwrap_or(committed))
+        gain_lane
+            .get()
+            .and_then(|id| arr.automation_lane(id)?.value_at(playhead.get()))
+            .map(fader_pos_to_gain_db)
+            .unwrap_or(committed)
     });
-    let fader_pos = arrangement.map(move |arr| {
-        gain_db_to_fader_pos(arr.track(track_id).map(|t| t.gain_db).unwrap_or(0.0))
-    });
+    let gain_text = Memo::new(move |_| format!("{:+.1} dB", gain_preview.get().unwrap_or(shown_gain_db.get())));
+    let fader_pos = shown_gain_db.map(|db| gain_db_to_fader_pos(*db));
     let height = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.height).unwrap_or(DEFAULT_TRACK_HEIGHT)
     });
@@ -297,7 +311,7 @@ pub fn track_header<'a>(
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
-                Label::new(cx, gain_text).class("meta");
+                Label::new(cx, gain_text).class("meta").toggle_class("is-automated", automated);
 
                 // Trailing edge, away from the gain readout and fader -
                 // a destructive action sitting right next to those two
@@ -328,6 +342,8 @@ pub fn track_header<'a>(
         Fader::new(cx, fader_pos, 0.75, theme, move |_, position| {
             gain_preview.set(Some(fader_pos_to_gain_db(position)));
         })
+        .pointer_events(automated.map(|a| if *a { PointerEvents::None } else { PointerEvents::Auto }))
+        .toggle_class("is-automated", automated)
         .on_release(move |cx, position| {
             gain_preview.set(None);
             cx.emit(TimelineEvent::SetTrackGain {
