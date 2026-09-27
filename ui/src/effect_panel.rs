@@ -9,10 +9,10 @@ use std::cell::Cell;
 
 use vizia::prelude::*;
 
-use shared::arrangement::{Arrangement, ClipColor, Effect, EffectNodeId, EffectParam, TrackId};
+use shared::arrangement::{Arrangement, AutomationTarget, ClipColor, Effect, EffectNodeId, EffectParam, TrackId};
 
 use crate::knob::{Knob, KnobAccentExt};
-use crate::timeline::state::TimelineEvent;
+use crate::timeline::state::{ContextMenu, ContextMenuTarget, TimelineEvent};
 use crate::tokens::{self, Palette, ThemeId};
 
 thread_local! {
@@ -104,6 +104,18 @@ fn param_knob(
         Label::new(cx, text).class("value");
     })
     .class("knob-col")
+    // Right-click: "Automate <param>". Track effects only - master-bus
+    // automation isn't supported (lanes belong to tracks).
+    .on_mouse_down(move |cx, button| {
+        if let (MouseButton::Right, Some(track)) = (button, track) {
+            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            cx.emit(TimelineEvent::OpenContextMenu(ContextMenu {
+                target: ContextMenuTarget::Param { track, target: AutomationTarget::Effect { node, param } },
+                x,
+                y,
+            }));
+        }
+    })
     .alignment(Alignment::Center)
     .gap(Pixels(2.0))
     .width(Auto)

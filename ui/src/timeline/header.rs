@@ -5,6 +5,7 @@ use vizia::prelude::*;
 use vizia::vg;
 
 use shared::arrangement::{
+    fader_pos_to_gain_db, gain_db_to_fader_pos,
     Arrangement, AutomationLaneId, ClipColor, EffectNode, TrackId, TrackKind, DEFAULT_TRACK_HEIGHT,
     MAX_TRACK_HEIGHT, MIN_TRACK_HEIGHT,
 };
@@ -107,26 +108,6 @@ impl<V: SignalGet<f32> + Copy + 'static> View for TrackResizeHandle<V> {
     }
 }
 
-/// A fader's position (0..1) to gain in dB: unity at 0.75, +6 dB at the
-/// top, -60..0 dB below that - typical DAW fader taper.
-fn fader_pos_to_gain_db(position: f32) -> f32 {
-    let position = position.clamp(0.0, 1.0);
-    if position <= 0.0 {
-        -100.0
-    } else if position >= 0.75 {
-        (position - 0.75) / 0.25 * 6.0
-    } else {
-        (position / 0.75 - 1.0) * 60.0
-    }
-}
-
-fn gain_db_to_fader_pos(db: f32) -> f32 {
-    if db >= 0.0 {
-        (0.75 + db / 24.0).clamp(0.75, 1.0)
-    } else {
-        (0.75 * (db / 60.0 + 1.0)).clamp(0.0, 0.75)
-    }
-}
 
 pub fn clip_color_to_rgb(color: ClipColor) -> Color {
     match color {
@@ -390,13 +371,31 @@ pub fn track_header<'a>(
 pub fn automation_header<'a>(
     cx: &'a mut Context,
     arrangement: Signal<Arrangement>,
+    playhead: Signal<shared::arrangement::Ticks>,
     lane_id: AutomationLaneId,
 ) -> Handle<'a, impl View> {
-    let name = arrangement.map(move |arr| {
-        arr.automation_lane(lane_id).map(|l| l.parameter_name.clone()).unwrap_or_default()
+    // A targeted lane is labelled from what it controls ("Compressor ·
+    // Threshold"); an old/untargeted one keeps its freeform name. A target
+    // whose effect was removed keeps its last name, marked, and does nothing.
+    let orphaned = arrangement.map(move |arr| {
+        arr.automation_lane(lane_id)
+            .and_then(|l| Some((l.track, l.target?)))
+            .is_some_and(|(track, target)| arr.target_label(track, target).is_none())
     });
-    let value = arrangement.map(move |arr| {
-        arr.automation_lane(lane_id).map(|l| l.display_value.clone()).unwrap_or_default()
+    let name = arrangement.map(move |arr| {
+        let Some(lane) = arr.automation_lane(lane_id) else { return String::new() };
+        match lane.target.map(|t| arr.target_label(lane.track, t)) {
+            Some(Some(label)) => label,
+            Some(None) => format!("{} (removed)", lane.parameter_name),
+            None => lane.parameter_name.clone(),
+        }
+    });
+    // The value at the playhead, formatted like the knob it drives.
+    let value = Memo::new(move |_| {
+        let arr = arrangement.get();
+        let Some(lane) = arr.automation_lane(lane_id) else { return String::new() };
+        let live = lane.target.zip(lane.value_at(playhead.get())).and_then(|(t, v)| arr.target_display_at(lane.track, t, v));
+        live.unwrap_or_else(|| lane.display_value.clone())
     });
 
     VStack::new(cx, move |cx| {
@@ -404,6 +403,13 @@ pub fn automation_header<'a>(
         Label::new(cx, value).class("meta");
     })
     .class("tl-head-auto")
+    .toggle_class("is-orphaned", orphaned)
+    .on_mouse_down(move |cx, button| {
+        if button == MouseButton::Right {
+            let (x, y) = (cx.mouse().cursor_x, cx.mouse().cursor_y);
+            cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target: ContextMenuTarget::AutomationLane { lane: lane_id }, x, y }));
+        }
+    })
     .gap(Pixels(2.0))
     .width(Pixels(crate::timeline::HEAD_WIDTH))
     .height(Pixels(crate::timeline::LANE_AUTO_HEIGHT))

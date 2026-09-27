@@ -639,6 +639,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".tl-head", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".tl-head.is-selected", vec![("background-color", c("bg-200"))]);
     rule(".tl-head-auto", vec![("background-color", c("bg-000"))]);
+    rule(".tl-head-auto.is-orphaned .control", vec![("color", c("ink-faint"))]);
 
     rule(".lower-panel", vec![("background-color", c("bg-000"))]);
     rule(".tgroup", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);

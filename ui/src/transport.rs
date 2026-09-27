@@ -141,10 +141,13 @@ fn file_menu_item_with_shortcut(
     action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
 ) {
     HStack::new(cx, move |cx| {
-        Label::new(cx, label).class("body");
-        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+        // Children aren't hit-testable (same as Vizia's own Button does to
+        // its content): `on_press` only fires when the press targets the row
+        // itself, so a hoverable label made clicks on the text do nothing.
+        Label::new(cx, label).class("body").hoverable(false);
+        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0)).hoverable(false);
         if !shortcut.is_empty() {
-            Label::new(cx, shortcut).class("value");
+            Label::new(cx, shortcut).class("value").hoverable(false);
         }
     })
     .class("menu-item")
@@ -180,8 +183,10 @@ fn input_device_menu_item(
         // straight off the edge of the window instead of staying inside
         // the menu's own box. Same `.text_wrap(false).text_overflow(...)`
         // pair Vizia's own `Select` widget uses for exactly this.
+        // Not hit-testable, so a click on the text reaches the row's on_press.
         Label::new(cx, label.clone())
             .class("body")
+            .hoverable(false)
             .text_wrap(false)
             .text_overflow(TextOverflow::Ellipsis)
             .width(Stretch(1.0));
@@ -433,7 +438,8 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                     sig.numerator == num && sig.denominator == den
                 });
                 HStack::new(cx, move |cx| {
-                    Label::new(cx, label.clone()).class("body");
+                    // Not hit-testable, so a click on the text reaches the row.
+                    Label::new(cx, label.clone()).class("body").hoverable(false);
                 })
                 .class("menu-item")
                 .toggle_class("is-on", is_current)

@@ -12,7 +12,7 @@
 
 use vizia::prelude::*;
 
-use shared::arrangement::{Arrangement, ClipContent, Instrument, TrackKind};
+use shared::arrangement::{Arrangement, AutomationTarget, ClipContent, Instrument, TrackKind};
 
 use crate::piano_roll::state::PianoRollEvent;
 use crate::synth::state::SynthEvent;
@@ -21,21 +21,25 @@ use crate::tokens;
 
 /// One row: a label, an optional right-aligned shortcut hint (muted, like
 /// a native menu's), and an action - closing the menu after either way.
-fn item(cx: &mut Context, label: &'static str, action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static) {
+fn item(cx: &mut Context, label: impl Into<String>, action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static) {
     item_with_shortcut(cx, label, "", action);
 }
 
 fn item_with_shortcut(
     cx: &mut Context,
-    label: &'static str,
+    label: impl Into<String>,
     shortcut: &'static str,
     action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
 ) {
+    let label: String = label.into();
     HStack::new(cx, move |cx| {
-        Label::new(cx, label).class("body");
-        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+        // Children aren't hit-testable (same as Vizia's own Button does to
+        // its content): `on_press` only fires when the press targets the row
+        // itself, so a hoverable label made clicks on the text do nothing.
+        Label::new(cx, label).class("body").hoverable(false);
+        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0)).hoverable(false);
         if !shortcut.is_empty() {
-            Label::new(cx, shortcut).class("value");
+            Label::new(cx, shortcut).class("value").hoverable(false);
         }
     })
     .class("menu-item")
@@ -101,6 +105,15 @@ pub fn context_menu_view(
                 separator(cx);
                 item(cx, if muted { "Unmute" } else { "Mute" }, move |cx| cx.emit(TimelineEvent::ToggleMute(track_id)));
                 item(cx, if soloed { "Unsolo" } else { "Solo" }, move |cx| cx.emit(TimelineEvent::ToggleSolo(track_id)));
+                let gain_automated = arr
+                    .automation
+                    .iter()
+                    .any(|l| l.track == track_id && l.target == Some(AutomationTarget::TrackGain));
+                if !gain_automated {
+                    item(cx, "Automate gain", move |cx| {
+                        cx.emit(TimelineEvent::AutomateParam { track: track_id, target: AutomationTarget::TrackGain })
+                    });
+                }
                 if is_midi {
                     separator(cx);
                     if has_instrument {
@@ -134,6 +147,15 @@ pub fn context_menu_view(
                 item(cx, "Rename...", move |cx| cx.emit(TimelineEvent::BeginRenameMarker(marker)));
                 separator(cx);
                 item(cx, "Delete", move |cx| cx.emit(TimelineEvent::DeleteMarker(marker)));
+            }
+            ContextMenuTarget::Param { track, target } => {
+                let already = arr.automation.iter().any(|l| l.track == track && l.target == Some(target));
+                let name = arr.target_label(track, target).unwrap_or_default();
+                let label = if already { format!("{name} is automated") } else { format!("Automate {name}") };
+                item(cx, label, move |cx| cx.emit(TimelineEvent::AutomateParam { track, target }));
+            }
+            ContextMenuTarget::AutomationLane { lane } => {
+                item(cx, "Remove automation lane", move |cx| cx.emit(TimelineEvent::RemoveAutomationLane(lane)));
             }
         })
         .class("panel")

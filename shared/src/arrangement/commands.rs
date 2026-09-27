@@ -60,6 +60,10 @@ pub enum Command {
     DisconnectEffect { track: Option<TrackId>, from: EffectNodeId, to: EffectNodeId },
     /// Sets the velocity of the note at (`start`, `pitch`).
     SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
+    /// Inserts `lane` at `index` in the lane list (clamped) - a new lane,
+    /// or `RemoveAutomationLane`'s inverse restoring it in place.
+    InsertAutomationLane { lane: Box<AutomationLane>, index: usize },
+    RemoveAutomationLane { lane: AutomationLaneId },
     AddBreakpoint { lane: AutomationLaneId, point: Breakpoint },
     RemoveBreakpoint { lane: AutomationLaneId, tick: Ticks },
     MoveBreakpoint { lane: AutomationLaneId, tick: Ticks, new_tick: Ticks, new_value: f32 },
@@ -347,6 +351,23 @@ impl Command {
                 Command::SetNoteVelocity { clip: clip_id, start, pitch, velocity: previous }
             }
 
+            Command::InsertAutomationLane { lane, index } => {
+                let id = lane.id;
+                let index = index.min(arr.automation.len());
+                arr.automation.insert(index, *lane);
+                Command::RemoveAutomationLane { lane: id }
+            }
+
+            Command::RemoveAutomationLane { lane } => {
+                let index = arr
+                    .automation
+                    .iter()
+                    .position(|l| l.id == lane)
+                    .expect("RemoveAutomationLane: unknown lane");
+                let removed = arr.automation.remove(index);
+                Command::InsertAutomationLane { lane: Box::new(removed), index }
+            }
+
             Command::AddBreakpoint { lane, point } => {
                 let lane = arr.automation_lane_mut(lane).expect("AddBreakpoint: unknown lane");
                 insert_breakpoint_sorted(&mut lane.breakpoints, point);
@@ -595,6 +616,29 @@ mod tests {
 
         assert!(stack.undo(&mut arr));
         assert_eq!(arr.clips.len(), 1);
+    }
+
+    #[test]
+    fn add_then_remove_automation_lane_round_trips_through_undo() {
+        let mut arr = test_arrangement();
+        let lane = |id| AutomationLane {
+            id,
+            track: 1,
+            parameter_name: String::new(),
+            display_value: String::new(),
+            breakpoints: vec![Breakpoint { tick: 0, value: 0.3 }],
+            target: Some(crate::arrangement::AutomationTarget::TrackGain),
+        };
+        let mut stack = CommandStack::new();
+        stack.do_command(Command::InsertAutomationLane { lane: Box::new(lane(1)), index: 0 }, &mut arr);
+        stack.do_command(Command::InsertAutomationLane { lane: Box::new(lane(2)), index: 1 }, &mut arr);
+        stack.do_command(Command::RemoveAutomationLane { lane: 1 }, &mut arr);
+        assert_eq!(arr.automation.iter().map(|l| l.id).collect::<Vec<_>>(), vec![2]);
+        assert!(stack.undo(&mut arr));
+        assert_eq!(arr.automation.iter().map(|l| l.id).collect::<Vec<_>>(), vec![1, 2], "restored in place");
+        assert!(stack.undo(&mut arr));
+        assert!(stack.undo(&mut arr));
+        assert!(arr.automation.is_empty());
     }
 
     #[test]

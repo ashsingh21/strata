@@ -201,6 +201,25 @@ impl Arrangement {
     }
 }
 
+impl Arrangement {
+    /// `target` on `track` formatted as if set to normalized `norm` - a lane
+    /// header's live readout, without cloning the arrangement.
+    pub fn target_display_at(&self, track: super::model::TrackId, target: AutomationTarget, norm: f32) -> Option<String> {
+        let t = self.track(track)?;
+        Some(match target {
+            AutomationTarget::TrackGain => {
+                let db = fader_pos_to_gain_db(norm);
+                if db <= -99.0 { "-inf dB".to_string() } else { format!("{db:+.1} dB") }
+            }
+            AutomationTarget::Effect { node, param } => {
+                let mut effect = t.fx.node(node)?.effect;
+                param.apply_norm(&mut effect, norm);
+                param.format(&effect)
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

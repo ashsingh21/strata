@@ -9,7 +9,7 @@ use std::sync::Arc;
 use vizia::prelude::*;
 
 use shared::arrangement::{
-    CompressorState, Effect, EffectNodeId, EqState, Instrument,
+    AutomationTarget, CompressorState, Effect, EffectNodeId, EqState, Instrument,
     empty_arrangement, snap, step_entry_commit, Arrangement, AutomationLaneId, Breakpoint, Clip,
     ClipColor, ClipContent, ClipId, Command, CommandStack, LoopRange, Marker, MarkerId, MidiNote,
     PeakPyramid, SnapGrid, Ticks, Track, TrackId, TrackKind, ViewTransform, PPQ,
@@ -159,6 +159,10 @@ pub enum ContextMenuTarget {
     Ruler { tick: Ticks },
     /// An existing marker's own tab.
     Marker { marker: MarkerId },
+    /// A parameter's control (an effect knob): offers "Automate <param>".
+    Param { track: TrackId, target: AutomationTarget },
+    /// An automation lane's header: offers "Remove automation lane".
+    AutomationLane { lane: AutomationLaneId },
 }
 
 /// A right-click context menu: what it's for, and where to draw it
@@ -490,6 +494,11 @@ pub enum TimelineEvent {
     SetTrackHeight { track: TrackId, height: f32 },
     /// A right-click: opens the menu for that target at that position.
     OpenContextMenu(ContextMenu),
+    /// Creates a lane for `target` on `track` (one breakpoint holding the
+    /// parameter's current value, so the sound doesn't change) - or does
+    /// nothing if that lane already exists.
+    AutomateParam { track: TrackId, target: AutomationTarget },
+    RemoveAutomationLane(AutomationLaneId),
     CloseContextMenu,
     /// A structural marker, added at `tick` with a default name.
     AddMarker(Ticks),
@@ -950,6 +959,31 @@ impl Model for TimelineState {
                     let id = arr.alloc_id();
                     stack.do_command(Command::InsertMarker { marker: Marker { id, position: *tick, name } }, arr);
                 });
+            }
+            TimelineEvent::AutomateParam { track, target } => {
+                let arr = self.arrangement.get();
+                let exists = arr.automation.iter().any(|l| l.track == *track && l.target == Some(*target));
+                if let (false, Some(norm), Some(label)) =
+                    (exists, arr.target_norm(*track, *target), arr.target_label(*track, *target))
+                {
+                    let mut id = 0;
+                    self.with_arrangement(|arr, _| id = arr.alloc_id());
+                    let lane = shared::arrangement::AutomationLane {
+                        id,
+                        track: *track,
+                        parameter_name: label,
+                        display_value: String::new(),
+                        breakpoints: vec![Breakpoint { tick: 0, value: norm }],
+                        target: Some(*target),
+                    };
+                    let index = arr.automation.len();
+                    self.do_command(Command::InsertAutomationLane { lane: Box::new(lane), index });
+                }
+            }
+            TimelineEvent::RemoveAutomationLane(lane) => {
+                if self.arrangement.get().automation_lane(*lane).is_some() {
+                    self.do_command(Command::RemoveAutomationLane { lane: *lane });
+                }
             }
             TimelineEvent::DeleteMarker(marker) => {
                 self.do_command(Command::RemoveMarker { marker: *marker });
