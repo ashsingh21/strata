@@ -75,6 +75,12 @@ pub const MELODY_MOTIF: &str = "melody-motif";
 /// "Piano roll": the notes you write, played with feeling.
 pub const ROLL_DYNAMICS: &str = "roll-dynamics";
 pub const ROLL_LENGTH: &str = "roll-length";
+/// Sound basics: what dB, Hz and harmonics are, by ear, before Carve.
+pub const SOUND_LOUDNESS: &str = "sound-loudness";
+pub const SOUND_PITCH: &str = "sound-pitch";
+pub const SOUND_HARMONICS: &str = "sound-harmonics";
+/// The pitch lesson's held note: A3, 220 Hz.
+pub const SOUND_PITCH_NOTE: u8 = 57;
 pub const ROLL_PAINT: &str = "roll-paint";
 pub const ROLL_SWING: &str = "roll-swing";
 pub const ROLL_ROLLS: &str = "roll-rolls";
@@ -391,6 +397,30 @@ fn step_lesson(lesson: &str) -> Project {
     Project { arrangement: arr, instruments: Vec::new(), synth: None }
 }
 
+/// The Sound basics lessons, at 100 BPM. Loudness: the Keys playing a
+/// tune, to turn down. Pitch: a held A3 to write octaves and fifths over.
+/// Harmonics: Carve's Init patch as a pure sine, holding one note, to
+/// step through the waves.
+fn sound_lesson(lesson: &str) -> Project {
+    let mut arr = empty_arrangement();
+    arr.tempo_map = TempoMap::constant(THEORY_BPM, TimeSignature::FOUR_FOUR);
+    if lesson == SOUND_HARMONICS {
+        let synth = add_track(&mut arr, "Carve", ClipColor::Violet, Instrument::Carve, -4.0);
+        add_loop(&mut arr, synth, "Held note", steps(&[(0, SOUND_PITCH_NOTE, 14)]), 1, CARVE_BARS);
+        let mut patch = init_patch();
+        patch.osc1.waveform = Waveform::Sine;
+        return Project { arrangement: arr, instruments: vec![(synth, patch)], synth: None };
+    }
+    let keys = add_track(&mut arr, "Keys", ClipColor::Teal, Instrument::Carve, 0.0);
+    let (name, notes, pattern_bars) = if lesson == SOUND_LOUDNESS {
+        ("Tune", steps(&HOME_TUNE), 2)
+    } else {
+        ("Notes", steps(&[(0, SOUND_PITCH_NOTE, 15)]), 1)
+    };
+    add_loop(&mut arr, keys, name, notes, pattern_bars, 8);
+    Project { arrangement: arr, instruments: vec![(keys, theory_keys())], synth: None }
+}
+
 /// The piano roll lessons, at an easy 100 BPM: a beat whose hats all hit
 /// equally hard (dynamics), or that beat under an empty Keys clip
 /// (length and timing).
@@ -476,6 +506,9 @@ pub fn starting_project(lesson: &str) -> Project {
     }
     if lesson.starts_with("theory-") {
         return theory_lesson(lesson);
+    }
+    if lesson.starts_with("sound-") {
+        return sound_lesson(lesson);
     }
     if lesson.starts_with("mix-") {
         return mix_lesson(lesson);

@@ -12,7 +12,7 @@ use shared::lessons::{
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
     THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
-    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS,
+    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, SOUND_PITCH_NOTE,
     TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE, TRAP_KICKS, TRAP_SNARE, TRAP_PHRASE, TRAP_GAP_BAR, MELODY_CALL, MELODY_MOTIF,
 };
 use super::sound_match::WIN;
@@ -59,6 +59,7 @@ pub const THEORY: &str = "Theory";
 pub const MIXING: &str = "Mixing";
 pub const ROLL: &str = "Piano roll";
 pub const MELODY: &str = "Melody";
+pub const SOUND: &str = "Sound basics";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -238,6 +239,137 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "Two chords, four hits. A minor and C major share two notes (C and E), \
                  which is why one flows so smoothly into the other.",
+            ),
+        ],
+    },
+    Lesson {
+        id: SOUND_LOUDNESS,
+        group: SOUND,
+        title: "Loudness and decibels",
+        steps: &[
+            info(
+                "Every sound is a vibration. How far it swings is its amplitude - bigger, louder. \
+                 Volume is measured in decibels (dB), and every fader, meter and knob in Shor that says dB uses the same scale.",
+            ),
+            act("Press Space: the Keys at full volume, 0 dB.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Drag the Keys fader, on the right of its track header, down to about -6 dB.",
+                "-6 dB halves the wave's amplitude. It's quieter - but not half as loud: your ears judge ratios, not differences, and dB counts ratios too.",
+                "The dB number beside the fader shows where it is. Anywhere from -7 to -5 counts.",
+                |s| gain_between(s, "Keys", -7.0, -5.0),
+                |s| track_named(s, "Keys").map(|t| Target::Fader(t.id)),
+            ),
+            recipe(
+                "Now down to about -20 dB.",
+                "-20 dB is a tenth of the amplitude. Every -20 dB is another tenth: -40 dB a hundredth, -60 dB practically silence - which is where Carve's mixer knobs stop.",
+                "Between -22 and -18.",
+                |s| gain_between(s, "Keys", -22.0, -18.0),
+                |s| track_named(s, "Keys").map(|t| Target::Fader(t.id)),
+            ),
+            recipe(
+                "Back up to about -10 dB.",
+                "-10 dB is roughly \u{201c}half as loud\u{201d} to most ears, even though the wave is about a third of its size. That gap between the size of a wave and how loud it seems is why sound is measured in dB at all.",
+                "Between -12 and -8.",
+                |s| gain_between(s, "Keys", -12.0, -8.0),
+                |s| track_named(s, "Keys").map(|t| Target::Fader(t.id)),
+            ),
+            info(
+                "0 dB is full, -6 dB half the amplitude, -20 dB a tenth, -60 dB silent - and about -10 dB sounds half as loud. \
+                 The meters beside each fader and in the top bar read on the same scale, so a mix can be balanced by numbers as well as by ear.",
+            ),
+        ],
+    },
+    Lesson {
+        id: SOUND_PITCH,
+        group: SOUND,
+        title: "Pitch and frequency",
+        steps: &[
+            info(
+                "Pitch is how fast a vibration repeats: its frequency, counted in hertz (Hz) - times a second. \
+                 The A in the Notes clip is A3, 220 Hz. The A above it, A4, is 440 Hz: the note orchestras tune to.",
+            ),
+            act("Press Space: A3, 220 Hz, held.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "Open the Notes clip: double-click it.",
+                "Two quick clicks on the clip in the Keys lane.",
+                |s| track_open(s, "Keys"),
+                |s| track_named(s, "Keys").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Add the A an octave up, A4, on beat 3.",
+                "A4 is 440 Hz: exactly double A3's 220. Doubling the frequency is an octave - the same note, higher - so the two melt together. Halving it is an octave down: that's what Carve's Octave knobs and its Sub do.",
+                "The A rows are labelled; A4 is the second one up. Beat 3 is the middle of the bar.",
+                |s| keys_notes(s).iter().any(|n| n.pitch == SOUND_PITCH_NOTE + 12),
+                |s| theory_row(s, SOUND_PITCH_NOTE + 12),
+            ),
+            recipe(
+                "Now E4 on beat 4.",
+                "E4 is 330 Hz: one and a half times A3. Simple ratios - 2 to 1, 3 to 2 - sound smooth together; that's why octaves and fifths are the backbone of chords, and why they appear inside every note as harmonics.",
+                "E4 is a few rows below A4.",
+                |s| keys_notes(s).iter().any(|n| n.pitch == SOUND_PITCH_NOTE + 7),
+                |s| theory_row(s, SOUND_PITCH_NOTE + 7),
+            ),
+            quiz(
+                "Listen: two notes, one after the other. The same note an octave apart, or two different notes?",
+                "An octave: 220 Hz then 440 Hz. It's the same note, just higher - which is why both are called A.",
+                &[(0, 57, 6), (8, 69, 6)],
+                &["An octave apart", "Two different notes"],
+                0,
+            ),
+            info(
+                "Frequency, in Hz, is pitch: double it for an octave up, halve it for one down, 1.5 times for a fifth. \
+                 We hear from about 20 Hz (a rumble) to about 16,000 Hz (a hiss) - the whole range the spectrum analyser draws.",
+            ),
+        ],
+    },
+    Lesson {
+        id: SOUND_HARMONICS,
+        group: SOUND,
+        title: "Harmonics and tone",
+        steps: &[
+            info(
+                "Almost every note is many frequencies at once: the note itself - the fundamental - plus quieter ones at 2, 3, 4 times its frequency. \
+                 Those are its harmonics. Which ones, and how loud, is what makes a flute sound unlike a violin: its tone.",
+            ),
+            act("Press Space: a sine wave. Just the fundamental, no harmonics - pure and plain.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Click Spectrum, in the top bar, to see it.",
+                "The spectrum draws how loud each frequency is, low on the left, high on the right. A sine is one peak: one frequency, nothing else.",
+                "Near the right end of the top bar.",
+                |s| s.analyzer_open,
+                |_| Some(Target::Spectrum),
+            ),
+            recipe(
+                "Switch Oscillator 1 to the triangle, the second wave button.",
+                "New peaks appear at 3, 5, 7 times the note - the odd harmonics - but faint. A triangle is a sine with a little edge.",
+                "The four wave pictures next to \u{201c}Oscillator 1\u{201d}.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Triangle),
+                |_| Some(Target::OscWave(1)),
+            ),
+            recipe(
+                "Now the square, the last button.",
+                "The same odd harmonics, much louder: hollow and woody, like a clarinet. Same peaks, different heights - that alone changes the tone.",
+                "The fourth wave button.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Square),
+                |_| Some(Target::OscWave(1)),
+            ),
+            recipe(
+                "And the saw, the third button.",
+                "Every harmonic, odd and even, all strong: the brightest, buzziest wave. That's why most synth sounds start from a saw - there's the most there to shape.",
+                "The third wave button.",
+                |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Saw),
+                |_| Some(Target::OscWave(1)),
+            ),
+            recipe(
+                "Turn the filter's Cutoff down to about 500 Hz and watch the peaks on the right disappear.",
+                "The filter takes the higher harmonics away and the saw goes dark and round. Starting bright and taking harmonics away is subtractive synthesis - what Carve does, and what its lessons teach next.",
+                "The big Cutoff knob in the Filter section. Between 300 and 800 Hz.",
+                |s| carve(s).is_some_and(|p| (300.0..=800.0).contains(&p.filter.cutoff_hz)),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            info(
+                "A note is its fundamental plus harmonics; the waves differ only in which harmonics they have and how loud: \
+                 sine none, triangle faint odd ones, square strong odd ones, saw all of them. A filter removes harmonics. That's the whole idea behind Carve.",
             ),
         ],
     },
@@ -3464,7 +3596,7 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// The suggested order for someone new: a beat first, then the notes on
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
-    FIRST_BEAT, BASSLINE, CHORDS, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
+    FIRST_BEAT, BASSLINE, CHORDS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
     THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, MELODY_STEPS, MELODY_CALL,
     MELODY_MOTIF, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
@@ -3552,7 +3684,11 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("drone", "one note held under everything"),
     ("raag", "a set of notes and rules for a melody, from Indian classical music"),
     ("fader", "the slider that sets a track's volume"),
-    ("db", "decibels, how loud: -6 dB is about half as loud"),
+    ("db", "decibels: how loud, counted in ratios - -6 dB is half the amplitude, -60 dB silence"),
+    ("amplitude", "how far a sound wave swings: bigger is louder"),
+    ("frequency", "how many times a second a vibration repeats: what you hear as pitch"),
+    ("hz", "hertz, times a second: A4 is 440 Hz"),
+    ("fundamental", "the note itself, the lowest frequency in it; its harmonics sit above"),
     ("mute", "silences a track"),
     ("solo", "plays only this track"),
     ("marker", "a named flag on the ruler, marking a section of the song"),

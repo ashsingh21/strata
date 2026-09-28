@@ -848,6 +848,26 @@ pub fn steps(lesson: &str) -> Vec<Show> {
             };
             vec![b(play), b(|s| s.open_clip = Some(clip_on_track(s, "Drums"))), b(soften(&ROLL_GHOSTS, 40)), b(soften(&[2, 6, 10, 14], 75))]
         }
+        SOUND_LOUDNESS => vec![
+            b(play),
+            b(|s| select_gain(s, "Keys", -6.0)),
+            b(|s| select_gain(s, "Keys", -20.0)),
+            b(|s| select_gain(s, "Keys", -10.0)),
+        ],
+        SOUND_PITCH => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Keys"))),
+            b(|s| add_note_on(s, "Keys", SOUND_PITCH_NOTE + 12, 2 * PPQ, SIXTEENTH)),
+            b(|s| add_note_on(s, "Keys", SOUND_PITCH_NOTE + 7, 3 * PPQ, SIXTEENTH)),
+        ],
+        SOUND_HARMONICS => vec![
+            b(play),
+            b(|s| s.analyzer_open = true),
+            b(|s| s.synth.osc1.waveform = Waveform::Triangle),
+            b(|s| s.synth.osc1.waveform = Waveform::Square),
+            b(|s| s.synth.osc1.waveform = Waveform::Saw),
+            b(|s| s.synth.filter.cutoff_hz = 500.0),
+        ],
         ROLL_PAINT => vec![
             b(play),
             b(|s| s.open_clip = Some(clip_on_track(s, "Drums"))),
