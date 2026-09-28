@@ -12,7 +12,8 @@ use shared::lessons::{
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
     THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
-    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS, MELODY_CALL, MELODY_MOTIF,
+    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS,
+    TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE, TRAP_KICKS, TRAP_SNARE, TRAP_PHRASE, TRAP_GAP_BAR, MELODY_CALL, MELODY_MOTIF,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -3059,6 +3060,231 @@ pub const LESSONS: &[Lesson] = &[
         ],
     },
     Lesson {
+        id: TRAP_DRUMS,
+        group: PROJECTS,
+        title: "Trap 1: the drums",
+        steps: &[
+            info(
+                "Trap: 140 BPM, but the kick and snare move at half that speed while the hats race. In four parts you'll \
+                 build a desi trap track: drums, a sliding 808, a flute line with an Indian touch, then the arrangement.",
+            ),
+            act(
+                "Add a drum track: \u{201c}+ Drums\u{201d} under the tracks.",
+                "Below the track list, on the left of the timeline.",
+                |s| tracks_with(s, Instrument::Drums).next().is_some(),
+                |_| Some(Target::AddDrumTrack),
+            ),
+            act(
+                "Double-click bar 1 of the Drums track to make a clip.",
+                "Two quick clicks on the empty lane. The clip opens below.",
+                |s| clips_on(s, Instrument::Drums).next().is_some(),
+                |s| tracks_with(s, Instrument::Drums).next().map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Kick on beat 1, and on the 7th square - the \u{201c}and\u{201d} of 2.",
+                "Each beat has four squares. The 7th is two after the 2 mark.",
+                |s| drum_pattern_has(s, KICK, &TRAP_KICKS.map(|at| at * SIXTEENTH)),
+                |s| row_or_clip(s, Instrument::Drums, KICK),
+            ),
+            recipe(
+                "One snare, on beat 3. Only one a bar: that's half-time.",
+                "A house beat claps on 2 and 4. Moving the snare to 3 makes the same tempo feel twice as slow and heavy.",
+                "The Snare row, under the 3 mark.",
+                |s| drum_pattern_has(s, SNARE, &[TRAP_SNARE * SIXTEENTH]),
+                |s| row_or_clip(s, Instrument::Drums, SNARE),
+            ),
+            act(
+                "Hats: pick 1/8 in the Snap menu, then drag along the Closed Hat row from beat 1 to beat 3.",
+                "Snap is at the top right of the editor. Hold the button down while you drag.",
+                |s| trap_hats(s, 0, 3 * PPQ).len() >= 5,
+                |s| if s.snap == SnapGrid::Eighth { row_or_clip(s, Instrument::Drums, CLOSED_HAT) } else { Some(Target::Snap) },
+            ),
+            recipe(
+                "Roll into the next bar: pick 1/32, then drag along the Closed Hat row across beat 4.",
+                "The rattle at the end of the bar is what makes hats sound like trap. Start on an empty square, or the drag erases.",
+                "Beat 4 is the last quarter of the bar.",
+                |s| {
+                    let roll = trap_hats(s, 3 * PPQ, BAR);
+                    roll.len() >= 6 && roll.iter().any(|n| n.start % SIXTEENTH != 0)
+                },
+                |s| if s.snap == SnapGrid::ThirtySecond { row_or_clip(s, Instrument::Drums, CLOSED_HAT) } else { Some(Target::Snap) },
+            ),
+            act("Press Space.", "Or the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            act(
+                "Stretch the clip to bar 17: drag its right edge.",
+                "Grab the very end of the clip in the timeline.",
+                |s| clips_on(s, Instrument::Drums).any(|c| loops(c, 16)),
+                |s| tracks_with(s, Instrument::Drums).next().map(|t| Target::Lane(t.id)),
+            ),
+            info("Half-time kick and snare, racing hats with a roll. Next: the 808 under it."),
+        ],
+    },
+    Lesson {
+        id: TRAP_808,
+        group: PROJECTS,
+        title: "Trap 2: the 808",
+        steps: &[
+            act(
+                "Add a MIDI track for the 808.",
+                "\u{201c}+ MIDI track\u{201d}, below the track list.",
+                |s| tracks_with(s, Instrument::Carve).next().is_some(),
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Its sound: open Carve's presets and pick 808.",
+                "The preset name at the top of Carve.",
+                |s| is_selected(s, trap_808(s)) && s.synth.name == "808",
+                |_| Some(Target::Preset("808")),
+            ),
+            act(
+                "Double-click bar 1 of the new track.",
+                "On its empty lane.",
+                |s| trap_808(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == 0)),
+                |s| trap_808(s).map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "The 808 hits with the kick: A3, the bottom row, on squares 1 and 7.",
+                "An 808 is a long, deep kick you can tune. Lined up with the kick, the two land as one huge hit.",
+                "The same squares as the kicks.",
+                |s| TRAP_KICKS.iter().all(|&at| track_notes(trap_808(s), s).iter().any(|n| n.pitch == 57 && n.start == at * SIXTEENTH)),
+                |s| trap_808(s).and_then(|t| row_or_lane(s, t, 57)),
+            ),
+            act("Press Space.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "A slide: set Snap to 1/4 and click A3 on beat 3 - a long note. Then Snap back to 1/16 and click C4 two squares later, inside it.",
+                "The 808 plays one note at a time with Glide on. A note that starts while the last one still sounds bends up to it instead of starting over: the 808 slide.",
+                "The C4 has to start before the long A3 ends. C4 is the row above A3.",
+                |s| slides(&track_notes(trap_808(s), s)),
+                |s| {
+                    let long = track_notes(trap_808(s), s).iter().any(|n| n.length >= PPQ);
+                    match (long, s.snap) {
+                        (false, SnapGrid::Quarter) | (true, SnapGrid::Sixteenth) => trap_808(s).and_then(|t| row_or_lane(s, t, if long { 60 } else { 57 })),
+                        _ => Some(Target::Snap),
+                    }
+                },
+            ),
+            act(
+                "Stretch the 808 clip to bar 17, level with the drums.",
+                "Drag its right edge.",
+                |s| trap_808(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| trap_808(s).map(|t| Target::Lane(t.id)),
+            ),
+            info("The 808 booms with the kick and bends up into the next bar. Next: the melody."),
+        ],
+    },
+    Lesson {
+        id: TRAP_MELODY,
+        group: PROJECTS,
+        title: "Trap 3: a flute line",
+        steps: &[
+            act(
+                "Add a MIDI track for the melody.",
+                "\u{201c}+ MIDI track\u{201d}.",
+                |s| tracks_with(s, Instrument::Carve).count() >= 2,
+                |_| Some(Target::AddMidiTrack),
+            ),
+            act(
+                "Preset: Flute - breathy, like a bansuri.",
+                "The preset name at the top of Carve.",
+                |s| is_selected(s, trap_melody(s)) && s.synth.name == "Flute",
+                |_| Some(Target::Preset("Flute")),
+            ),
+            act(
+                "Double-click bar 1 of the new track.",
+                "On its empty lane.",
+                |s| trap_melody(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.start == 0)),
+                |s| trap_melody(s).map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Pattern + until it says 2 bars.",
+                "Above the grid.",
+                |s| trap_melody(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.content_len() == bars(2))),
+                |_| Some(Target::PatternPlus),
+            ),
+            act(
+                "Bar 1, falling: E, D, C, then B.",
+                "Use the upper octave: E5 is high up. Space them out - the flute's notes can be longer than a square.",
+                |s| trap_phrase(s, 0),
+                |s| trap_melody(s).and_then(|t| row_or_lane(s, t, 76)),
+            ),
+            act(
+                "Bar 2, the answer: C, B, G, then home to A.",
+                "Bar 2 starts at the 2 mark.",
+                |s| trap_phrase(s, 1),
+                |s| trap_melody(s).and_then(|t| row_or_lane(s, t, 72)),
+            ),
+            act(
+                "Stretch the melody to bar 17.",
+                "Drag its right edge.",
+                |s| trap_melody(s).is_some_and(|t| clips_of(s, t.id).any(|c| c.end() >= bars(16) && looping(c))),
+                |s| trap_melody(s).map(|t| Target::Lane(t.id)),
+            ),
+            act("Press Space.", "Or the play button.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "The desi touch: one square before one of your notes, add the note just above it.",
+                "A grace note from above - a kan - is how Indian singers and flautists land on a note. It turns a plain line into a sung one.",
+                "Click the row one above a note, one square to its left.",
+                |s| has_kan_in(&track_notes(trap_melody(s), s)),
+                |s| trap_melody(s).and_then(|t| row_or_lane(s, t, 77)),
+            ),
+            info("A falling call, an answer that comes home, and a kan to make it sing. Last part: shape it into a track."),
+        ],
+    },
+    Lesson {
+        id: TRAP_ARRANGE,
+        group: PROJECTS,
+        title: "Trap 4: intro and drop",
+        steps: &[
+            act(
+                "An intro - the flute alone, then everything. Click the ruler at bar 5 and press Ctrl+E (\u{2318}E on a Mac): every clip splits there.",
+                "Click the glowing bar first - the split happens at the playhead.",
+                |s| starts_at(s, "Drums", 4),
+                |_| Some(Target::RulerBar(4)),
+            ),
+            act(
+                "Click the Drums piece in bars 1 to 4 and press Delete.",
+                "Just that first piece.",
+                |s| silent_in(s, "Drums", 0, 4) && !silent_in(s, "Drums", 4, 16),
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Same for the 808 piece in bars 1 to 4.",
+                "Click it, then Delete.",
+                |s| silent_in(s, "808", 0, 4) && !silent_in(s, "808", 4, 16),
+                |s| track_named(s, "808").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "A drop-out before the loop comes round: split again at bar 12.",
+                "Click the ruler at bar 12, then Ctrl+E.",
+                |s| starts_at(s, "Drums", TRAP_GAP_BAR),
+                |_| Some(Target::RulerBar(TRAP_GAP_BAR)),
+            ),
+            act(
+                "And at bar 13.",
+                "Click the ruler at bar 13, then Ctrl+E.",
+                |s| starts_at(s, "Drums", TRAP_GAP_BAR + 1),
+                |_| Some(Target::RulerBar(TRAP_GAP_BAR + 1)),
+            ),
+            recipe(
+                "Delete the Drums piece in bar 12.",
+                "One bar with only the 808 and flute, then the drums crash back in: silence is what makes the return hit.",
+                "The short piece between the two splits.",
+                |s| silent_in(s, "Drums", TRAP_GAP_BAR, TRAP_GAP_BAR + 1) && !silent_in(s, "Drums", TRAP_GAP_BAR + 1, 16) && !silent_in(s, "Drums", 4, TRAP_GAP_BAR),
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Listen from the top: press Home, then Space.",
+                "Home jumps to the start.",
+                |s| s.playing && s.playhead < bars(2),
+                |_| Some(Target::Play),
+            ),
+            info(
+                "A flute intro, the beat and 808 landing together, a bar of air, then back in: a trap track. \
+                 Save it (Ctrl+S, \u{2318}S on a Mac) and export it from the File menu.",
+            ),
+        ],
+    },
+    Lesson {
         id: MATCH_WAVE,
         group: SOUND_MATCH,
         title: "Which wave?",
@@ -3224,7 +3450,7 @@ pub const PATH: &[&str] = &[
     MELODY_MOTIF, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
     ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
-    LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE,
+    LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE,
 ];
 
 /// The lesson to take next: the first unfinished one on the path, then
@@ -3313,6 +3539,14 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("marker", "a named flag on the ruler, marking a section of the song"),
     ("breakdown", "a quieter section where the drums and bass drop out"),
     ("automate", "let a knob move by itself as the song plays"),
+    ("swing", "every second 16th pushed a little late, so a beat shuffles instead of marching"),
+    ("accent", "a hit played harder than the ones around it"),
+    ("ghost", "a very quiet extra hit, felt more than heard"),
+    ("roll", "a burst of hits too fast to count, usually on the hi-hat"),
+    ("triplet", "three notes in the space of two"),
+    ("808", "a long, deep kick tuned to play bass notes - named after the drum machine it came from"),
+    ("half-time", "the snare on beat 3 only, so the beat feels half as fast as the tempo"),
+    ("kan", "a quick grace note from just above, touched before landing on a note"),
 ];
 
 /// The glossary words step `step` of `lesson` uses that no earlier step
@@ -3798,6 +4032,55 @@ fn sequenced(s: &Snapshot, from: i64, to: i64) -> bool {
 /// `pitch`'s row once the Melody clip is open, else its lane.
 fn melody_row(s: &Snapshot, pitch: u8) -> Option<Target> {
     if track_open(s, "Melody") { Some(Target::PianoRollRow(pitch)) } else { track_named(s, "Melody").map(|t| Target::Lane(t.id)) }
+}
+
+fn trap_808(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    part_track(s, "808", &[])
+}
+
+fn trap_melody(s: &Snapshot) -> Option<&shared::arrangement::Track> {
+    part_track(s, "Melody", &["808"])
+}
+
+/// Every pattern note on `track`'s clips.
+fn track_notes(track: Option<&shared::arrangement::Track>, s: &Snapshot) -> Vec<shared::arrangement::MidiNote> {
+    let Some(t) = track else { return Vec::new() };
+    clips_of(s, t.id)
+        .flat_map(|c| match &c.content {
+            ClipContent::Midi { notes, .. } => notes.clone(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// The closed hats starting in `from..to` of any drum clip's pattern.
+fn trap_hats(s: &Snapshot, from: Ticks, to: Ticks) -> Vec<shared::arrangement::MidiNote> {
+    clips_on(s, Instrument::Drums)
+        .flat_map(|c| match &c.content {
+            ClipContent::Midi { notes, .. } => notes.clone(),
+            _ => Vec::new(),
+        })
+        .filter(|n| n.pitch == CLOSED_HAT && (from..to).contains(&n.start))
+        .collect()
+}
+
+/// A note that starts, at another pitch, while an earlier one still
+/// sounds - what a Mono patch glides between.
+fn slides(notes: &[shared::arrangement::MidiNote]) -> bool {
+    notes.iter().any(|a| notes.iter().any(|b| b.pitch != a.pitch && b.start > a.start && b.start < a.start + a.length))
+}
+
+/// A grace note from above: a note one 16th before a lower one.
+fn has_kan_in(notes: &[shared::arrangement::MidiNote]) -> bool {
+    notes.iter().any(|a| notes.iter().any(|b| b.start == a.start + SIXTEENTH && a.pitch > b.pitch))
+}
+
+/// Bar `bar` of the flute's pattern has that bar's notes of the phrase
+/// (any octave, any rhythm).
+fn trap_phrase(s: &Snapshot, bar: i64) -> bool {
+    let Some(t) = trap_melody(s) else { return false };
+    let want: Vec<u8> = TRAP_PHRASE.iter().filter(|(at, ..)| at / 16 == bar).map(|&(_, p, _)| p).collect();
+    clips_of(s, t.id).any(|c| want.iter().all(|&p| notes_in_bar(c, bar as usize).any(|n| same_class(n.pitch, p))))
 }
 
 fn drums_open(s: &Snapshot) -> bool {

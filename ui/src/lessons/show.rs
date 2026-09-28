@@ -577,6 +577,65 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 b(|s| add_notes(s, 71, &[11 * SIXTEENTH])),
             ]
         }
+        TRAP_DRUMS => vec![
+            b(|s| add_track(s, "Drums", Some(Instrument::Drums))),
+            b(|s| draw_clip_at(s, 0)),
+            b(|s| add_notes(s, KICK, &TRAP_KICKS.map(|at| at * SIXTEENTH))),
+            b(|s| add_notes(s, SNARE, &[TRAP_SNARE * SIXTEENTH])),
+            b(|s| {
+                s.snap = shared::arrangement::SnapGrid::Eighth;
+                add_notes(s, CLOSED_HAT, &[0, PPQ / 2, PPQ, 3 * PPQ / 2, 2 * PPQ, 5 * PPQ / 2]);
+            }),
+            b(|s| {
+                s.snap = shared::arrangement::SnapGrid::ThirtySecond;
+                add_notes(s, CLOSED_HAT, &(0..8).map(|i| 3 * PPQ + i * PPQ / 8).collect::<Vec<_>>());
+            }),
+            b(play),
+            b(|s| stretch_to(s, 16)),
+        ],
+        TRAP_808 => vec![
+            b(|s| add_midi_track(s, "MIDI 1")),
+            b(|s| s.synth = shared::synth::recipes::eight_oh_eight()),
+            b(|s| draw_clip_at(s, 0)),
+            b(|s| add_notes(s, 57, &TRAP_KICKS.map(|at| at * SIXTEENTH))),
+            b(play),
+            b(|s| {
+                let clip = last_clip(s);
+                s.snap = shared::arrangement::SnapGrid::Quarter;
+                Command::AddMidiNote { clip, note: MidiNote { start: 2 * PPQ, length: PPQ, pitch: 57, velocity: 100 } }.apply(&mut s.arrangement);
+                s.snap = shared::arrangement::SnapGrid::Sixteenth;
+                add_notes(s, 60, &[2 * PPQ + PPQ / 2]);
+            }),
+            b(|s| stretch_to(s, 16)),
+        ],
+        TRAP_MELODY => {
+            let bar = |s: &mut Snapshot, bar: i64| {
+                for &(at, pitch, _) in TRAP_PHRASE.iter().filter(|(at, ..)| at / 16 == bar) {
+                    add_notes(s, pitch, &[at * SIXTEENTH]);
+                }
+            };
+            vec![
+                b(|s| add_midi_track(s, "MIDI 2")),
+                b(|s| s.synth = shared::synth::recipes::flute()),
+                b(|s| draw_clip_at(s, 0)),
+                b(|s| pattern_bars(s, 2)),
+                b(move |s| bar(s, 0)),
+                b(move |s| bar(s, 1)),
+                b(|s| stretch_to(s, 16)),
+                b(play),
+                // A C one square before bar 2's B: a kan from above.
+                b(|s| add_notes(s, 72, &[19 * SIXTEENTH])),
+            ]
+        }
+        TRAP_ARRANGE => vec![
+            b(|s| split_all_at(s, 4)),
+            b(|s| delete_piece(s, "Drums", 0)),
+            b(|s| delete_piece(s, "808", 0)),
+            b(|s| split_all_at(s, TRAP_GAP_BAR)),
+            b(|s| split_all_at(s, TRAP_GAP_BAR + 1)),
+            b(|s| delete_piece(s, "Drums", TRAP_GAP_BAR)),
+            b(play),
+        ],
         BOLLY_DRONE => vec![
             b(|s| add_midi_track(s, "MIDI 4")),
             b(|s| s.synth = shared::synth::recipes::tanpura()),

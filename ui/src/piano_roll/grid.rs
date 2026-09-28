@@ -668,6 +668,9 @@ impl View for Grid {
                 }
             }
         }
+        // A drum hit is a one-shot: drawn one Snap step wide at most, so a
+        // 16th hat doesn't hide the empty 32nd after it.
+        let hit_width = if self.drums() { self.snap.get().ticks().unwrap_or(PPQ / 4) } else { Ticks::MAX };
         for note in &notes {
             if self.paint.as_ref().is_some_and(|p| p.pitch == note.pitch) && erasing.contains(&note.start) {
                 continue;
@@ -676,7 +679,7 @@ impl View for Grid {
             let y0 = top + row as f32 * ROW_H + 1.0;
             let y1 = y0 + ROW_H - 3.0;
             let x0 = tick_to_x(note.start) + 1.0;
-            let x1 = tick_to_x(note.start + note.length).min(gx + gw);
+            let x1 = tick_to_x(note.start + note.length.min(hit_width)).min(gx + gw);
             if x1 <= x0 {
                 continue;
             }

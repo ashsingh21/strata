@@ -938,6 +938,48 @@ mod tests {
     }
 
     #[test]
+    fn the_trap_chain_builds_part_by_part() {
+        let names = |n| trap_after(n).arrangement.tracks.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+        assert!(names(0).is_empty());
+        assert_eq!(names(3), ["Drums", "808", "Melody"]);
+        assert_eq!(part_track_names(TRAP_MELODY), ["808", "Melody"]);
+        assert_eq!(previous_part(TRAP_ARRANGE), Some(TRAP_MELODY));
+        let p = trap_after(4);
+        assert_eq!(p.arrangement.tempo_map.bpm_at(0), TRAP_BPM);
+        let minor = [9, 11, 0, 2, 4, 5, 7];
+        for clip in &p.arrangement.clips {
+            let track = p.arrangement.track(clip.track).unwrap();
+            let notes = clip.played_notes();
+            if track.instrument == Some(Instrument::Carve) {
+                assert!(notes.iter().all(|n| minor.contains(&(n.pitch % 12)) && n.pitch >= 57), "{}", track.name);
+            }
+            // The arranged drums: nothing in the intro or the drop-out bar.
+            if track.name == "Drums" {
+                assert!(notes.iter().all(|n| {
+                    let at = clip.start + n.start;
+                    at >= 4 * BAR && !(TRAP_GAP_BAR * BAR..(TRAP_GAP_BAR + 1) * BAR).contains(&at)
+                }));
+            }
+        }
+        // The 808 slides: its C starts while the long A still sounds.
+        let bass = steps(&TRAP_808_NOTES);
+        assert!(bass.iter().any(|a| bass.iter().any(|b| b.pitch != a.pitch && b.start > a.start && b.start < a.start + a.length)));
+    }
+
+    #[test]
+    fn step_lessons_start_with_the_beat_they_finish() {
+        let hats = |id| {
+            let p = starting_project(id);
+            let ClipContent::Midi { notes, .. } = &p.arrangement.clips[0].content else { panic!() };
+            notes.iter().filter(|n| n.pitch == CLOSED_HAT).count()
+        };
+        assert_eq!(hats(ROLL_PAINT), 0);
+        assert_eq!(hats(ROLL_SWING), 16);
+        assert_eq!(hats(ROLL_ROLLS), 8);
+        assert_eq!(starting_project(ROLL_ROLLS).arrangement.tempo_map.bpm_at(0), TRAP_BPM);
+    }
+
+    #[test]
     fn every_lesson_key_is_a_real_scale() {
         for id in LOFI_PARTS.iter().chain(&HOUSE_PARTS).chain(&[RECIPE_HARP, RECIPE_REED, RECIPE_KEYS, FIRST_BEAT, ARRANGE_HOUSE, ARRANGE_BHAIRAV]) {
             if let Some((root, scale)) = lesson_key(id) {
