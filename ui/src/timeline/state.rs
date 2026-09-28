@@ -175,9 +175,12 @@ pub struct ContextMenu {
     pub y: f32,
 }
 
-/// Room below the last row for the "+ Audio track / + MIDI track" actions
-/// in the header column, so scrolling can always reach them.
-const ADD_ROW_ROOM: f64 = 48.0;
+/// Room below the last row for the Add (Audio / MIDI / Drums) row in the
+/// header column, so scrolling can always reach it. The headers' viewport
+/// is the lanes' height less the Master row pinned under it, so that's
+/// counted too - without it the Add row stayed hidden behind Master.
+const ADD_ROW_ROOM: f64 =
+    (crate::tokens::SIZE_CONTROL + crate::tokens::SPACE_3 + crate::tokens::SIZE_TOOLBAR + crate::tokens::SPACE_2) as f64;
 
 /// The stacked rows' total height, in px (as `LaneArea` lays them out).
 pub fn content_height(arr: &Arrangement) -> f64 {
