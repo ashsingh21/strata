@@ -878,6 +878,15 @@ mod tests {
         let mut driven = raw_osc(Waveform::Saw, 0.0);
         driven.filter.drive_db = 18.0;
         report("saw, drive +18 dB", &driven, 88);
+        // Read these against the plain saw at the same note: around -40 dB
+        // is this measurement's own floor there (window leakage from the
+        // saw's many harmonics, plus pitch drift), and sync and drive land
+        // within about a dB of it - they add no aliasing it can see.
+        for note in [48, 60, 72, 88] {
+            report("plain saw (baseline)", &raw_osc(Waveform::Saw, 0.0), note);
+            report("osc2 saw, synced +1 oct", &synced, note);
+            report("saw, drive +18 dB", &driven, note);
+        }
     }
 
     /// Guards the headline numbers: the raw oscillators' aliasing must stay
