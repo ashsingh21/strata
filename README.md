@@ -44,7 +44,7 @@ headers, and `zenity` for file dialogs).
 | Ctrl/⌘ E | Split clips at the playhead |
 | Ctrl/⌘ B | Show or hide the sidebar panel |
 | Ctrl/⌘ F | Search the browser |
-| Ctrl/⌘ T | Switch between the Studio (dark) and Daylight themes |
+| Ctrl/⌘ T | Cycle themes: Studio, Daylight, Midnight, High contrast, Paper |
 
 ## Code
 

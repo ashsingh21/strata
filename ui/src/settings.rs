@@ -38,13 +38,18 @@ pub fn save_input_device(device: Option<&str>) {
     save_key("input_device", serde_json::json!(device));
 }
 
-/// `Some(true)` for Daylight, `Some(false)` for Studio, `None` if never set.
-pub fn load_daylight() -> Option<bool> {
-    load_all().get("daylight")?.as_bool()
+/// The colour theme's id, if one was chosen - or, from before there were
+/// more than two, the old light/dark switch.
+pub fn load_theme() -> Option<String> {
+    let all = load_all();
+    if let Some(id) = all.get("theme").and_then(|v| v.as_str()) {
+        return Some(id.to_string());
+    }
+    all.get("daylight")?.as_bool().map(|d| if d { "daylight" } else { "studio" }.to_string())
 }
 
-pub fn save_daylight(daylight: bool) {
-    save_key("daylight", serde_json::json!(daylight));
+pub fn save_theme(id: &str) {
+    save_key("theme", serde_json::json!(id));
 }
 
 pub fn load_sidebar_open() -> Option<bool> {

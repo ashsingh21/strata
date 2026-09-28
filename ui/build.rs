@@ -19,58 +19,88 @@ fn main() {
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", tokens_path.display()));
     let tokens: Value = serde_json::from_str(&raw).expect("tokens.json is not valid JSON");
 
-    let (studio, daylight) = resolve_colors(&tokens);
+    let themes = resolve_colors(&tokens);
     let scalars = resolve_scalars(&tokens);
     let fonts = resolve_fonts(&tokens);
-    let (shadow_studio, shadow_daylight) = resolve_shadow_pop(&tokens);
+    let shadows = resolve_shadow_pop(&tokens);
 
+    // The first theme (Studio) is the default: unscoped rules. Every other
+    // theme's rules are scoped under `.theme-<id>` on the root, all in one
+    // sheet.
+    let (_, studio) = &themes[0];
     let styles_dir = manifest_dir.join("styles");
     fs::create_dir_all(&styles_dir).unwrap();
-    fs::write(styles_dir.join("base.css"), render_base_css(&scalars, &fonts, &studio)).unwrap();
-    fs::write(styles_dir.join("studio.css"), render_theme_css(&studio, None, &shadow_studio)).unwrap();
-    fs::write(
-        styles_dir.join("daylight.css"),
-        render_theme_css(&daylight, Some("theme-daylight"), &shadow_daylight),
-    )
-    .unwrap();
+    fs::write(styles_dir.join("base.css"), render_base_css(&scalars, &fonts, studio)).unwrap();
+    fs::write(styles_dir.join("studio.css"), render_theme_css(studio, None, &shadows[0])).unwrap();
+    let mut others = String::new();
+    for ((id, colors), shadow) in themes.iter().zip(&shadows).skip(1) {
+        others.push_str(&render_theme_css(colors, Some(&format!("theme-{id}")), shadow));
+        others.push('\n');
+    }
+    fs::write(styles_dir.join("themes.css"), others).unwrap();
+    // Replaced by themes.css.
+    let _ = fs::remove_file(styles_dir.join("daylight.css"));
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    fs::write(out_dir.join("tokens.rs"), render_tokens_rs(&studio, &daylight, &scalars)).unwrap();
+    fs::write(out_dir.join("tokens.rs"), render_tokens_rs(&themes, &scalars)).unwrap();
 }
 
 /// name -> "#rrggbb" per theme.
 type ColorMap = HashMap<String, String>;
 
-fn resolve_colors(tokens: &Value) -> (ColorMap, ColorMap) {
-    let entries = tokens["color"]["tokens"].as_array().expect("color.tokens array");
+/// The themes, in `color.themes` order: `(id, base)`. A theme with a
+/// `base` takes every colour it doesn't list from that theme - Midnight
+/// is Studio with blacker grounds, Paper is Daylight gone warm.
+fn theme_list(tokens: &Value) -> Vec<(String, Option<String>)> {
+    tokens["color"]["themes"]
+        .as_array()
+        .expect("color.themes array")
+        .iter()
+        .map(|t| (t["id"].as_str().unwrap().to_string(), t["base"].as_str().map(str::to_string)))
+        .collect()
+}
 
-    // Raw per-theme values first: a value is either one string for both
-    // themes or a {studio, daylight} pair, and any of them may be a
-    // `{other-token}` alias (Strata 2 aliases per theme, e.g. a
-    // `clip-*-line` is its clip colour in Studio but its own darker hex
-    // in Daylight).
-    let mut raw: Vec<(String, String, String)> = Vec::new();
-    for entry in entries {
-        let name = entry["name"].as_str().unwrap().to_string();
-        match &entry["value"] {
-            Value::Object(map) => raw.push((
-                name,
-                map["studio"].as_str().expect("studio value").to_string(),
-                map["daylight"].as_str().expect("daylight value").to_string(),
-            )),
-            Value::String(v) => raw.push((name, v.clone(), v.clone())),
-            other => panic!("unexpected value for token {name}: {other:?}"),
+/// A token's raw value in `theme`: its own entry, else its base's (and so
+/// on up), else the one value every theme shares.
+fn value_in<'a>(value: &'a Value, theme: &str, themes: &[(String, Option<String>)]) -> &'a str {
+    match value {
+        Value::String(v) => v,
+        Value::Object(map) => {
+            let mut id = theme.to_string();
+            loop {
+                if let Some(v) = map.get(&id).and_then(|v| v.as_str()) {
+                    return v;
+                }
+                let base = themes.iter().find(|(t, _)| *t == id).and_then(|(_, b)| b.clone());
+                id = base.unwrap_or_else(|| panic!("no value for {theme} in {value:?}"));
+            }
         }
+        other => panic!("unexpected token value {other:?}"),
     }
+}
 
-    let resolve_theme = |pick: fn(&(String, String, String)) -> &String| -> ColorMap {
+fn resolve_colors(tokens: &Value) -> Vec<(String, ColorMap)> {
+    let entries = tokens["color"]["tokens"].as_array().expect("color.tokens array");
+    let themes = theme_list(tokens);
+    themes.iter().map(|(id, _)| (id.clone(), resolve_theme_colors(entries, id, &themes))).collect()
+}
+
+/// One theme's colours. A value may be a `{other-token}` alias (Strata 2
+/// aliases per theme, e.g. a `clip-*-line` is its clip colour in Studio
+/// but its own darker hex in Daylight).
+fn resolve_theme_colors(entries: &[Value], theme: &str, themes: &[(String, Option<String>)]) -> ColorMap {
+    let raw: Vec<(String, String)> = entries
+        .iter()
+        .map(|e| (e["name"].as_str().unwrap().to_string(), value_in(&e["value"], theme, themes).to_string()))
+        .collect();
+    {
         let alias = |v: &str| v.strip_prefix('{').and_then(|v| v.strip_suffix('}')).map(str::to_string);
         let mut out = ColorMap::new();
         // Aliases may point at tokens declared later in the file, so
         // resolve in fixed-point passes rather than assuming order.
         for _ in 0..8 {
             for entry in &raw {
-                let value = pick(entry);
+                let value = &entry.1;
                 match alias(value) {
                     None => {
                         out.insert(entry.0.clone(), value.clone());
@@ -84,11 +114,9 @@ fn resolve_colors(tokens: &Value) -> (ColorMap, ColorMap) {
             }
         }
         let missing: Vec<_> = raw.iter().filter(|e| !out.contains_key(&e.0)).map(|e| e.0.clone()).collect();
-        assert!(missing.is_empty(), "unresolved color aliases: {missing:?}");
+        assert!(missing.is_empty(), "unresolved color aliases in {theme}: {missing:?}");
         out
-    };
-
-    (resolve_theme(|e| &e.1), resolve_theme(|e| &e.2))
+    }
 }
 
 /// name -> pixel value, for spacing/radius/size (theme-invariant).
@@ -126,12 +154,11 @@ fn resolve_fonts(tokens: &Value) -> Fonts {
 /// `shadow-pop`'s two theme values - "Popovers and menus only. Panels are
 /// flat," per its own `usage` note - but until now nothing in the
 /// generated CSS ever referenced it, so no popover actually got a shadow.
-fn resolve_shadow_pop(tokens: &Value) -> (String, String) {
+fn resolve_shadow_pop(tokens: &Value) -> Vec<String> {
     let entries = tokens["shadow"]["tokens"].as_array().expect("shadow.tokens array");
     let entry = entries.iter().find(|e| e["name"] == "shadow-pop").expect("shadow-pop token");
-    let studio = entry["value"]["studio"].as_str().expect("shadow-pop.studio").to_string();
-    let daylight = entry["value"]["daylight"].as_str().expect("shadow-pop.daylight").to_string();
-    (studio, daylight)
+    let themes = theme_list(tokens);
+    themes.iter().map(|(id, _)| value_in(&entry["value"], id, &themes).to_string()).collect()
 }
 
 /// Parses `#rrggbb`, `#rrggbbaa` or `rgba(r, g, b, a)` (`a` in 0..1) into
@@ -854,7 +881,8 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
 
 // --- Rust palette rendering -------------------------------------------
 
-fn render_tokens_rs(studio: &ColorMap, daylight: &ColorMap, scalars: &ScalarMap) -> String {
+fn render_tokens_rs(themes: &[(String, ColorMap)], scalars: &ScalarMap) -> String {
+    let studio = &themes[0].1;
     let color_fields = [
         ("bg_000", "bg-000"),
         ("bg_100", "bg-100"),
@@ -906,7 +934,8 @@ fn render_tokens_rs(studio: &ColorMap, daylight: &ColorMap, scalars: &ScalarMap)
     }
     out.push_str("}\n\n");
 
-    for (theme_name, map) in [("STUDIO", studio), ("DAYLIGHT", daylight)] {
+    for (id, map) in themes {
+        let theme_name = id.to_uppercase().replace('-', "_");
         out.push_str(&format!("pub const {theme_name}: Palette = Palette {{\n"));
         for (field, token) in &color_fields {
             out.push_str(&format!("    {field}: {},\n", color_lit(map, token)));

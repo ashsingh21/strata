@@ -102,7 +102,7 @@ fn main() -> Result<(), ApplicationError> {
         }
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");
         cx.add_stylesheet(include_style!("styles/studio.css")).expect("failed to add studio.css");
-        cx.add_stylesheet(include_style!("styles/daylight.css")).expect("failed to add daylight.css");
+        cx.add_stylesheet(include_style!("styles/themes.css")).expect("failed to add themes.css");
         // Tooltips after 0.4 s, not Vizia's 1.5 s: they're how the icon
         // rail and the quieter controls explain themselves.
         cx.emit(EnvironmentEvent::SetTooltipDelay(Duration::from_millis(400)));
@@ -364,7 +364,6 @@ fn main() -> Result<(), ApplicationError> {
         });
         cx.start_timer(render_timer);
 
-        let is_daylight = theme.map(|t| t.is_daylight());
 
         Keymap::from(vec![
             (
@@ -632,7 +631,11 @@ fn main() -> Result<(), ApplicationError> {
 
         })
         .class("app")
-        .toggle_class("theme-daylight", is_daylight)
+        // The theme's class on the root switches its colours on.
+        .toggle_class("theme-daylight", theme.map(|t| *t == tokens::ThemeId::Daylight))
+        .toggle_class("theme-midnight", theme.map(|t| *t == tokens::ThemeId::Midnight))
+        .toggle_class("theme-contrast", theme.map(|t| *t == tokens::ThemeId::Contrast))
+        .toggle_class("theme-paper", theme.map(|t| *t == tokens::ThemeId::Paper))
         .height(Stretch(1.0))
         .width(Stretch(1.0));
     })

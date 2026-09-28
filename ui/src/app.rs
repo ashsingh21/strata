@@ -62,6 +62,8 @@ pub struct AppData {
 #[derive(Debug)]
 pub enum AppEvent {
     ToggleTheme,
+    /// Pick a colour theme (Settings).
+    SetTheme(crate::tokens::ThemeId),
     /// Switch the recording input to this device now (`None`: the OS
     /// default). Ignored while a take is recording.
     SwitchInputDevice(Option<std::sync::Arc<str>>),
@@ -101,10 +103,7 @@ impl AppData {
     ) -> Self {
         Self {
             // Remembered across launches (settings.json).
-            theme: Signal::new(match crate::settings::load_daylight() {
-                Some(true) => ThemeId::Daylight,
-                _ => ThemeId::Studio,
-            }),
+            theme: Signal::new(crate::settings::load_theme().and_then(|id| ThemeId::from_id(&id)).unwrap_or(ThemeId::Studio)),
             playing: Signal::new(false),
             loop_on: Signal::new(false),
             record_armed: Signal::new(false),
@@ -140,9 +139,13 @@ pub(crate) fn db_to_meter_fraction(db: f32) -> f32 {
 impl Model for AppData {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|app_event, _| match app_event {
+            AppEvent::SetTheme(theme) => {
+                self.theme.set(*theme);
+                crate::settings::save_theme(theme.id());
+            }
             AppEvent::ToggleTheme => {
-                self.theme.update(|t| *t = t.toggled());
-                crate::settings::save_daylight(self.theme.get().is_daylight());
+                self.theme.update(|t| *t = t.next());
+                crate::settings::save_theme(self.theme.get().id());
             }
             AppEvent::ToggleSidebar => {
                 self.sidebar_open.update(|o| *o = !*o);

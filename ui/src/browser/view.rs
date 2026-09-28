@@ -213,21 +213,21 @@ fn rail(cx: &mut Context, p: BrowserProps) {
 fn settings_menu(cx: &mut Context, p: BrowserProps) {
     VStack::new(cx, move |cx| {
         Label::new(cx, "Theme").class("label");
-        HStack::new(cx, move |cx| {
-            for (name, daylight) in [("Studio", false), ("Daylight", true)] {
-                Button::new(cx, move |cx| Label::new(cx, name))
-                    .class("btn")
-                    .toggle_class("is-on", p.theme.map(move |t| t.is_daylight() == daylight))
+        VStack::new(cx, move |cx| {
+            for theme in ThemeId::ALL {
+                Button::new(cx, move |cx| Label::new(cx, theme.name()).class("body"))
+                    .class("menu-item")
+                    .toggle_class("is-on", p.theme.map(move |t| *t == theme))
+                    .width(Stretch(1.0))
                     .on_press(move |cx| {
-                        if p.theme.get().is_daylight() != daylight {
-                            cx.emit(crate::app::AppEvent::ToggleTheme);
-                        }
+                        cx.emit(crate::app::AppEvent::SetTheme(theme));
                         cx.emit(BrowserEvent::ToggleSettings);
                     });
             }
         })
-        .gap(Pixels(4.0))
-        .size(Auto);
+        .gap(Pixels(2.0))
+        .width(Pixels(140.0))
+        .height(Auto);
     })
     .class("panel")
     .class("context-menu")
