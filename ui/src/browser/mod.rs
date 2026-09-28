@@ -197,7 +197,6 @@ pub enum BrowserEvent {
     Rail(Section),
     SetChip(Chip),
     ToggleFitsKey,
-    ToggleSortMenu,
     SetSort(Sort),
     SetQuery(String),
     /// Click on a collection: narrow to it, or back out if it's selected.
@@ -233,7 +232,6 @@ pub struct BrowserModel {
     pub chip: Signal<Chip>,
     pub fits_key: Signal<bool>,
     pub sort: Signal<Sort>,
-    pub sort_open: Signal<bool>,
     pub favourites: Signal<Vec<String>>,
     pub collections: Signal<Vec<Collection>>,
     pub collection: Signal<Option<Coll>>,
@@ -275,7 +273,6 @@ impl BrowserModel {
             chip: Signal::new(Chip::All),
             fits_key: Signal::new(false),
             sort: Signal::new(Sort::Recent),
-            sort_open: Signal::new(false),
             favourites: Signal::new(crate::settings::load_browser_list("browser_favourites")),
             collections: Signal::new(crate::settings::load_browser_collections()),
             collection: Signal::new(None),
@@ -427,11 +424,7 @@ impl Model for BrowserModel {
             }
             BrowserEvent::SetChip(chip) => self.chip.set(*chip),
             BrowserEvent::ToggleFitsKey => self.fits_key.set(!self.fits_key.get()),
-            BrowserEvent::ToggleSortMenu => self.sort_open.set(!self.sort_open.get()),
-            BrowserEvent::SetSort(sort) => {
-                self.sort.set(*sort);
-                self.sort_open.set(false);
-            }
+            BrowserEvent::SetSort(sort) => self.sort.set(*sort),
             BrowserEvent::SetQuery(q) => self.query.set(q.clone()),
             BrowserEvent::SelectCollection(coll) => {
                 self.collection.set(if self.collection.get() == Some(*coll) { None } else { Some(*coll) });

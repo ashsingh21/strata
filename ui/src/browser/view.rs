@@ -61,7 +61,6 @@ pub struct BrowserProps {
     chip: Signal<Chip>,
     fits_key: Signal<bool>,
     sort: Signal<Sort>,
-    sort_open: Signal<bool>,
     favourites: Signal<Vec<String>>,
     collections: Signal<Vec<Collection>>,
     collection: Signal<Option<Coll>>,
@@ -110,7 +109,6 @@ impl BrowserProps {
             chip: m.chip,
             fits_key: m.fits_key,
             sort: m.sort,
-            sort_open: m.sort_open,
             favourites: m.favourites,
             collections: m.collections,
             collection: m.collection,
@@ -355,29 +353,41 @@ fn panel(cx: &mut Context, p: BrowserProps) {
                         .on_press(|cx| cx.emit(BrowserEvent::ToggleFitsKey));
                     Label::new(cx, Memo::new(move |_| super::key_label(p.key.get(), p.scale_mask.get()))).class("value").text_wrap(false);
                     Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-                    Button::new(cx, move |cx| Label::new(cx, p.sort.map(|s| format!("{} \u{25be}", s.label()))))
-                        .class("btn")
-                        .class("sm")
-                        .class("quiet")
-                        .on_press(|cx| cx.emit(BrowserEvent::ToggleSortMenu));
-                    VStack::new(cx, move |cx| {
-                            for sort in Sort::ALL {
-                                Button::new(cx, move |cx| Label::new(cx, sort.label()).class("body"))
-                                    .class("menu-item")
-                                    .toggle_class("is-on", p.sort.map(move |s| *s == sort))
-                                    .width(Stretch(1.0))
-                                    .on_press(move |cx| cx.emit(BrowserEvent::SetSort(sort)));
-                            }
-                        })
-                    .class("panel")
-                    .class("context-menu")
-                    .toggle_class("hidden", p.sort_open.map(|o| !*o))
-                    .position_type(PositionType::Absolute)
-                    .top(Pixels(28.0))
-                    .right(Pixels(tokens::SPACE_3))
-                    .z_index(10)
-                    .width(Pixels(96.0))
-                    .height(Auto);
+                    Dropdown::new(
+                        cx,
+                        move |cx| {
+                            Button::new(cx, move |cx| Label::new(cx, p.sort.map(|s| format!("{} \u{25be}", s.label()))))
+                                .class("btn")
+                                .class("sm")
+                                .class("quiet")
+                                // Vizia sizes a dropdown's children to stretch,
+                                // which is nothing inside an Auto dropdown.
+                                .width(Auto)
+                                .on_press(|cx| cx.emit(PopupEvent::Switch));
+                        },
+                        move |cx| {
+                            VStack::new(cx, move |cx| {
+                                for sort in Sort::ALL {
+                                    Button::new(cx, move |cx| Label::new(cx, sort.label()).class("body"))
+                                        .class("menu-item")
+                                        .toggle_class("is-on", p.sort.map(move |s| *s == sort))
+                                        .width(Stretch(1.0))
+                                        .on_press(move |cx| {
+                                            cx.emit(BrowserEvent::SetSort(sort));
+                                            cx.emit(PopupEvent::Close);
+                                        });
+                                }
+                            })
+                            .class("panel")
+                            .class("context-menu")
+                            .width(Pixels(96.0))
+                            .height(Auto);
+                        },
+                    )
+                    .placement(Placement::BottomEnd)
+                    .show_arrow(false)
+                    .arrow_size(Pixels(4.0))
+                    .size(Auto);
                 })
                 .toggle_class("hidden", !section.filters())
                 .alignment(Alignment::Left)
