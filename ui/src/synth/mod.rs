@@ -170,7 +170,9 @@ fn knob(
     .alignment(Alignment::Center)
     .gap(Pixels(2.0))
     .padding(Pixels(2.0))
-    .min_width(Pixels(44.0))
+    // Wide enough for the longest readout ("\u{2212}60.0 dB", "18.00 kHz"):
+    // narrower, the text ran past the column and its lesson highlight.
+    .min_width(Pixels(58.0))
     .width(Auto)
     .height(Auto);
 

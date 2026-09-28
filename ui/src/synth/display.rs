@@ -198,9 +198,19 @@ impl View for FilterDisplay {
         let mut text_paint = vg::Paint::default();
         text_paint.set_color(palette.ink_muted);
         text_paint.set_anti_alias(true);
+        // The cutoff's readout beside its line, on whichever side has room,
+        // on a plate so the curve (which peaks right there) never runs
+        // through the text.
         let label = format_hz(filter.cutoff_hz);
-        let label_x = (cutoff_x + 4.0).min(bounds.x + bounds.w - 50.0);
-        canvas.draw_str(&label, vg::Point::new(label_x, bounds.y + 12.0), &font, &text_paint);
+        let text_w = font.measure_str(&label, None).0;
+        let right = cutoff_x + 6.0;
+        let label_x = if right + text_w <= bounds.x + bounds.w - 2.0 { right } else { cutoff_x - 6.0 - text_w };
+        let mut plate = vg::Paint::default();
+        plate.set_color(palette.bg_100);
+        plate.set_anti_alias(true);
+        let plate_rect = vg::Rect::new(label_x - 3.0, bounds.y + 2.0, label_x + text_w + 3.0, bounds.y + 16.0);
+        canvas.draw_path(&vg::Path::rect(plate_rect, None), &plate);
+        canvas.draw_str(&label, vg::Point::new(label_x, bounds.y + 13.0), &font, &text_paint);
     }
 }
 
