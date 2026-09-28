@@ -23,6 +23,7 @@ pub struct LessonBarProps {
     pub match_score: Signal<Option<f32>>,
     pub quiz_wrong: Signal<Option<usize>>,
     pub reviewing: Signal<Option<usize>>,
+    pub completed: Signal<bool>,
     pub theme: Signal<crate::tokens::ThemeId>,
 }
 
@@ -40,6 +41,7 @@ impl LessonBarProps {
             match_score: model.match_score,
             quiz_wrong: model.quiz_wrong,
             reviewing: model.reviewing,
+            completed: model.completed,
             theme,
         }
     }
@@ -126,12 +128,64 @@ fn review_bar(cx: &mut Context, lesson: usize, viewing: usize, current: usize) {
     .padding_bottom(Pixels(6.0));
 }
 
+/// The step just done, held until you move on: what you did, why it
+/// sounds that way, and Before / After to hear the difference - rather
+/// than the next instruction appearing the moment it passed.
+fn done_bar(cx: &mut Context, p: LessonBarProps, lesson: usize, done: usize) {
+    let l = &LESSONS[lesson];
+    let s = &l.steps[done];
+    HStack::new(cx, move |cx| {
+        title_and_dots(cx, lesson, done + 1, done + 1);
+        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(28.0));
+        VStack::new(cx, move |cx| {
+            Label::new(cx, format!("\u{2713} Done: {}", s.text)).class("value").width(Stretch(1.0)).text_wrap(true);
+            Label::new(cx, s.why).class("body").class("lesson-text").width(Stretch(1.0)).text_wrap(true);
+        })
+        .gap(Pixels(2.0))
+        .width(Stretch(1.0))
+        .height(Auto);
+
+        // Just watched "Show me" do it: undo it and have a go.
+        Button::new(cx, |cx| Label::new(cx, "\u{21b6} Try it yourself"))
+            .class("btn")
+            .toggle_class("hidden", p.shown_step.map(move |s| *s != Some(done)))
+            .on_press(|cx| cx.emit(LessonEvent::TryYourself));
+        // The sound before the step and after it, back to back.
+        let unheard = p.change_step.map(move |c| *c != Some(done));
+        for (which, label) in [(Which::Before, "Before"), (Which::After, "After")] {
+            preview_button(cx, p, which, label).toggle_class("hidden", unheard);
+        }
+        Button::new(cx, |cx| Label::new(cx, "Next step \u{203a}"))
+            .class("btn")
+            .class("is-on")
+            .on_press(|cx| cx.emit(LessonEvent::NextStep));
+        Button::new(cx, |cx| Label::new(cx, "Exit"))
+            .class("btn")
+            .class("quiet")
+            .on_press(|cx| cx.emit(LessonEvent::Exit));
+    })
+    .class("lesson-bar")
+    .gap(Pixels(tokens::SPACE_3))
+    .padding_left(Pixels(tokens::SPACE_3))
+    .padding_right(Pixels(tokens::SPACE_3))
+    .alignment(Alignment::Left)
+    .width(Stretch(1.0))
+    .height(Auto)
+    .min_height(Pixels(48.0))
+    .padding_top(Pixels(6.0))
+    .padding_bottom(Pixels(6.0));
+}
+
 pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
-    let shown = Memo::new(move |_| (p.active.get(), p.reviewing.get()));
+    let shown = Memo::new(move |_| (p.active.get(), p.reviewing.get(), p.completed.get()));
     Binding::new(cx, shown, move |cx| {
         let Some((lesson, step)) = p.active.get() else { return };
         if let Some(viewing) = p.reviewing.get().filter(|v| *v < step) {
             review_bar(cx, lesson, viewing, step);
+            return;
+        }
+        if p.completed.get() && step > 0 {
+            done_bar(cx, p, lesson, step - 1);
             return;
         }
         let l = &LESSONS[lesson];
@@ -154,29 +208,6 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
                 if !words.is_empty() {
                     let line = words.iter().map(|(term, meaning)| format!("{term}: {meaning}")).collect::<Vec<_>>().join("   \u{b7}   ");
                     Label::new(cx, line).class("value").class("lesson-words").width(Stretch(1.0)).text_wrap(true);
-                }
-                // Under it: why the step just done sounds the way it does
-                // (while the change is still in your ears) - until a hint
-                // for this step is due, which takes the line instead.
-                let why = step.checked_sub(1).map(|i| l.steps[i].why).unwrap_or("");
-                if !why.is_empty() {
-                    HStack::new(cx, move |cx| {
-                        Label::new(cx, format!("Just now: {why}"))
-                            .class("value")
-                            .class("lesson-why")
-                            .width(Stretch(1.0))
-                            .text_wrap(true);
-                        // Hear the step just done: the sound before it and
-                        // after it, back to back, is the lesson.
-                        let unheard = p.change_step.map(move |c| step.checked_sub(1).is_none_or(|prev| *c != Some(prev)));
-                        for (which, label) in [(Which::Before, "Before"), (Which::After, "After")] {
-                            preview_button(cx, p, which, label).toggle_class("hidden", unheard);
-                        }
-                    })
-                    .gap(Pixels(tokens::SPACE_2))
-                    .alignment(Alignment::Left)
-                    .height(Auto)
-                    .toggle_class("hidden", p.hint_visible.map(move |v| *v && !s.hint.is_empty()));
                 }
                 // A quiz answered wrong: try again, by ear.
                 if let Kind::Quiz { options, .. } = s.kind {

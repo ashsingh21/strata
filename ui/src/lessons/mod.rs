@@ -182,6 +182,9 @@ pub enum LessonEvent {
     /// Reread an earlier step (read-only; the current one keeps checking
     /// meanwhile), or `None` to go back to the current step.
     Review(Option<usize>),
+    /// Done reading why the step just finished sounds as it does: on to
+    /// the next one.
+    NextStep,
     /// A preview finished rendering; `generation` drops a stale one.
     PreviewReady { generation: u64, which: preview::Which, audio: Arc<[f32]> },
     /// A Sound match measurement finished: the target's, or (with the
@@ -238,6 +241,10 @@ pub struct LessonModel {
     pub shown_step: Signal<Option<usize>>,
     /// An earlier step being reread, if any (see `LessonEvent::Review`).
     pub reviewing: Signal<Option<usize>>,
+    /// The step before the current one was just done and explains itself:
+    /// the bar stays on it (what you did, why it sounds so, Before/After)
+    /// until Next step - jumping straight to the next instruction lost it.
+    pub completed: Signal<bool>,
     /// When the lesson's project was last auto-saved to My tracks.
     last_save: Instant,
     /// A lesson just reached its end (reported to the project on the
@@ -317,6 +324,7 @@ impl LessonModel {
             shown: None,
             shown_step: Signal::new(None),
             reviewing: Signal::new(None),
+            completed: Signal::new(false),
             last_save: Instant::now(),
             finished: None,
             last_check: Instant::now(),
@@ -355,6 +363,7 @@ impl LessonModel {
         }
         self.active.set(Some((lesson, step)));
         self.reviewing.set(None);
+        self.completed.set(false);
         self.step_started = Instant::now();
         self.step_before = Some(preview::take_of(&self.snapshot(), &self.patches.get()));
         if self.last_change.as_ref().is_some_and(|(i, ..)| i + 1 != step) {
@@ -408,6 +417,7 @@ impl LessonModel {
     fn exit(&mut self) {
         self.active.set(None);
         self.reviewing.set(None);
+        self.completed.set(false);
         self.reset_match();
         self.stop_preview();
         self.step_before = None;
@@ -614,6 +624,10 @@ impl Model for LessonModel {
                     cx.emit(crate::project::ProjectEvent::AutoSave);
                 }
                 let course::Kind::Action { check, target } = course::LESSONS[lesson].steps[step].kind else { return };
+                // Still reading about the step just done: this one waits.
+                if self.completed.get() {
+                    return;
+                }
                 if self.last_check.elapsed() < CHECK_EVERY {
                     return;
                 }
@@ -624,6 +638,9 @@ impl Model for LessonModel {
                         self.last_change = Some((step, before, preview::take_of(&snap, &self.patches.get())));
                     }
                     self.go_to(lesson, step + 1);
+                    if !course::LESSONS[lesson].steps[step].why.is_empty() {
+                        self.completed.set(true);
+                    }
                 } else {
                     self.set_highlight(target(&snap));
                     if !self.hint_visible.get() && self.step_started.elapsed() >= HINT_AFTER {
@@ -661,6 +678,10 @@ impl Model for LessonModel {
                 }
             }
             LessonEvent::TryYourself => self.try_yourself(cx),
+            LessonEvent::NextStep => {
+                self.completed.set(false);
+                self.step_started = Instant::now();
+            }
             LessonEvent::Review(step) => {
                 let current = self.active.get().map(|(_, s)| s);
                 self.reviewing.set(step.filter(|s| current.is_some_and(|c| *s < c)));

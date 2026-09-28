@@ -108,8 +108,10 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 b(move |s| s.synth.mix.osc2_db = -8.0),
                 b(move |s| s.synth.osc2.knob_a_cents = 10.0),
                 b(move |s| s.synth.osc2.octave = 1),
+                b(move |s| s.synth.osc2.waveform = Waveform::Square),
                 b(move |s| s.synth.mix.sub_db = -8.0),
                 b(move |s| s.synth.mix.noise_db = -30.0),
+                b(move |s| s.synth.mix.osc1_db = -12.0),
             ]
         }
         CARVE_FILTER => {

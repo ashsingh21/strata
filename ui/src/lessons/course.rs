@@ -1163,40 +1163,63 @@ pub const LESSONS: &[Lesson] = &[
         group: CARVE,
         title: "Mixing oscillators",
         steps: &[
-            act("Press Space: one saw, held.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
-            act(
+            info(
+                "Carve has four sound sources, and the Mixer sets how loud each is: Oscillator 1, Oscillator 2, a Sub and Noise. \
+                 Every sound starts as a blend of them. In this lesson you'll add them one at a time and hear what each brings.",
+            ),
+            act("Press Space: one saw, held - Oscillator 1 on its own.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
                 "Oscillator 2 is silent. In the Mixer, turn Osc 2 up past -12 dB.",
+                "Two oscillators on the same note add up: louder, but it still sounds like one. A second oscillator only earns its place once it's different from the first - which is the next three steps.",
                 "Drag the Osc 2 knob in the Mixer upward.",
                 |s| carve(s).is_some_and(|p| p.mix.osc2_db > -12.0),
                 |_| Some(Target::Knob(SynthParam::Osc2Level)),
             ),
-            act(
-                "Detune it: set Oscillator 2's Detune to about +10 cents. The two waves drift in and out of step - that beating makes it thick.",
+            recipe(
+                "Detune it: set Oscillator 2's Detune to about +10 cents - a tenth of a semitone sharp.",
+                "Two waves a few cents apart drift in and out of step, so the sound swells and thins a few times a second (\u{201c}beating\u{201d}). That slow movement is why detuned synths sound thick and alive. Much past +30 cents it just sounds out of tune.",
                 "Anywhere from +5 to +25 cents works.",
                 |s| carve(s).is_some_and(|p| (5.0..=25.0).contains(&p.osc2.knob_a_cents)),
                 |_| Some(Target::Knob(SynthParam::Osc2Detune)),
             ),
-            act(
-                "Set Oscillator 2's Octave to +1: it now plays an octave up, adding brightness on top.",
+            recipe(
+                "Set Oscillator 2's Octave to +1: it now plays an octave above Oscillator 1.",
+                "An octave up is exactly double the pitch, so it lines up with Oscillator 1's own harmonics and strengthens the top: brighter, rather than thicker. An octave down would add body instead.",
                 "One step up on the Octave knob under Oscillator 2.",
                 |s| carve(s).is_some_and(|p| p.osc2.octave == 1),
                 |_| Some(Target::Knob(SynthParam::Osc2Octave)),
             ),
-            act(
-                "Add weight: turn Sub up past -12 dB - a sine one octave below the note.",
+            recipe(
+                "Give Oscillator 2 a different wave: pick the square in its wave buttons.",
+                "A saw has every harmonic; a square only the odd ones, which sounds hollow. Blended, they make a tone neither makes alone - a woody, reedy edge on top of the saw. Mixing oscillators is mostly this: two waves that cover each other's gaps.",
+                "The last of the four wave buttons, in Oscillator 2's header.",
+                |s| carve(s).is_some_and(|p| p.osc2.waveform == Waveform::Square),
+                |_| Some(Target::OscWave(2)),
+            ),
+            recipe(
+                "Add weight: turn Sub up past -12 dB - a plain sine one octave below the note.",
+                "The sub is felt more than heard: on big speakers it's most of a bass's power. A sine has no harmonics, so it adds weight without adding any more buzz. On laptop and phone speakers it barely shows - it supports the oscillators, it never replaces them.",
                 "The Sub knob in the Mixer.",
                 |s| carve(s).is_some_and(|p| p.mix.sub_db > -12.0),
                 |_| Some(Target::Knob(SynthParam::SubLevel)),
             ),
-            act(
+            recipe(
                 "A little air: Noise to about -30 dB. Not much - noise gets harsh fast.",
+                "Noise is every frequency at once, with no pitch of its own. A little adds breath and bite - the air in a flute, the scrape at the start of a note. More, and the note turns to static.",
                 "Between -40 and -15 dB.",
                 |s| carve(s).is_some_and(|p| (-40.0..=-15.0).contains(&p.mix.noise_db)),
                 |_| Some(Target::Knob(SynthParam::NoiseLevel)),
             ),
+            recipe(
+                "Now balance them: bring Osc 1 down to about -12 dB, so Oscillator 2's square leads.",
+                "Same four sources, different levels, different sound: with the square on top it's reedier; with the saw on top it's buzzier. Most presets are exactly this - a few sources and a careful balance.",
+                "The Osc 1 knob in the Mixer, a little way down.",
+                |s| carve(s).is_some_and(|p| (-16.0..=-9.0).contains(&p.mix.osc1_db)),
+                |_| Some(Target::Knob(SynthParam::Osc1Level)),
+            ),
             info(
-                "The Mixer blends four sources: two oscillators, a sub and noise. Most sounds use two or three, \
-                 and their levels matter as much as their waves.",
+                "The oscillators give the tone; detune and octaves give width and brightness; the sub gives weight; noise gives air. \
+                 Most sounds use two or three sources, and their levels matter as much as their waves. Next: the filter, which shapes the whole blend.",
             ),
         ],
     },
