@@ -322,7 +322,7 @@ pub fn house_demo() -> Project {
         Effect::Compressor(CompressorState { threshold_db: -20.0, ratio: 4.0, attack_ms: 5.0, release_ms: 120.0, makeup_db: 3.0 }),
     );
     // The pad's EQ is a resonant peak that the breakdown sweeps upward.
-    let pad_eq = add_effect(&mut b.arr, Some(pad), Effect::Eq(EqState { freq_hz: 400.0, gain_db: 8.0, q: 2.0 }));
+    let pad_eq = add_effect(&mut b.arr, Some(pad), Effect::Eq(EqState::bell(400.0, 8.0, 2.0)));
     // Glue on the master bus.
     add_effect(
         &mut b.arr,
@@ -337,7 +337,7 @@ pub fn house_demo() -> Project {
 
     // Pad EQ: the breakdown's sweep - the peak rises from 400 Hz to 5 kHz.
     let eq_norm = |hz: f32| {
-        let e = Effect::Eq(EqState { freq_hz: hz, gain_db: 8.0, q: 2.0 });
+        let e = Effect::Eq(EqState::bell(hz, 8.0, 2.0));
         EffectParam::EqFreq.norm(&e).unwrap_or(0.0)
     };
     b.lane(

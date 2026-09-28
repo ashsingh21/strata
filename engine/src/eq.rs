@@ -1,10 +1,12 @@
-//! A single-band peaking EQ: the RBJ ("Audio EQ Cookbook") peaking
-//! biquad, one instance per channel. Real-time safe (fixed coefficients
-//! recomputed only when the config actually changes, two state values
-//! per channel, no allocation) - same config-in-`shared`/state-in-
-//! `engine` split as `Compressor`.
+//! The four-band EQ (low cut, low shelf, bell, high shelf): one biquad
+//! per band per channel, coefficients from `shared::eq` (the same maths
+//! the UI draws its curve with). Real-time safe: coefficients are
+//! recomputed only when the config changes, flat bands are skipped, and
+//! nothing allocates - same config-in-`shared`/state-in-`engine` split as
+//! `Compressor`.
 
 use shared::arrangement::EqState;
+use shared::eq::{coefficients, is_active, Biquad};
 
 #[derive(Clone, Copy, Default)]
 struct BiquadState {
@@ -15,10 +17,9 @@ struct BiquadState {
 }
 
 impl BiquadState {
-    fn process(&mut self, x0: f32, coeffs: &Coeffs) -> f32 {
-        let y0 = coeffs.b0 * x0 + coeffs.b1 * self.x1 + coeffs.b2 * self.x2
-            - coeffs.a1 * self.y1
-            - coeffs.a2 * self.y2;
+    #[inline]
+    fn process(&mut self, x0: f32, c: &Biquad) -> f32 {
+        let y0 = c.b0 * x0 + c.b1 * self.x1 + c.b2 * self.x2 - c.a1 * self.y1 - c.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = x0;
         self.y2 = self.y1;
@@ -27,113 +28,107 @@ impl BiquadState {
     }
 }
 
-#[derive(Clone, Copy)]
-struct Coeffs {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
-}
-
-impl Coeffs {
-    fn peaking(state: EqState, sample_rate: f32) -> Self {
-        let freq = state.freq_hz.clamp(20.0, sample_rate * 0.49);
-        let q = state.q.max(0.05);
-        let a = 10f32.powf(state.gain_db / 40.0);
-        let w0 = std::f32::consts::TAU * freq / sample_rate;
-        let (sin_w0, cos_w0) = w0.sin_cos();
-        let alpha = sin_w0 / (2.0 * q);
-
-        let b0 = 1.0 + alpha * a;
-        let b1 = -2.0 * cos_w0;
-        let b2 = 1.0 - alpha * a;
-        let a0 = 1.0 + alpha / a;
-        let a1 = -2.0 * cos_w0;
-        let a2 = 1.0 - alpha / a;
-
-        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
-    }
-}
-
 pub struct Eq {
     state: EqState,
     sample_rate: f32,
-    coeffs: Coeffs,
-    left: BiquadState,
-    right: BiquadState,
+    coeffs: [Biquad; 4],
+    active: [bool; 4],
+    left: [BiquadState; 4],
+    right: [BiquadState; 4],
 }
 
 impl Eq {
     pub fn new(sample_rate: f32) -> Self {
-        let state = EqState::bypass();
-        Self {
-            state,
+        let mut eq = Self {
+            state: EqState::bypass(),
             sample_rate,
-            coeffs: Coeffs::peaking(state, sample_rate),
-            left: BiquadState::default(),
-            right: BiquadState::default(),
-        }
+            coeffs: [Biquad::IDENTITY; 4],
+            active: [false; 4],
+            left: [BiquadState::default(); 4],
+            right: [BiquadState::default(); 4],
+        };
+        eq.recompute();
+        eq
     }
 
     pub fn set_state(&mut self, state: EqState) {
         if state != self.state {
-            self.coeffs = Coeffs::peaking(state, self.sample_rate);
             self.state = state;
+            self.recompute();
+        }
+    }
+
+    fn recompute(&mut self) {
+        for (i, band) in self.state.bands.iter().enumerate() {
+            let was = self.active[i];
+            self.active[i] = is_active(band);
+            self.coeffs[i] = coefficients(band, self.sample_rate);
+            // A band switching on starts from silence, not stale history.
+            if self.active[i] && !was {
+                self.left[i] = BiquadState::default();
+                self.right[i] = BiquadState::default();
+            }
         }
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
-        (self.left.process(l, &self.coeffs), self.right.process(r, &self.coeffs))
+        let (mut l, mut r) = (l, r);
+        for i in 0..4 {
+            if self.active[i] {
+                l = self.left[i].process(l, &self.coeffs[i]);
+                r = self.right[i].process(r, &self.coeffs[i]);
+            }
+        }
+        (l, r)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::arrangement::{EQ_LOW_CUT, EQ_LOW_SHELF};
 
-    fn settle(eq: &mut Eq, n: usize) -> f32 {
-        let mut out = 0.0;
-        for i in 0..n {
-            let x = (i as f32 * 0.37).sin();
-            out = eq.process(x, x).0;
+    /// Steady-state peak of a sine at `freq` through `eq`.
+    fn level(state: EqState, freq: f32) -> f32 {
+        let sr = 48_000.0;
+        let mut eq = Eq::new(sr);
+        eq.set_state(state);
+        let mut peak = 0.0f32;
+        for i in 0..9600 {
+            let x = (std::f32::consts::TAU * freq * i as f32 / sr).sin();
+            let y = eq.process(x, x).0;
+            if i > 4800 {
+                peak = peak.max(y.abs());
+            }
         }
-        out.abs()
+        peak
     }
 
     #[test]
-    fn zero_gain_is_close_to_a_no_op() {
+    fn flat_passes_everything_unchanged() {
         let mut eq = Eq::new(48_000.0);
-        eq.set_state(EqState { freq_hz: 1000.0, gain_db: 0.0, q: 1.0 });
-        // A true peaking filter at 0dB gain is an identity filter up to
-        // floating point noise - feed it a few different levels and
-        // confirm they come back roughly unchanged.
-        for input in [0.1f32, 0.5, 0.9] {
-            let mut probe = Eq::new(48_000.0);
-            probe.set_state(EqState { freq_hz: 1000.0, gain_db: 0.0, q: 1.0 });
-            let (l, _) = probe.process(input, input);
-            assert!((l - input).abs() < 1e-3, "expected ~{input}, got {l}");
+        eq.set_state(EqState::default());
+        for x in [0.1f32, -0.5, 0.9] {
+            assert_eq!(eq.process(x, x), (x, x));
         }
-        let _ = settle(&mut eq, 8);
     }
 
     #[test]
-    fn boost_increases_energy_at_the_target_frequency() {
-        let sample_rate = 48_000.0;
-        let freq = 1000.0;
-        let mut flat = Eq::new(sample_rate);
-        flat.set_state(EqState::bypass());
-        let mut boosted = Eq::new(sample_rate);
-        boosted.set_state(EqState { freq_hz: freq, gain_db: 12.0, q: 1.0 });
+    fn the_bell_boosts_its_frequency() {
+        let boosted = level(EqState::bell(1000.0, 12.0, 1.0), 1000.0);
+        assert!((20.0 * boosted.log10() - 12.0).abs() < 0.3, "{boosted}");
+    }
 
-        let n = 2000;
-        let mut flat_peak = 0.0f32;
-        let mut boosted_peak = 0.0f32;
-        for i in 0..n {
-            let x = (std::f32::consts::TAU * freq * i as f32 / sample_rate).sin();
-            flat_peak = flat_peak.max(flat.process(x, x).0.abs());
-            boosted_peak = boosted_peak.max(boosted.process(x, x).0.abs());
-        }
-        assert!(boosted_peak > flat_peak * 1.5, "expected a real boost, flat={flat_peak} boosted={boosted_peak}");
+    #[test]
+    fn the_low_cut_and_shelf_shape_the_bass() {
+        let mut state = EqState::default();
+        state.bands[EQ_LOW_CUT].on = true;
+        state.bands[EQ_LOW_CUT].freq_hz = 200.0;
+        assert!(level(state, 50.0) < 0.1, "50 Hz cut");
+        assert!(level(state, 2000.0) > 0.98, "2 kHz untouched");
+
+        let mut state = EqState::default();
+        state.bands[EQ_LOW_SHELF].gain_db = -12.0;
+        assert!((20.0 * level(state, 40.0).log10() + 12.0).abs() < 0.5);
     }
 }

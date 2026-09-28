@@ -331,7 +331,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                 Effect::Eq(state) => {
                                     let state_signal = Memo::new(move |_| state);
                                     crate::eq_curve::EqCurve::new(cx, state_signal, p.theme).class("device").width(Stretch(1.0)).height(Stretch(1.0));
-                                    Label::new(cx, format!("{:.0} Hz \u{b7} {:+.1} dB", state.freq_hz, state.gain_db)).class("meta");
+                                    Label::new(cx, shared::eq::summary(&state)).class("meta");
                                 }
                                 Effect::Compressor(state) => {
                                     let state_signal = Memo::new(move |_| state);

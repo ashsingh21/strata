@@ -73,16 +73,14 @@ pub fn effect_panel(
         .toggle_class("is-on", enabled)
         .on_press(move |cx| cx.emit(TimelineEvent::ToggleEffectEnabled(track, node)));
 
+    let is_eq = matches!(initial, Effect::Eq(_));
     HStack::new(cx, move |cx| {
-        if matches!(initial, Effect::Eq(_)) {
-            let eq_state = shown.map(|e| match e {
-                Effect::Eq(s) => *s,
-                _ => shared::arrangement::EqState::default(),
-            });
-            crate::eq_curve::eq_curve(cx, eq_state, theme);
-        }
-        for &param in EffectParam::for_effect(initial) {
-            param_knob(cx, theme, arrangement, stored, shown, track, node, param, initial);
+        if is_eq {
+            eq_controls(cx, theme, arrangement, stored, shown, track, node, initial);
+        } else {
+            for &param in EffectParam::for_effect(initial) {
+                param_knob(cx, theme, arrangement, stored, shown, track, node, param, initial);
+            }
         }
     })
     .class("device")
@@ -90,7 +88,84 @@ pub fn effect_panel(
     .alignment(Alignment::Center)
     .padding(Pixels(tokens::SPACE_3))
     .width(Stretch(1.0))
-    .height(Pixels(96.0));
+    .height(Pixels(if is_eq { 124.0 } else { 96.0 }));
+}
+
+/// The EQ: its curve (drag a band's dot), then each band's knobs under a
+/// button that switches the band on and off.
+#[allow(clippy::too_many_arguments)]
+fn eq_controls(
+    cx: &mut Context,
+    theme: Signal<ThemeId>,
+    arrangement: Signal<Arrangement>,
+    stored: Memo<Effect>,
+    shown: Memo<Effect>,
+    track: Option<TrackId>,
+    node: EffectNodeId,
+    initial: Effect,
+) {
+    use shared::arrangement::{EqState, EQ_BELL, EQ_HIGH_SHELF, EQ_LOW_CUT, EQ_LOW_SHELF};
+    let as_eq = |e: &Effect| match e {
+        Effect::Eq(s) => *s,
+        _ => EqState::default(),
+    };
+    let shown_eq = shown.map(as_eq);
+    crate::eq_curve::EqCurve::editable(cx, shown_eq, theme, move |cx, eq| {
+        cx.emit(TimelineEvent::SetEffectState(track, node, Effect::Eq(eq)));
+    })
+    .class("device")
+    .tooltip(|cx| {
+        Tooltip::new(cx, |cx| {
+            VStack::new(cx, |cx| {
+                for line in [
+                    "Drag a dot: left-right is frequency, up-down is gain",
+                    "Wheel over the bell's dot: narrower or wider",
+                    "Double-click a dot: back to 0 dB",
+                ] {
+                    Label::new(cx, line);
+                }
+            })
+            .gap(Pixels(2.0))
+            .size(Auto);
+        })
+        .arrow(false)
+    })
+    .width(Pixels(280.0))
+    .height(Stretch(1.0));
+
+    let bands: [(usize, &'static [EffectParam]); 4] = [
+        (EQ_LOW_CUT, &[EffectParam::EqLowCut]),
+        (EQ_LOW_SHELF, &[EffectParam::EqLowFreq, EffectParam::EqLowGain]),
+        (EQ_BELL, &[EffectParam::EqFreq, EffectParam::EqGain, EffectParam::EqQ]),
+        (EQ_HIGH_SHELF, &[EffectParam::EqHighFreq, EffectParam::EqHighGain]),
+    ];
+    for (band, params) in bands {
+        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Stretch(1.0));
+        VStack::new(cx, move |cx| {
+            let on = stored.map(move |e| as_eq(e).bands[band].on);
+            let name = shared::eq::band_name(as_eq(&initial).bands[band].kind);
+            Button::new(cx, move |cx| Label::new(cx, name))
+                .class("btn")
+                .class("sm")
+                .toggle_class("is-on", on)
+                .on_press(move |cx| {
+                    let mut eq = as_eq(&stored.get());
+                    eq.bands[band].on = !eq.bands[band].on;
+                    cx.emit(TimelineEvent::SetEffectState(track, node, Effect::Eq(eq)));
+                });
+            HStack::new(cx, move |cx| {
+                for &param in params {
+                    param_knob(cx, theme, arrangement, stored, shown, track, node, param, initial);
+                }
+            })
+            .gap(Pixels(tokens::SPACE_2))
+            .size(Auto);
+        })
+        .alignment(Alignment::TopCenter)
+        .gap(Pixels(tokens::SPACE_1))
+        .width(Auto)
+        .height(Auto);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -123,6 +198,11 @@ fn param_knob(
         Knob::plain(cx, pos, default_pos, theme, move |cx, p| {
             let mut updated = stored.get();
             param.apply_norm(&mut updated, p);
+            // Turning a knob on a band that's off switches the band on
+            // (otherwise the knob would do nothing you could hear).
+            if let (Effect::Eq(eq), Some(band)) = (&mut updated, param.eq_band()) {
+                eq.bands[band].on = true;
+            }
             cx.emit(TimelineEvent::SetEffectState(track, node, updated));
         })
         .accent(accent)

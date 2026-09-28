@@ -9,7 +9,7 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-use super::model::{Arrangement, AutomationLane, Effect, EffectNodeId, EffectParam};
+use super::model::{Arrangement, AutomationLane, Effect, EffectNodeId, EffectParam, EQ_BELL, EQ_HIGH_SHELF, EQ_LOW_CUT, EQ_LOW_SHELF};
 use super::time::Ticks;
 
 /// What an automation lane controls, on the lane's own track.
@@ -62,7 +62,32 @@ pub fn gain_db_to_fader_pos(db: f32) -> f32 {
     }
 }
 
+/// The EQ's frequency knobs' ranges (Hz): each band's useful span.
+pub const LOW_CUT: (f32, f32) = (20.0, 1000.0);
+pub const LOW_SHELF: (f32, f32) = (30.0, 1000.0);
+pub const HIGH_SHELF: (f32, f32) = (1000.0, 18_000.0);
+
+fn hz(f: f32) -> String {
+    if f >= 1000.0 {
+        format!("{:.1} kHz", f / 1000.0)
+    } else {
+        format!("{f:.0} Hz")
+    }
+}
+
 impl EffectParam {
+    /// Which EQ band (index into `EqState::bands`) this param sets, if
+    /// it's an EQ param.
+    pub fn eq_band(self) -> Option<usize> {
+        match self {
+            EffectParam::EqLowCut => Some(EQ_LOW_CUT),
+            EffectParam::EqLowFreq | EffectParam::EqLowGain => Some(EQ_LOW_SHELF),
+            EffectParam::EqFreq | EffectParam::EqGain | EffectParam::EqQ => Some(EQ_BELL),
+            EffectParam::EqHighFreq | EffectParam::EqHighGain => Some(EQ_HIGH_SHELF),
+            _ => None,
+        }
+    }
+
     /// The effect type this param belongs to ("Compressor", "EQ").
     pub fn effect_name(self) -> &'static str {
         match self {
@@ -71,7 +96,14 @@ impl EffectParam {
             | EffectParam::CompressorAttack
             | EffectParam::CompressorRelease
             | EffectParam::CompressorMakeup => "Compressor",
-            EffectParam::EqFreq | EffectParam::EqGain | EffectParam::EqQ => "EQ",
+            EffectParam::EqFreq
+            | EffectParam::EqGain
+            | EffectParam::EqQ
+            | EffectParam::EqLowCut
+            | EffectParam::EqLowFreq
+            | EffectParam::EqLowGain
+            | EffectParam::EqHighFreq
+            | EffectParam::EqHighGain => "EQ",
         }
     }
 
@@ -84,9 +116,14 @@ impl EffectParam {
             (EffectParam::CompressorAttack, Effect::Compressor(c)) => lin_norm(0.1, 100.0, c.attack_ms),
             (EffectParam::CompressorRelease, Effect::Compressor(c)) => lin_norm(10.0, 1000.0, c.release_ms),
             (EffectParam::CompressorMakeup, Effect::Compressor(c)) => lin_norm(0.0, 24.0, c.makeup_db),
-            (EffectParam::EqFreq, Effect::Eq(e)) => log_norm(20.0, 20_000.0, e.freq_hz),
-            (EffectParam::EqGain, Effect::Eq(e)) => lin_norm(-18.0, 18.0, e.gain_db),
-            (EffectParam::EqQ, Effect::Eq(e)) => lin_norm(0.1, 10.0, e.q),
+            (EffectParam::EqFreq, Effect::Eq(e)) => log_norm(20.0, 20_000.0, e.bands[EQ_BELL].freq_hz),
+            (EffectParam::EqGain, Effect::Eq(e)) => lin_norm(-18.0, 18.0, e.bands[EQ_BELL].gain_db),
+            (EffectParam::EqQ, Effect::Eq(e)) => lin_norm(0.1, 10.0, e.bands[EQ_BELL].q),
+            (EffectParam::EqLowCut, Effect::Eq(e)) => log_norm(LOW_CUT.0, LOW_CUT.1, e.bands[EQ_LOW_CUT].freq_hz),
+            (EffectParam::EqLowFreq, Effect::Eq(e)) => log_norm(LOW_SHELF.0, LOW_SHELF.1, e.bands[EQ_LOW_SHELF].freq_hz),
+            (EffectParam::EqLowGain, Effect::Eq(e)) => lin_norm(-18.0, 18.0, e.bands[EQ_LOW_SHELF].gain_db),
+            (EffectParam::EqHighFreq, Effect::Eq(e)) => log_norm(HIGH_SHELF.0, HIGH_SHELF.1, e.bands[EQ_HIGH_SHELF].freq_hz),
+            (EffectParam::EqHighGain, Effect::Eq(e)) => lin_norm(-18.0, 18.0, e.bands[EQ_HIGH_SHELF].gain_db),
             _ => return None,
         })
     }
@@ -100,9 +137,20 @@ impl EffectParam {
             (EffectParam::CompressorAttack, Effect::Compressor(c)) => c.attack_ms = lin_value(0.1, 100.0, norm),
             (EffectParam::CompressorRelease, Effect::Compressor(c)) => c.release_ms = lin_value(10.0, 1000.0, norm),
             (EffectParam::CompressorMakeup, Effect::Compressor(c)) => c.makeup_db = lin_value(0.0, 24.0, norm),
-            (EffectParam::EqFreq, Effect::Eq(e)) => e.freq_hz = log_value(20.0, 20_000.0, norm),
-            (EffectParam::EqGain, Effect::Eq(e)) => e.gain_db = lin_value(-18.0, 18.0, norm),
-            (EffectParam::EqQ, Effect::Eq(e)) => e.q = lin_value(0.1, 10.0, norm),
+            (EffectParam::EqFreq, Effect::Eq(e)) => e.bands[EQ_BELL].freq_hz = log_value(20.0, 20_000.0, norm),
+            (EffectParam::EqGain, Effect::Eq(e)) => e.bands[EQ_BELL].gain_db = lin_value(-18.0, 18.0, norm),
+            (EffectParam::EqQ, Effect::Eq(e)) => e.bands[EQ_BELL].q = lin_value(0.1, 10.0, norm),
+            (EffectParam::EqLowCut, Effect::Eq(e)) => {
+                e.bands[EQ_LOW_CUT].freq_hz = log_value(LOW_CUT.0, LOW_CUT.1, norm)
+            }
+            (EffectParam::EqLowFreq, Effect::Eq(e)) => {
+                e.bands[EQ_LOW_SHELF].freq_hz = log_value(LOW_SHELF.0, LOW_SHELF.1, norm)
+            }
+            (EffectParam::EqLowGain, Effect::Eq(e)) => e.bands[EQ_LOW_SHELF].gain_db = lin_value(-18.0, 18.0, norm),
+            (EffectParam::EqHighFreq, Effect::Eq(e)) => {
+                e.bands[EQ_HIGH_SHELF].freq_hz = log_value(HIGH_SHELF.0, HIGH_SHELF.1, norm)
+            }
+            (EffectParam::EqHighGain, Effect::Eq(e)) => e.bands[EQ_HIGH_SHELF].gain_db = lin_value(-18.0, 18.0, norm),
             _ => {}
         }
     }
@@ -115,9 +163,14 @@ impl EffectParam {
             (EffectParam::CompressorAttack, Effect::Compressor(c)) => format!("{:.1} ms", c.attack_ms),
             (EffectParam::CompressorRelease, Effect::Compressor(c)) => format!("{:.0} ms", c.release_ms),
             (EffectParam::CompressorMakeup, Effect::Compressor(c)) => format!("{:+.1} dB", c.makeup_db),
-            (EffectParam::EqFreq, Effect::Eq(e)) => format!("{:.0} Hz", e.freq_hz),
-            (EffectParam::EqGain, Effect::Eq(e)) => format!("{:+.1} dB", e.gain_db),
-            (EffectParam::EqQ, Effect::Eq(e)) => format!("{:.2}", e.q),
+            (EffectParam::EqFreq, Effect::Eq(e)) => hz(e.bands[EQ_BELL].freq_hz),
+            (EffectParam::EqGain, Effect::Eq(e)) => format!("{:+.1} dB", e.bands[EQ_BELL].gain_db),
+            (EffectParam::EqQ, Effect::Eq(e)) => format!("{:.2}", e.bands[EQ_BELL].q),
+            (EffectParam::EqLowCut, Effect::Eq(e)) => hz(e.bands[EQ_LOW_CUT].freq_hz),
+            (EffectParam::EqLowFreq, Effect::Eq(e)) => hz(e.bands[EQ_LOW_SHELF].freq_hz),
+            (EffectParam::EqLowGain, Effect::Eq(e)) => format!("{:+.1} dB", e.bands[EQ_LOW_SHELF].gain_db),
+            (EffectParam::EqHighFreq, Effect::Eq(e)) => hz(e.bands[EQ_HIGH_SHELF].freq_hz),
+            (EffectParam::EqHighGain, Effect::Eq(e)) => format!("{:+.1} dB", e.bands[EQ_HIGH_SHELF].gain_db),
             _ => String::new(),
         }
     }

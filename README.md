@@ -14,7 +14,8 @@ run inside the app.
 - **Carve:** a subtractive synth with two oscillators, sub, noise, filter,
   envelopes, two LFOs, unison, chorus and reverb, plus presets.
 - **Drum Kit:** a step grid, and a piano roll that shows the song's key.
-- **Effects:** a compressor and an EQ on every track and on the master bus.
+- **Effects:** a compressor and a four-band EQ (low cut, shelves, bell) on
+  every track and on the master bus.
 - **Recording:** record from any audio input, like a guitar interface or a mic.
 - **Browser:** samples, presets, instruments and effects, with preview,
   collections, and a *Fits key* filter that hides samples that would clash

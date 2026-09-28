@@ -19,7 +19,7 @@ pub use model::{
     DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent,
     ClipId, LinkId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
-    Effect, EffectSlot, EffectNode, EffectNodeId, EffectEdge, EffectGraph, CompressorState, EqState,
+    Effect, EffectSlot, EffectNode, EffectNodeId, EffectEdge, EffectGraph, CompressorState, EqState, EqBand, EqBandKind, EQ_LOW_CUT, EQ_LOW_SHELF, EQ_BELL, EQ_HIGH_SHELF,
     EffectParam, ModTarget,
 };
 pub use peaks::{PeakLevel, PeakPyramid};

@@ -17,6 +17,7 @@ pub mod analysis;
 pub mod arrangement;
 pub mod demo;
 pub mod drums;
+pub mod eq;
 pub mod lessons;
 pub mod playback;
 pub mod project;

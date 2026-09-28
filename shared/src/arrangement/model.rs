@@ -475,28 +475,91 @@ impl CompressorState {
     }
 }
 
-/// A single-band peaking EQ's knobs. Same config/DSP split as
-/// `CompressorState` - the running biquad state lives in `engine`.
+/// What one EQ band does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EqBandKind {
+    /// Removes everything below `freq_hz` (12 dB/oct high-pass).
+    LowCut,
+    /// Raises or lowers everything below `freq_hz` by `gain_db`.
+    LowShelf,
+    /// Raises or lowers a band around `freq_hz`; `q` sets how narrow.
+    Bell,
+    /// Raises or lowers everything above `freq_hz` by `gain_db`.
+    HighShelf,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct EqState {
+pub struct EqBand {
+    pub kind: EqBandKind,
+    pub on: bool,
     pub freq_hz: f32,
-    /// Boost (positive) or cut (negative) at `freq_hz`.
+    /// Boost (positive) or cut (negative); unused by a low cut.
     pub gain_db: f32,
-    /// Bandwidth - higher is narrower, same convention as most EQs.
+    /// Bandwidth - higher is narrower, same convention as most EQs. Only
+    /// the bell uses it.
     pub q: f32,
+}
+
+/// Which band is which in `EqState::bands`.
+pub const EQ_LOW_CUT: usize = 0;
+pub const EQ_LOW_SHELF: usize = 1;
+pub const EQ_BELL: usize = 2;
+pub const EQ_HIGH_SHELF: usize = 3;
+
+/// A four-band EQ: low cut, low shelf, bell, high shelf, in that order.
+/// Same config/DSP split as `CompressorState` - the running filter state
+/// lives in `engine`, the filter maths in `crate::eq`.
+///
+/// Projects saved when the EQ was one bell band (`{freq_hz, gain_db, q}`)
+/// load as that bell, the other bands flat.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(from = "EqRepr")]
+pub struct EqState {
+    pub bands: [EqBand; 4],
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum EqRepr {
+    Bands { bands: [EqBand; 4] },
+    Bell { freq_hz: f32, gain_db: f32, q: f32 },
+}
+
+impl From<EqRepr> for EqState {
+    fn from(repr: EqRepr) -> Self {
+        match repr {
+            EqRepr::Bands { bands } => Self { bands },
+            EqRepr::Bell { freq_hz, gain_db, q } => Self::bell(freq_hz, gain_db, q),
+        }
+    }
 }
 
 impl Default for EqState {
     fn default() -> Self {
-        Self { freq_hz: 1000.0, gain_db: 0.0, q: 1.0 }
+        let band = |kind, on, freq_hz| EqBand { kind, on, freq_hz, gain_db: 0.0, q: 1.0 };
+        Self {
+            bands: [
+                band(EqBandKind::LowCut, false, 40.0),
+                band(EqBandKind::LowShelf, true, 120.0),
+                band(EqBandKind::Bell, true, 1000.0),
+                band(EqBandKind::HighShelf, true, 8000.0),
+            ],
+        }
     }
 }
 
 impl EqState {
-    /// 0 dB gain is mathematically a no-op regardless of freq/Q - what a
+    /// Flat, with the bell set - what the one-band EQ was.
+    pub fn bell(freq_hz: f32, gain_db: f32, q: f32) -> Self {
+        let mut eq = Self::default();
+        eq.bands[EQ_BELL] = EqBand { freq_hz, gain_db, q, ..eq.bands[EQ_BELL] };
+        eq
+    }
+
+    /// Flat: every band at 0 dB and the low cut off - a no-op, what a
     /// bypassed EQ is treated as, same reasoning as `CompressorState::bypass`.
     pub fn bypass() -> Self {
-        Self { gain_db: 0.0, ..Self::default() }
+        Self::default()
     }
 }
 
@@ -860,9 +923,16 @@ pub enum EffectParam {
     CompressorAttack,
     CompressorRelease,
     CompressorMakeup,
+    /// The bell band (the EQ's only band once, hence the plain names -
+    /// saved automation lanes still point at them).
     EqFreq,
     EqGain,
     EqQ,
+    EqLowCut,
+    EqLowFreq,
+    EqLowGain,
+    EqHighFreq,
+    EqHighGain,
 }
 
 impl EffectParam {
@@ -876,6 +946,11 @@ impl EffectParam {
             EffectParam::EqFreq => "Freq",
             EffectParam::EqGain => "Gain",
             EffectParam::EqQ => "Q",
+            EffectParam::EqLowCut => "Low cut",
+            EffectParam::EqLowFreq => "Low freq",
+            EffectParam::EqLowGain => "Low gain",
+            EffectParam::EqHighFreq => "High freq",
+            EffectParam::EqHighGain => "High gain",
         }
     }
 
@@ -890,7 +965,16 @@ impl EffectParam {
                 EffectParam::CompressorRelease,
                 EffectParam::CompressorMakeup,
             ],
-            Effect::Eq(_) => &[EffectParam::EqFreq, EffectParam::EqGain, EffectParam::EqQ],
+            Effect::Eq(_) => &[
+                EffectParam::EqLowCut,
+                EffectParam::EqLowFreq,
+                EffectParam::EqLowGain,
+                EffectParam::EqFreq,
+                EffectParam::EqGain,
+                EffectParam::EqQ,
+                EffectParam::EqHighFreq,
+                EffectParam::EqHighGain,
+            ],
         }
     }
 }
@@ -1170,7 +1254,7 @@ mod effect_graph_tests {
         assert!(compressor_params.contains(&EffectParam::CompressorThreshold));
 
         let eq_params = EffectParam::for_effect(Effect::Eq(EqState::default()));
-        assert_eq!(eq_params.len(), 3);
+        assert_eq!(eq_params.len(), 8, "four bands: cut, shelf freq+gain, bell freq+gain+Q, shelf freq+gain");
         assert!(eq_params.contains(&EffectParam::EqFreq));
         assert!(!eq_params.contains(&EffectParam::CompressorThreshold), "an EQ node shouldn't offer Compressor knobs");
     }
