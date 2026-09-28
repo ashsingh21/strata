@@ -256,7 +256,7 @@ pub fn piano_roll_view(
                 Button::new(cx, move |cx| Label::new(cx, key_text))
                     .class("btn")
                     .class("sm")
-                    .on_press(|cx| cx.emit(crate::interval_input::state::IntervalInputEvent::ToggleOpen));
+                    .on_press(crate::key_menu::toggle_under);
             })
             .toggle_class("hidden", drums)
             .gap(Pixels(tokens::SPACE_2))

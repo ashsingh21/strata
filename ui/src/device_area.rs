@@ -1,7 +1,7 @@
 //! The lower panel's contents: the selected track's device chain, then
 //! whatever that track shows - its open clip's editor, its Carve, or (for
 //! a MIDI track with no instrument, an audio track, or no selection) a
-//! short empty state - with the Interval Input docked underneath.
+//! short empty state - with Theory (the Interval Input views) docked underneath.
 
 use std::collections::HashSet;
 
@@ -11,7 +11,6 @@ use shared::arrangement::{Arrangement, ClipId, Effect, EffectNodeId, Instrument,
 use shared::synth::SynthState;
 
 use crate::interval_input;
-use crate::interval_input::state::IntervalInputEvent;
 use crate::piano_roll;
 use crate::piano_roll::state::{EditMode, LabelMode, NoteKey, PianoRollEvent};
 use crate::synth;
@@ -336,13 +335,6 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             });
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-        // Toggles the Interval input (scale) panel - named after it, since
-        // "Show input" read like the audio input.
-        Button::new(cx, |cx| Label::new(cx, "Interval input"))
-            .class("btn")
-            .class("quiet")
-            .toggle_class("is-on", p.interval_open)
-            .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
     })
     .gap(Pixels(tokens::SPACE_2))
     .padding_left(Pixels(tokens::SPACE_3))

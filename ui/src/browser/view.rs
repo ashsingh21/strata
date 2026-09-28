@@ -83,6 +83,8 @@ pub struct BrowserProps {
     pub theme: Signal<ThemeId>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
+    /// The Theory view (the scale explorer, docked under the devices).
+    theory_open: Signal<bool>,
     lessons_active: Signal<Option<(usize, usize)>>,
     lessons_done: Signal<Vec<String>>,
     ghost: Signal<Option<(f32, f32, String)>>,
@@ -95,6 +97,7 @@ impl BrowserProps {
         theme: Signal<ThemeId>,
         key: Signal<u8>,
         scale_mask: Signal<u16>,
+        theory_open: Signal<bool>,
         lessons_active: Signal<Option<(usize, usize)>>,
         lessons_done: Signal<Vec<String>>,
     ) -> Self {
@@ -130,6 +133,7 @@ impl BrowserProps {
             theme,
             key,
             scale_mask,
+            theory_open,
             lessons_active,
             lessons_done,
             ghost,
@@ -193,6 +197,10 @@ fn rail(cx: &mut Context, p: BrowserProps) {
             let on = Memo::new(move |_| p.open.get() && p.section.get() == section);
             rail_button(cx, p, section.icon(), section.title(), on).on_press(move |cx| cx.emit(BrowserEvent::Rail(section)));
         }
+        // Too wide for the panel: it opens under the devices instead.
+        let theory = Memo::new(move |_| p.theory_open.get());
+        rail_button(cx, p, IconKind::Theory, "Theory: explore the key's scale and chords", theory)
+            .on_press(|cx| cx.emit(crate::interval_input::state::IntervalInputEvent::ToggleOpen));
         Element::new(cx).height(Stretch(1.0)).width(Pixels(1.0));
         let open = Memo::new(move |_| p.open.get());
         rail_button(cx, p, IconKind::Panel, "Show or hide the panel", open).on_press(|cx| cx.emit(crate::app::AppEvent::ToggleSidebar));

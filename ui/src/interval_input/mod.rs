@@ -1,4 +1,4 @@
-//! Interval Input: three linked views of one scale (true-spacing ruler,
+//! Theory (the code still calls it Interval Input): three linked views of one scale (true-spacing ruler,
 //! tonnetz lattice, chord ring) for exploring intervals and chords by
 //! ear. Tapping a pad in any of the three plays the note for real through
 //! Carve (same `SynthEvent::ToggleKey` the on-screen keyboard uses), and
@@ -22,8 +22,8 @@ use spacing::Spacing;
 use state::{scale_name, IntervalInputEvent};
 
 /// Row 3 of the device area: docked under Carve (not floating over the
-/// arrangement), toggled by "Interval input" in the device chain or the Key
-/// button in the header. Built only while open - a `Binding` rather than a
+/// arrangement), toggled by Theory on the sidebar's rail or from the key
+/// menu (`key_menu`). Built only while open - a `Binding` rather than a
 /// `display: none` toggle, since text shown from hidden never laid out.
 #[allow(clippy::too_many_arguments)]
 pub fn interval_input_view(
@@ -41,19 +41,15 @@ pub fn interval_input_view(
         }
         VStack::new(cx, move |cx| {
             HStack::new(cx, move |cx| {
-                Label::new(cx, "Interval input").class("heading");
+                Label::new(cx, "Theory").class("heading");
 
-                let key_text = key.map(|k| format!("Key {}", note_name(*k)));
+                let key_text = Memo::new(move |_| {
+                    format!("{} {}  \u{2304}", note_name(key.get()), scale_name(scale_mask.get()).to_lowercase())
+                });
                 Button::new(cx, move |cx| Label::new(cx, key_text))
                     .class("btn")
                     .class("sm")
-                    .on_press(move |cx| cx.emit(IntervalInputEvent::SetKey((key.get() + 1) % 12)));
-
-                let scale_text = scale_mask.map(|m| scale_name(*m).to_string());
-                Button::new(cx, move |cx| Label::new(cx, scale_text))
-                    .class("btn")
-                    .class("sm")
-                    .on_press(|cx| cx.emit(IntervalInputEvent::CyclePreset));
+                    .on_press(crate::key_menu::toggle_under);
 
                 crate::synth::segmented::segmented(
                     cx,
@@ -87,6 +83,10 @@ pub fn interval_input_view(
                 })
                 .class("synth-seg")
                 .size(Auto);
+                Button::new(cx, |cx| Label::new(cx, "Close"))
+                    .class("btn")
+                    .class("quiet")
+                    .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
             })
             .class("synth-devhead")
             .gap(Pixels(tokens::SPACE_2))

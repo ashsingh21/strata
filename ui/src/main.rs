@@ -16,6 +16,7 @@ mod fx_board;
 mod glyph;
 mod hidpi;
 mod interval_input;
+mod key_menu;
 mod knob;
 mod lessons;
 mod meter;
@@ -288,7 +289,7 @@ fn main() -> Result<(), ApplicationError> {
             browser::preview::BrowserPreview::new(preview_player.clone(), tl_arrangement, interval_key, interval_scale_mask),
         );
         let browser_props =
-            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, lessons_active, lessons_done);
+            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, interval_open, lessons_active, lessons_done);
         browser_model.build(cx);
         browser::view::DragTracker.build(cx);
         browser::start_key_analysis(cx);
@@ -488,7 +489,6 @@ fn main() -> Result<(), ApplicationError> {
                     record_armed,
                     click_on,
                     position,
-                    interval_open,
                     key: interval_key,
                     scale_mask: interval_scale_mask,
                     input_level,
@@ -625,6 +625,7 @@ fn main() -> Result<(), ApplicationError> {
             // A dragged browser result's name, following the pointer.
             browser::view::DragGhost::new(cx, browser_props);
             transport::header_menu_backdrop(cx, header_menus);
+            key_menu::key_menu(cx, header_menus, interval_key, interval_scale_mask, interval_open);
             // Selecting clips drops the Effects Board's node selection, so
             // Delete removes what was picked last (see TimelineState::fx_selected).
             Binding::new(cx, tl_selection, move |_cx| {

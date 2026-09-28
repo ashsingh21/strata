@@ -13,7 +13,7 @@ use shared::Position;
 use crate::app::AppEvent;
 use crate::bpm_field::BpmField;
 use crate::glyph::{Glyph, GlyphKind, GlyphColor};
-use crate::interval_input::state::{scale_name, IntervalInputEvent};
+use crate::interval_input::state::scale_name;
 use crate::knob::Knob;
 use crate::meter::{Meter, HOT_THRESHOLD};
 use crate::project::ProjectEvent;
@@ -43,7 +43,6 @@ pub struct HeaderProps {
     pub record_armed: Signal<bool>,
     pub click_on: Signal<bool>,
     pub position: Signal<Position>,
-    pub interval_open: Signal<bool>,
     pub key: Signal<u8>,
     pub scale_mask: Signal<u16>,
     pub input_level: Signal<f32>,
@@ -74,26 +73,29 @@ pub struct HeaderMenus {
     pub file: Signal<bool>,
     pub time_sig: Signal<bool>,
     pub input_device: Signal<bool>,
+    /// The key and scale menu (see `key_menu`).
+    pub key: Signal<bool>,
 }
 
 impl HeaderMenus {
     pub fn new() -> Self {
-        Self { file: Signal::new(false), time_sig: Signal::new(false), input_device: Signal::new(false) }
+        Self { file: Signal::new(false), time_sig: Signal::new(false), input_device: Signal::new(false), key: Signal::new(false) }
     }
 
     fn any_open(self) -> bool {
-        self.file.get() || self.time_sig.get() || self.input_device.get()
+        self.file.get() || self.time_sig.get() || self.input_device.get() || self.key.get()
     }
 
-    fn close_all(self) {
+    pub fn close_all(self) {
         self.file.set(false);
         self.time_sig.set(false);
         self.input_device.set(false);
+        self.key.set(false);
     }
 
     /// Opens/closes `which`, closing any other open menu - only one drop-
     /// down at a time.
-    fn toggle(self, which: Signal<bool>) {
+    pub fn toggle(self, which: Signal<bool>) {
         let was_open = which.get();
         self.close_all();
         which.set(!was_open);
@@ -245,7 +247,7 @@ fn elapsed_text(position: Position, bpm: f64) -> String {
 }
 
 pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + Copy + 'static) {
-    let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, interval_open, project_name, .. } =
+    let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, project_name, .. } =
         props;
     let menus = props.menus;
     let file_menu_open = menus.file;
@@ -369,8 +371,8 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         });
         Button::new(cx, move |cx| Label::new(cx, key_text).font_size(13.0))
             .class("btn")
-            .toggle_class("is-on", interval_open)
-            .on_press(|cx| cx.emit(IntervalInputEvent::ToggleOpen));
+            .toggle_class("is-on", menus.key)
+            .on_press(crate::key_menu::toggle_under);
 
         // Right-click for an exact typed value - drag/scroll (BpmField's
         // own gesture) is great for coarse changes but painfully slow (or

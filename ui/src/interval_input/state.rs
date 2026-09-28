@@ -31,7 +31,6 @@ pub enum IntervalInputEvent {
     /// Replace the whole scale (bit n = semitone n above the root).
     SetScaleMask(u16),
     ToggleDegree(u8),
-    CyclePreset,
     ToggleOpen,
     ToggleLabelMode,
 }
@@ -63,15 +62,6 @@ impl Model for IntervalInputModel {
                 if *degree != 0 {
                     self.scale_mask.update(|m| *m ^= 1 << (degree % 12));
                 }
-            }
-            IntervalInputEvent::CyclePreset => {
-                let current = self.scale_mask.get();
-                let next_index = SCALE_PRESETS
-                    .iter()
-                    .position(|p| p.mask == current)
-                    .map(|i| (i + 1) % SCALE_PRESETS.len())
-                    .unwrap_or(0);
-                self.scale_mask.set(SCALE_PRESETS[next_index].mask);
             }
             IntervalInputEvent::ToggleOpen => self.open.update(|v| *v = !*v),
             IntervalInputEvent::ToggleLabelMode => self.show_note_names.update(|v| *v = !*v),
