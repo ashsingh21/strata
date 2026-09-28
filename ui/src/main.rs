@@ -157,7 +157,6 @@ fn main() -> Result<(), ApplicationError> {
         let tl_playhead = timeline_state.playhead_ticks;
         let tl_tool = timeline_state.tool;
         let tl_context_menu = timeline_state.context_menu;
-        let tl_clipboard_nonempty = timeline_state.clipboard_nonempty;
         let tl_missing_sources = timeline_state.missing_sources;
         let tl_fx_selected = timeline_state.fx_selected;
         let tl_renaming_marker = timeline_state.renaming_marker;
@@ -622,7 +621,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
             sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status);
 
-            context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);
+            context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu);
             // A dragged browser result's name, following the pointer.
             browser::view::DragGhost::new(cx, browser_props);
             // The key menu's one dropdown, over everything (see key_menu).

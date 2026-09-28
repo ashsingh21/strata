@@ -1209,9 +1209,17 @@ impl Model for TimelineState {
             }
             TimelineEvent::OpenContextMenu(menu) => {
                 self.context_menu.set(Some(*menu));
+                // Empty space with nothing to paste has no actions: no menu.
+                let nothing = matches!(menu.target, ContextMenuTarget::Lane { .. }) && !self.clipboard_nonempty.get();
+                if nothing {
+                    crate::context_menu::close(cx);
+                } else {
+                    crate::context_menu::open(cx);
+                }
             }
             TimelineEvent::CloseContextMenu => {
                 self.context_menu.set(None);
+                crate::context_menu::close(cx);
             }
             TimelineEvent::AddMarker(tick) => {
                 let name = format!("Marker {}", self.arrangement.get().markers.len() + 1);

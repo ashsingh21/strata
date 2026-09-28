@@ -1,14 +1,16 @@
 //! The timeline's right-click context menu: a small floating list of
 //! actions for whatever was clicked (a clip, a track header, or empty
-//! track space), positioned at the click. A transparent backdrop behind
-//! it closes it on any click elsewhere, the same convention as every
-//! other overlay in the app (Interval Input, the piano
-//! roll's own backdrop).
+//! track space), opened at the click. It's one Vizia dropdown at the
+//! window root, its zero-size anchor moved to the click: it opens there,
+//! moves to stay inside the window, and closes on a click elsewhere or
+//! Escape. `TimelineState` keeps what was clicked and opens it.
 //!
 //! Every clip action reuses the timeline's existing Cut/Copy/Duplicate/
 //! Delete events rather than adding new ones: right-clicking a clip first
 //! selects it (unless it's already part of a bigger selection), so those
 //! events already do the right thing.
+
+use std::cell::Cell;
 
 use vizia::prelude::*;
 
@@ -59,23 +61,47 @@ fn separator(cx: &mut Context) {
     Element::new(cx).class("menu-sep").width(Stretch(1.0)).height(Pixels(1.0));
 }
 
-pub fn context_menu_view(
-    cx: &mut Context,
-    arrangement: Signal<Arrangement>,
-    menu: Signal<Option<ContextMenu>>,
-    clipboard_nonempty: Signal<bool>,
-) {
-    Element::new(cx)
-        .class("context-menu-backdrop")
-        .toggle_class("hidden", menu.map(|m| m.is_none()))
-        .on_mouse_down(|cx, _| cx.emit(TimelineEvent::CloseContextMenu))
-        .position_type(PositionType::Absolute)
-        .top(Pixels(0.0))
-        .left(Pixels(0.0))
-        .width(Stretch(1.0))
-        .height(Stretch(1.0));
+thread_local! {
+    /// The menu's dropdown, for `open` and `close`.
+    static HOST: Cell<Option<Entity>> = const { Cell::new(None) };
+}
 
-    Binding::new(cx, menu, move |cx| {
+/// Opens the menu at the click `TimelineState` just recorded.
+pub fn open(cx: &mut EventContext) {
+    if let Some(host) = HOST.get() {
+        cx.emit_to(host, PopupEvent::Open);
+    }
+}
+
+pub fn close(cx: &mut EventContext) {
+    if let Some(host) = HOST.get() {
+        cx.emit_to(host, PopupEvent::Close);
+    }
+}
+
+/// Mounted once, at the window root, after everything it opens over.
+pub fn context_menu_view(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option<ContextMenu>>) {
+    let at = menu.map(|m| m.map(|m| (m.x, m.y)).unwrap_or((0.0, 0.0)));
+    let host = crate::menu::menu(
+        cx,
+        Placement::BottomStart,
+        |cx| {
+            Element::new(cx).width(Stretch(1.0)).height(Stretch(1.0));
+        },
+        move |cx| items(cx, arrangement, menu),
+    )
+    .position_type(PositionType::Absolute)
+    .left(at.map(|a| Pixels(a.0)))
+    .top(at.map(|a| Pixels(a.1)))
+    .width(Pixels(0.0))
+    .height(Pixels(0.0))
+    .entity();
+    HOST.set(Some(host));
+}
+
+/// The rows for whatever was clicked, built as the menu opens.
+fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option<ContextMenu>>) {
+    {
         let Some(m) = menu.get() else { return };
         let arr = arrangement.get();
 
@@ -171,17 +197,6 @@ pub fn context_menu_view(
         })
         .class("panel")
         .class("context-menu")
-        // A Lane menu with nothing to paste has no rows at all; hide the
-        // empty panel rather than show an empty floating box.
-        .toggle_class(
-            "hidden",
-            Memo::new(move |_| {
-                matches!(m.target, ContextMenuTarget::Lane { .. }) && !clipboard_nonempty.get()
-            }),
-        )
-        .position_type(PositionType::Absolute)
-        .left(Pixels(m.x))
-        .top(Pixels(m.y))
         .gap(Pixels(2.0))
         .padding_top(Pixels(tokens::SPACE_2))
         .padding_bottom(Pixels(tokens::SPACE_2))
@@ -191,5 +206,5 @@ pub fn context_menu_view(
         .padding_right(Pixels(tokens::SPACE_1))
         .width(Pixels(212.0))
         .height(Auto);
-    });
+    }
 }
