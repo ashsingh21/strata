@@ -732,6 +732,26 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 move_note(s, 5 * PPQ, 69, 68);
             }),
         ],
+        ROLL_DYNAMICS => {
+            let soften = |at: &'static [i64], velocity: u8| {
+                move |s: &mut Snapshot| {
+                    for &a in at {
+                        set_velocity(s, "Drums", shared::drums::CLOSED_HAT, a * SIXTEENTH, velocity);
+                    }
+                }
+            };
+            vec![b(play), b(|s| s.open_clip = Some(clip_on_track(s, "Drums"))), b(soften(&ROLL_GHOSTS, 40)), b(soften(&[2, 6, 10, 14], 75))]
+        }
+        ROLL_LENGTH => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Keys"))),
+            b(|s| {
+                add_note_on(s, "Keys", 57, 0, PPQ);
+                add_note_on(s, "Keys", 57, 2 * PPQ, PPQ);
+            }),
+            b(|s| add_note_on(s, "Keys", 60, 3 * PPQ, SIXTEENTH)),
+            b(|s| add_note_on(s, "Keys", 64, PPQ + 40, SIXTEENTH)),
+        ],
         CARVE_SYNC_FM => vec![
             b(play),
             b(|s| {
@@ -816,6 +836,18 @@ fn open_theory_clip(s: &mut Snapshot) {
 fn clip_on_track(s: &Snapshot, name: &str) -> shared::arrangement::ClipId {
     let track = s.arrangement.tracks.iter().find(|t| t.name == name).unwrap().id;
     s.arrangement.clips.iter().find(|c| c.track == track).unwrap().id
+}
+
+/// A velocity drag on `name`'s clip: the note at `start` of `pitch`.
+fn set_velocity(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks, velocity: u8) {
+    let clip = clip_on_track(s, name);
+    Command::SetNoteVelocity { clip, start, pitch, velocity }.apply(&mut s.arrangement);
+}
+
+/// One click on `name`'s clip at `start`, with Snap making it `length` long.
+fn add_note_on(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks, length: Ticks) {
+    let clip = clip_on_track(s, name);
+    Command::AddMidiNote { clip, note: MidiNote { start, length, pitch, velocity: 100 } }.apply(&mut s.arrangement);
 }
 
 /// Clicks on `name`'s clip, one note per start.

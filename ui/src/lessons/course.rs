@@ -12,7 +12,7 @@ use shared::lessons::{
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
     THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
-    MIX_FINISH,
+    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -56,6 +56,7 @@ pub const PROJECTS: &str = "Projects";
 pub const SOUND_MATCH: &str = "Sound match";
 pub const THEORY: &str = "Theory";
 pub const MIXING: &str = "Mixing";
+pub const ROLL: &str = "Piano roll";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -235,6 +236,87 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "Two chords, four hits. A minor and C major share two notes (C and E), \
                  which is why one flows so smoothly into the other.",
+            ),
+        ],
+    },
+    Lesson {
+        id: ROLL_DYNAMICS,
+        group: ROLL,
+        title: "Accents and ghost notes",
+        steps: &[
+            act(
+                "Press Space: every hi-hat hits exactly as hard as the last. It sounds like a machine.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Beat clip: double-click it.",
+                "Two quick clicks on the clip in the Drums lane.",
+                |s| drums_open(s),
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Make two ghost notes: the hats just before beats 3 and 1 (at 1.2.4 and 1.4.4). Drag their stems in the Velocity lane, under the grid, down to less than half height.",
+                "A ghost note is felt more than heard: it fills the gap before the next beat and makes the pattern roll forward.",
+                "The glowing column in the Velocity lane. Drag the top of the stem down, below the halfway mark.",
+                |s| ROLL_GHOSTS.iter().all(|&at| hat_velocity(s, at).is_some_and(|v| v < 60)),
+                |s| velocity_target(s, &ROLL_GHOSTS, |v| v < 60),
+            ),
+            recipe(
+                "Now soften the hats halfway between the beats (1.1.3, 1.2.3, 1.3.3 and 1.4.3): drag their stems a little way down, to about three quarters height.",
+                "Strong on the beat, lighter between, barely there on the ghosts. That rise and fall is what people mean by groove.",
+                "Their stems glow in turn. Anywhere between half and nearly full height counts.",
+                |s| ROLL_HATS_8THS.iter().filter(|&&at| at % 4 == 2).all(|&at| hat_velocity(s, at).is_some_and(|v| (60..=105).contains(&v))),
+                |s| velocity_target(s, &[2, 6, 10, 14], |v| (60..=105).contains(&v)),
+            ),
+            info(
+                "Velocity is how hard a note is played. A drummer never hits twice the same, and neither should a programmed beat. \
+                 The same goes for keys and bass: lean on the notes that matter and let the rest sit back.",
+            ),
+        ],
+    },
+    Lesson {
+        id: ROLL_LENGTH,
+        group: ROLL,
+        title: "Note length and timing",
+        steps: &[
+            act(
+                "Press Space: a beat, and an empty Keys part to write on.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Notes clip in the Keys lane: double-click it.",
+                "Two quick clicks on the empty clip under the drums.",
+                |s| track_open(s, "Keys"),
+                |s| track_named(s, "Keys").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Long notes: click Snap (top right of the editor) until it says 1/4, then click A3 on beat 1 and on beat 3.",
+                "With Snap at 1/4, each click writes a note a whole beat long. Long notes ring into each other and connect.",
+                "A new note is as long as one step of Snap. A3 is the bottom row.",
+                |s| long_note_on(s, 0) && long_note_on(s, 2),
+                |s| if !track_open(s, "Keys") { None } else if long_note_on(s, 0) || long_note_on(s, 2) { Some(Target::PianoRollRow(57)) } else { Some(Target::Snap) },
+            ),
+            recipe(
+                "A short stab: set Snap back to 1/16, then click C4 on beat 4.",
+                "A 16th-long note is a stab: it punctuates. Short notes next to long ones are what make a part breathe.",
+                "Click Snap until it says 1/16. C4 is the row above A3.",
+                |s| short_note_on(s, 3),
+                |_| Some(Target::Snap),
+            ),
+            recipe(
+                "Off the grid: hold Alt and click E4 just after beat 2.",
+                "Alt puts a note exactly where you click. A little late feels laid back; a little early feels pushed. The grid is a guide, not a rule.",
+                "Hold Alt (Option on a Mac) while you click, a little right of the 1.2 line.",
+                |s| keys_notes(s).iter().any(|n| n.start % SIXTEENTH != 0),
+                |_| Some(Target::PianoRollRow(64)),
+            ),
+            info(
+                "Length and timing are the other half of expression: long or short, on the grid or just off it. \
+                 Most of a part's feel comes from these and velocity, not from which notes it plays.",
             ),
         ],
     },
@@ -2812,7 +2894,7 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// The suggested order for someone new: a beat first, then the notes on
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
-    FIRST_BEAT, BASSLINE, CHORDS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
+    FIRST_BEAT, BASSLINE, CHORDS, ROLL_DYNAMICS, ROLL_LENGTH, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
     THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
     ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
@@ -2854,6 +2936,9 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("fifth", "7 semitones up: open and strong"),
     ("diminished", "a tense chord built from two minor thirds"),
     ("progression", "a series of chords, usually looping"),
+    ("velocity", "how hard a note is played: the height of its stem under the grid"),
+    ("groove", "the feel of a rhythm: which hits lean in and which sit back"),
+    ("snap", "the grid clicks land on - it also sets how long a new note is"),
     ("mix", "balancing the parts of a song so each one can be heard"),
     ("eq", "turns parts of a sound's range - its lows, middle or highs - up or down"),
     ("spectrum", "a picture of a sound, from low pitches to high"),
@@ -3348,6 +3433,42 @@ fn melody_has_beat(s: &Snapshot, bar: i64, beat: i64) -> bool {
 /// The melody lane until its clip is open; then nothing (any row will do).
 fn melody_target(s: &Snapshot) -> Option<Target> {
     if track_open(s, "Melody") { None } else { track_named(s, "Melody").map(|t| Target::Lane(t.id)) }
+}
+
+fn drums_open(s: &Snapshot) -> bool {
+    track_open(s, "Drums")
+}
+
+/// The dynamics lesson's closed hat at 16th `at`, and its velocity.
+fn hat_velocity(s: &Snapshot, at: i64) -> Option<u8> {
+    let ClipContent::Midi { notes, .. } = &named_clip(s, "Drums")?.content else { return None };
+    notes.iter().find(|n| n.pitch == shared::drums::CLOSED_HAT && n.start == at * SIXTEENTH).map(|n| n.velocity)
+}
+
+/// The first of `at` (16ths) whose hat isn't `done` yet: its stem, or the
+/// lane while the clip is closed.
+fn velocity_target(s: &Snapshot, at: &[i64], done: fn(u8) -> bool) -> Option<Target> {
+    if !drums_open(s) {
+        return track_named(s, "Drums").map(|t| Target::Lane(t.id));
+    }
+    at.iter().find(|&&a| !hat_velocity(s, a).is_some_and(done)).map(|&a| Target::Velocity(a * SIXTEENTH))
+}
+
+fn keys_notes(s: &Snapshot) -> Vec<shared::arrangement::MidiNote> {
+    match named_clip(s, "Keys").map(|c| &c.content) {
+        Some(ClipContent::Midi { notes, .. }) => notes.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// A Keys note starting in beat `beat` that lasts at least a beat.
+fn long_note_on(s: &Snapshot, beat: i64) -> bool {
+    keys_notes(s).iter().any(|n| n.start / PPQ == beat && n.length >= PPQ)
+}
+
+/// A Keys note starting in beat `beat` no longer than a 16th.
+fn short_note_on(s: &Snapshot, beat: i64) -> bool {
+    keys_notes(s).iter().any(|n| n.start / PPQ == beat && n.length <= SIXTEENTH)
 }
 
 /// `name`'s volume is within `lo..=hi` dB.

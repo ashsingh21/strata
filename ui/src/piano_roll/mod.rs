@@ -291,6 +291,7 @@ pub fn piano_roll_view(
             Button::new(cx, move |cx| Label::new(cx, snap_text))
                 .class("readout")
                 .class("snap")
+                .lesson_target(crate::lessons::Target::Snap)
                 .on_press(|cx| cx.emit(TimelineEvent::CycleSnap));
             Button::new(cx, |cx| Label::new(cx, "Close"))
                 .class("btn")

@@ -67,6 +67,14 @@ pub const MATCH_MYSTERY: &str = "match-mystery";
 pub const MATCH_NOTE: u8 = 57;
 /// How long it's held, in 16ths.
 pub const MATCH_NOTE_16THS: i64 = 12;
+/// "Piano roll": the notes you write, played with feeling.
+pub const ROLL_DYNAMICS: &str = "roll-dynamics";
+pub const ROLL_LENGTH: &str = "roll-length";
+/// The dynamics lesson's hats, all at full strength to start: every 8th
+/// (16ths 0, 2 ... 14), plus two extra 16ths (7 and 15) to become ghost
+/// notes.
+pub const ROLL_HATS_8THS: [i64; 8] = [0, 2, 4, 6, 8, 10, 12, 14];
+pub const ROLL_GHOSTS: [i64; 2] = [7, 15];
 /// "Mixing": the finished house track, made to sound finished.
 pub const MIX_LEVELS: &str = "mix-levels";
 pub const MIX_EQ: &str = "mix-eq";
@@ -320,6 +328,35 @@ fn theory_lesson(lesson: &str) -> Project {
     Project { arrangement: arr, instruments, synth: None }
 }
 
+/// The piano roll lessons, at an easy 100 BPM: a beat whose hats all hit
+/// equally hard (dynamics), or that beat under an empty Keys clip
+/// (length and timing).
+fn roll_lesson(lesson: &str) -> Project {
+    let mut arr = empty_arrangement();
+    arr.tempo_map = TempoMap::constant(THEORY_BPM, TimeSignature::FOUR_FOUR);
+    let hit = |at: i64, pitch: u8, velocity: u8| MidiNote { start: at * SIXTEENTH, length: SIXTEENTH, pitch, velocity };
+    let mut beat: Vec<MidiNote> = Vec::new();
+    for b in 0..4 {
+        beat.push(hit(b * 4, KICK, 115));
+        if b % 2 == 1 {
+            beat.push(hit(b * 4, CLAP, 105));
+        }
+    }
+    let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, -6.0);
+    let mut instruments = Vec::new();
+    if lesson == ROLL_DYNAMICS {
+        beat.extend(ROLL_HATS_8THS.iter().chain(&ROLL_GHOSTS).map(|&at| hit(at, CLOSED_HAT, 110)));
+        add_loop(&mut arr, drums, "Beat", beat, 1, 8);
+    } else {
+        beat.extend(ROLL_HATS_8THS.iter().map(|&at| hit(at, CLOSED_HAT, if at % 4 == 0 { 100 } else { 70 })));
+        add_loop(&mut arr, drums, "Beat", beat, 1, 8);
+        let keys = add_track(&mut arr, "Keys", ClipColor::Teal, Instrument::Carve, -4.0);
+        add_loop(&mut arr, keys, "Notes", Vec::new(), 1, 8);
+        instruments.push((keys, theory_keys()));
+    }
+    Project { arrangement: arr, instruments, synth: None }
+}
+
 /// The mixing lessons: the finished house track (the Projects chain's
 /// end), with the problem each lesson fixes put in.
 fn mix_lesson(lesson: &str) -> Project {
@@ -372,6 +409,9 @@ pub fn starting_project(lesson: &str) -> Project {
     }
     if lesson.starts_with("mix-") {
         return mix_lesson(lesson);
+    }
+    if lesson.starts_with("roll-") {
+        return roll_lesson(lesson);
     }
     let mut arr = empty_arrangement();
     let mut instruments = Vec::new();

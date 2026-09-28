@@ -511,6 +511,12 @@ impl View for Grid {
         }
         let label_font = crate::canvas_text::canvas_font(11.0);
 
+        // A lesson pointing at a velocity stem: its column of the lane glows.
+        if let Some(crate::lessons::Target::Velocity(at)) = crate::lessons::highlighted() {
+            let x = tick_to_x(at).round();
+            fill(canvas, vg::Rect::new(x - 5.0, lane_top + 1.0, x + 8.0, bottom), p.signal_soft);
+        }
+
         // Notes: clip colour with a faint edge; `signal` while sounding;
         // a 2px ink outline when selected.
         // The notes a velocity drag in progress moves together.

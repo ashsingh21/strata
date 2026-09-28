@@ -80,6 +80,10 @@ pub enum Target {
     VoiceMode,
     /// Oscillator 2's Sync switch.
     Sync,
+    /// The velocity stem at this tick of the open clip (a canvas wash).
+    Velocity(shared::arrangement::Ticks),
+    /// The piano roll's Snap button.
+    Snap,
     /// Carve's filter type switch (LP 24 / LP 12 / BP / HP).
     FilterType,
     /// LFO 1 or 2's pill (drag it onto a knob).
