@@ -1,0 +1,6 @@
+# Windows: Skia bundles its own ICU, and the `windows` crate (via
+# accesskit_windows, the screen-reader support) also declares ICU's
+# functions from Windows' icuuc.dll. Both define the same symbols, so the
+# linker is told to keep the first (Skia's) instead of failing.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/FORCE:MULTIPLE"]
