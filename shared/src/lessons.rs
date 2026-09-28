@@ -197,7 +197,7 @@ pub fn init_patch() -> SynthState {
         voice_mode: VoiceMode::Poly,
         voices: 8,
         osc1: Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 0.0, knob_b: 0.0, knob_c: 0.0, sync: false },
-        osc2: Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 0.0, knob_b: 0.5, knob_c: 0.0, sync: false },
+        osc2: Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 0.0, knob_b: 0.0, knob_c: 0.0, sync: false },
         mix: Mix { osc1_db: -6.0, osc2_db: -60.0, sub_db: -60.0, noise_db: -60.0 },
         filter: Filter {
             filter_type: FilterType::Lp24,

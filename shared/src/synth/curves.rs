@@ -31,9 +31,9 @@ pub fn waveform_points(waveform: Waveform, shape: f32, cycles: f32, n: usize) ->
                         1.0 - 2.0 * (phase - duty) / (1.0 - duty)
                     }
                 }
-                // High for `shape` of the cycle: its width.
+                // A square at 0, narrowing to a 5% pulse.
                 Waveform::Square => {
-                    if phase < shape.clamp(0.05, 0.95) {
+                    if phase < 0.5 - shape * 0.45 {
                         1.0
                     } else {
                         -1.0
@@ -51,7 +51,7 @@ pub fn shape_label(waveform: Waveform) -> &'static str {
         Waveform::Sine => "Harmonic",
         Waveform::Triangle => "To saw",
         Waveform::Saw => "To triangle",
-        Waveform::Square => "Width",
+        Waveform::Square => "Narrow",
     }
 }
 
@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn square_wave_is_bilevel() {
-        let points = waveform_points(Waveform::Square, 0.5, 2.0, 50);
+        let points = waveform_points(Waveform::Square, 0.0, 2.0, 50);
         assert!(points.iter().all(|&v| v == 1.0 || v == -1.0));
     }
 
@@ -150,7 +150,8 @@ mod tests {
         assert!(close(&waveform_points(Waveform::Triangle, 1.0, 1.0, n), &saw) < 0.05);
         assert!(close(&waveform_points(Waveform::Saw, 1.0, 1.0, n), &triangle) < 0.01);
         let high = |shape| waveform_points(Waveform::Square, shape, 1.0, n).iter().filter(|&&v| v > 0.0).count();
-        assert!(high(0.2) < high(0.5));
+        assert!(high(0.5) < high(0.0));
+        assert!(high(0.0).abs_diff(n / 2) <= 1, "0 is a true square: high half the cycle");
     }
 
     #[test]

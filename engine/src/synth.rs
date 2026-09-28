@@ -239,8 +239,11 @@ fn sine(t: f32, shape: f32) -> f32 {
     (x.sin() + fold * (2.0 * x).sin()) / (1.0 + fold)
 }
 
+/// The square's Shape knob narrows it: 0 is a true square (high half the
+/// cycle), 1 the thinnest pulse (5%). A pulse and its mirror (30% / 70%)
+/// sound the same, so the knob only runs one way from the square.
 fn pulse_duty(shape: f32) -> f32 {
-    shape.clamp(0.05, 0.95)
+    0.5 - shape.clamp(0.0, 1.0) * 0.45
 }
 
 /// Triangle and saw are one shape: a ramp rising from -1 to 1 over
@@ -862,8 +865,8 @@ mod tests {
     #[test]
     fn alias_measurements() {
         report("saw", &raw_osc(Waveform::Saw, 0.0), 100);
-        report("square 50%", &raw_osc(Waveform::Square, 0.5), 100);
-        report("pulse 20%", &raw_osc(Waveform::Square, 0.2), 100);
+        report("square 50%", &raw_osc(Waveform::Square, 0.0), 100);
+        report("pulse 20%", &raw_osc(Waveform::Square, 2.0 / 3.0), 100);
         report("triangle", &raw_osc(Waveform::Triangle, 0.0), 100);
         report("saw->tri shape 50%", &raw_osc(Waveform::Saw, 0.5), 100);
         let mut synced = raw_osc(Waveform::Saw, 0.0);
@@ -895,8 +898,8 @@ mod tests {
     fn oscillators_are_band_limited() {
         for (name, state) in [
             ("saw", raw_osc(Waveform::Saw, 0.0)),
-            ("square", raw_osc(Waveform::Square, 0.5)),
-            ("pulse", raw_osc(Waveform::Square, 0.2)),
+            ("square", raw_osc(Waveform::Square, 0.0)),
+            ("pulse", raw_osc(Waveform::Square, 2.0 / 3.0)),
             ("triangle", raw_osc(Waveform::Triangle, 0.0)),
         ] {
             let db = report(name, &state, 100);

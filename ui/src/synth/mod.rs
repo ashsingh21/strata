@@ -352,7 +352,7 @@ fn osc1_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId
         knob_row(cx, move |cx| {
             knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Octave, octave_pos(-1), None);
             knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Tune, lin_inv(0.0, -100.0, 100.0), Some(LfoTarget::Pitch));
-            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Shape, 0.35, None);
+            knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Shape, 0.0, None);
             knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, SynthParam::Osc1Drift, 0.12, None);
         });
     })
@@ -378,7 +378,7 @@ fn osc2_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId
             knob_row(cx, move |cx| {
                 knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, SynthParam::Osc2Octave, octave_pos(0), None);
                 knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2Detune, lin_inv(0.0, -50.0, 50.0), None);
-                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2PulseWidth, 0.38, Some(LfoTarget::PulseWidth));
+                knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2PulseWidth, 0.0, Some(LfoTarget::PulseWidth));
                 knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2Fm, 0.0, None);
             });
         },

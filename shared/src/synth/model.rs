@@ -247,7 +247,7 @@ pub fn seed_synth() -> SynthState {
             waveform: Waveform::Square,
             octave: 0,
             knob_a_cents: 7.0,
-            knob_b: 0.38,
+            knob_b: 0.27,
             knob_c: 0.0,
             sync: true,
         },

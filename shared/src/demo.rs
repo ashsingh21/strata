@@ -165,7 +165,7 @@ fn house_stab() -> SynthState {
         voice_mode: VoiceMode::Poly,
         voices: 8,
         osc1: Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 0.0, knob_b: 0.2, knob_c: 0.1, sync: false },
-        osc2: Oscillator { waveform: Waveform::Square, octave: 0, knob_a_cents: 8.0, knob_b: 0.45, knob_c: 0.0, sync: false },
+        osc2: Oscillator { waveform: Waveform::Square, octave: 0, knob_a_cents: 8.0, knob_b: 0.11, knob_c: 0.0, sync: false },
         mix: crate::synth::Mix { osc1_db: -4.0, osc2_db: -7.0, sub_db: -60.0, noise_db: -60.0 },
         filter: Filter {
             filter_type: FilterType::Lp24,
@@ -190,7 +190,7 @@ fn pluck_lead() -> SynthState {
     let mut s = seed_synth();
     s.name = "Pluck Lead";
     s.voice_mode = VoiceMode::Poly;
-    s.osc1 = Oscillator { waveform: Waveform::Square, octave: 0, knob_a_cents: 0.0, knob_b: 0.3, knob_c: 0.05, sync: false };
+    s.osc1 = Oscillator { waveform: Waveform::Square, octave: 0, knob_a_cents: 0.0, knob_b: 0.44, knob_c: 0.05, sync: false };
     s.osc2 = Oscillator { waveform: Waveform::Saw, octave: 1, knob_a_cents: 5.0, knob_b: 0.5, knob_c: 0.0, sync: false };
     s.mix = crate::synth::Mix { osc1_db: -4.0, osc2_db: -10.0, sub_db: -60.0, noise_db: -60.0 };
     s.filter = Filter {
@@ -452,7 +452,7 @@ fn reed_lead() -> SynthState {
     let mut s = seed_synth();
     s.name = "Reed lead";
     s.voice_mode = VoiceMode::Mono;
-    s.osc1 = Oscillator { waveform: Waveform::Square, octave: 0, knob_a_cents: 0.0, knob_b: 0.3, knob_c: 0.05, sync: false };
+    s.osc1 = Oscillator { waveform: Waveform::Square, octave: 0, knob_a_cents: 0.0, knob_b: 0.44, knob_c: 0.05, sync: false };
     s.osc2 = Oscillator { waveform: Waveform::Saw, octave: 0, knob_a_cents: 6.0, knob_b: 0.5, knob_c: 0.0, sync: false };
     s.mix = crate::synth::Mix { osc1_db: -4.0, osc2_db: -9.0, sub_db: -60.0, noise_db: -34.0 };
     s.filter = Filter {
