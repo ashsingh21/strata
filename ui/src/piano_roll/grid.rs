@@ -272,6 +272,15 @@ impl View for Grid {
 
                 let lx = cx.lmouse().0 - bounds.x - LABEL_W;
                 let ly = cx.lmouse().1 - bounds.y - RULER_H;
+                // The label column's head: Interval / Note.
+                if lx < 0.0 && ly < 0.0 && !self.drums() {
+                    let next = match self.label_mode.get() {
+                        LabelMode::Intervals => LabelMode::Notes,
+                        LabelMode::Notes => LabelMode::Intervals,
+                    };
+                    cx.emit(PianoRollEvent::SetLabelMode(next));
+                    return;
+                }
                 if lx < 0.0 || ly < 0.0 {
                     return;
                 }
@@ -438,13 +447,21 @@ impl View for Grid {
             text(canvas, &small, bounds.x + 44.0, baseline, 11.0, p.ink_muted);
         }
 
-        // Column heads.
-        let head = match (drums, label_mode) {
-            (true, _) => "Pad",
-            (false, LabelMode::Intervals) => "Interval",
-            (false, LabelMode::Notes) => "Note",
-        };
-        text(canvas, head, bounds.x + 10.0, bounds.y + 16.0, 11.0, p.ink_muted);
+        // Column heads. A pitched clip's is also the switch between
+        // naming rows by interval or by note: both words, the one in use
+        // in ink - click to swap.
+        if drums {
+            text(canvas, "Pad", bounds.x + 10.0, bounds.y + 16.0, 11.0, p.ink_muted);
+        } else {
+            let font = crate::canvas_text::canvas_font(11.0);
+            let (on, off) = (p.ink, p.ink_faint);
+            let (interval, note) = if label_mode == LabelMode::Intervals { (on, off) } else { (off, on) };
+            let mut x = bounds.x + 10.0;
+            for (word, color) in [("Interval", interval), (" \u{b7} ", p.ink_faint), ("Note", note)] {
+                text(canvas, word, x, bounds.y + 16.0, 11.0, color);
+                x += font.measure_str(word, None).0;
+            }
+        }
         text(canvas, "Velocity", bounds.x + 10.0, lane_top + 18.0, 11.0, p.ink_muted);
 
         // Vertical grid through rows and lane: bars, beats, sixteenths

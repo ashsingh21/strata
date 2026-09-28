@@ -100,25 +100,21 @@ pub fn piano_roll_view(
                 open_clip.get().and_then(|id| arrangement.get().clip(id).map(|c| c.name.clone())).unwrap_or_default()
             });
             Label::new(cx, name_text).class("heading");
+            // Only what the rest of the header doesn't say: the track's name
+            // is in the device chain above, the length in Length below.
             let meta_text = Memo::new(move |_| {
                 let arr = arrangement.get();
                 let Some(clip) = open_clip.get().and_then(|id| arr.clip(id)) else { return String::new() };
-                let track = arr.track(clip.track).map(|t| t.name.clone()).unwrap_or_default();
-                let bars_of = |t: Ticks| (t as f64 / (PPQ * 4) as f64).ceil().max(1.0) as i64;
-                let plural = |n: i64| if n == 1 { "bar" } else { "bars" };
-                let bars = bars_of(clip.length);
-                let linked = clip
-                    .link()
-                    .map(|l| format!(" \u{b7} linked \u{d7}{}", arr.link_count(l)))
-                    .unwrap_or_default();
-                let base = match &clip.content {
-                    ClipContent::Midi { loop_len: Some(len), .. } if *len < clip.length => {
-                        let repeats = (clip.length as f64 / *len as f64).ceil() as i64;
-                        format!("{track} \u{b7} MIDI \u{b7} {bars} {}, loops \u{d7}{repeats}", plural(bars))
+                let mut parts = Vec::new();
+                if let ClipContent::Midi { loop_len: Some(len), .. } = &clip.content {
+                    if *len < clip.length {
+                        parts.push(format!("loops \u{d7}{}", (clip.length as f64 / *len as f64).ceil() as i64));
                     }
-                    _ => format!("{track} \u{b7} MIDI \u{b7} {bars} {}", plural(bars)),
-                };
-                format!("{base}{linked}")
+                }
+                if let Some(l) = clip.link() {
+                    parts.push(format!("linked \u{d7}{}", arr.link_count(l)));
+                }
+                parts.join(" \u{b7} ")
             });
             Label::new(cx, meta_text).class("value");
 
@@ -242,14 +238,6 @@ pub fn piano_roll_view(
                     })
                     .on_press(|cx| cx.emit(PianoRollEvent::ShiftOctave(1)));
                 Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
-                let label_modes = [LabelMode::Notes, LabelMode::Intervals];
-                segmented(
-                    cx,
-                    2,
-                    |cx, i| Label::new(cx, if i == 0 { "Notes" } else { "Intervals" }),
-                    move |i| label_mode.map(move |m| *m == label_modes[i]),
-                    move |cx, i| cx.emit(PianoRollEvent::SetLabelMode(label_modes[i])),
-                );
                 let key_text = Memo::new(move |_| {
                     format!("{} {}", note_name(key.get()), crate::interval_input::state::scale_name(scale_mask.get()).to_lowercase())
                 });

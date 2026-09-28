@@ -17,7 +17,9 @@ use crate::transport::HeaderMenus;
 const MENU_WIDTH: f32 = 300.0;
 /// About how tall the menu is: it opens above its button when there's no
 /// room below (the clip editor's button sits low in the window).
-const MENU_HEIGHT: f32 = 380.0;
+const MENU_HEIGHT: f32 = 440.0;
+/// Scale rows: compact, so 12 of them don't make a tower.
+const ROW_HEIGHT: f32 = 24.0;
 
 thread_local! {
     static MENU: Cell<Option<(HeaderMenus, Signal<(f32, f32)>)>> = const { Cell::new(None) };
@@ -75,7 +77,10 @@ pub fn key_menu(cx: &mut Context, menus: HeaderMenus, key: Signal<u8>, scale_mas
                         Button::new(cx, move |cx| Label::new(cx, preset.name).class("body").hoverable(false))
                             .class("menu-item")
                             .toggle_class("is-on", scale_mask.map(move |m| *m == mask))
+                            .alignment(Alignment::Left)
+                            .padding_left(Pixels(SPACE_2))
                             .width(Stretch(1.0))
+                            .height(Pixels(ROW_HEIGHT))
                             .on_press(move |cx| {
                                 cx.emit(IntervalInputEvent::SetScaleMask(mask));
                                 menus.close_all();
@@ -94,7 +99,10 @@ pub fn key_menu(cx: &mut Context, menus: HeaderMenus, key: Signal<u8>, scale_mas
         Element::new(cx).class("hairline").width(Stretch(1.0)).height(Pixels(1.0));
         Button::new(cx, |cx| Label::new(cx, "Explore this scale in Theory").class("body").hoverable(false))
             .class("menu-item")
+            .alignment(Alignment::Left)
+            .padding_left(Pixels(SPACE_2))
             .width(Stretch(1.0))
+            .height(Pixels(ROW_HEIGHT))
             .on_press(move |cx| {
                 if !theory_open.get() {
                     cx.emit(IntervalInputEvent::ToggleOpen);

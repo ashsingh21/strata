@@ -130,7 +130,10 @@ fn eq_controls(
         })
         .arrow(false)
     })
-    .width(Pixels(280.0))
+    // Takes whatever room the knobs leave: a wider curve is easier to
+    // place a dot on.
+    .min_width(Pixels(240.0))
+    .width(Stretch(1.0))
     .height(Stretch(1.0));
 
     let bands: [(usize, &'static [EffectParam]); 4] = [
