@@ -8,6 +8,7 @@
 //! functions of a [`Snapshot`], so each lesson is unit-tested end to end.
 
 pub mod bar;
+pub mod panel;
 pub mod match_view;
 pub mod course;
 pub mod preview;
@@ -206,7 +207,6 @@ pub struct LessonModel {
     selected_track: Signal<Option<TrackId>>,
     playing: Signal<bool>,
     synth: Signal<SynthState>,
-    sidebar_open: Signal<bool>,
     open_clip: Signal<Option<shared::arrangement::ClipId>>,
     playhead: Signal<shared::arrangement::Ticks>,
     patches: Signal<BTreeMap<TrackId, SynthState>>,
@@ -282,7 +282,6 @@ impl LessonModel {
         selected_track: Signal<Option<TrackId>>,
         playing: Signal<bool>,
         synth: Signal<SynthState>,
-        sidebar_open: Signal<bool>,
         open_clip: Signal<Option<shared::arrangement::ClipId>>,
         playhead: Signal<shared::arrangement::Ticks>,
         patches: Signal<BTreeMap<TrackId, SynthState>>,
@@ -306,7 +305,6 @@ impl LessonModel {
             selected_track,
             playing,
             synth,
-            sidebar_open,
             open_clip,
             playhead,
             patches,
@@ -588,9 +586,8 @@ impl Model for LessonModel {
                 cx.emit(TimelineEvent::SetTool(TimelineTool::Select));
                 // Snap as the steps expect it: 16ths.
                 cx.emit(TimelineEvent::SetSnap(shared::arrangement::SnapGrid::Sixteenth));
-                if !self.sidebar_open.get() {
-                    cx.emit(AppEvent::ToggleSidebar);
-                }
+                // The lesson itself shows in the sidebar's Learn panel.
+                cx.emit(crate::browser::BrowserEvent::ShowLearn);
                 // The part the lesson is about is the last track: select
                 // it, so its instrument is what the panel shows.
                 if let Some(last) = self.arrangement.get().tracks.last() {

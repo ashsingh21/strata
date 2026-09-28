@@ -28,6 +28,8 @@ use items::{Chip, Item, Kind};
 pub const MIN_WIDTH: f32 = 200.0;
 pub const MAX_WIDTH: f32 = 360.0;
 pub const DEFAULT_WIDTH: f32 = 236.0;
+/// A running lesson's panel is at least this wide: its lines read better.
+pub const LESSON_WIDTH: f32 = 320.0;
 pub const RAIL_WIDTH: f32 = 44.0;
 /// How many recently used items History keeps.
 const HISTORY_LEN: usize = 40;
@@ -195,6 +197,8 @@ pub enum BrowserEvent {
     /// Click on a rail icon: switch to it, or collapse if it's already
     /// showing.
     Rail(Section),
+    /// A lesson wants to be seen: Learn, open, wide enough to read.
+    ShowLearn,
     SetChip(Chip),
     ToggleFitsKey,
     SetSort(Sort),
@@ -420,6 +424,15 @@ impl Model for BrowserModel {
                         cx.emit(crate::app::AppEvent::ToggleSidebar);
                     }
                     self.save_layout();
+                }
+            }
+            BrowserEvent::ShowLearn => {
+                self.section.set(Section::Learn);
+                if !self.open.get() {
+                    cx.emit(crate::app::AppEvent::ToggleSidebar);
+                }
+                if self.width.get() < LESSON_WIDTH {
+                    self.width.set(LESSON_WIDTH);
                 }
             }
             BrowserEvent::SetChip(chip) => self.chip.set(*chip),

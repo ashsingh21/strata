@@ -88,6 +88,8 @@ pub struct BrowserProps {
     ghost: Signal<Option<(f32, f32, String)>>,
     /// The UI zoom, shown (and stepped) in the Settings menu.
     zoom: Signal<f64>,
+    /// The running lesson, shown in Learn in place of the list.
+    lesson: crate::lessons::bar::LessonBarProps,
 }
 
 impl BrowserProps {
@@ -101,6 +103,7 @@ impl BrowserProps {
         lessons_active: Signal<Option<(usize, usize)>>,
         lessons_done: Signal<Vec<String>>,
         zoom: Signal<f64>,
+        lesson: crate::lessons::bar::LessonBarProps,
     ) -> Self {
         let ghost = Signal::new(None);
         GHOST.set(Some(ghost));
@@ -137,6 +140,7 @@ impl BrowserProps {
             lessons_done,
             ghost,
             zoom,
+            lesson,
         }
     }
 }
@@ -458,12 +462,19 @@ fn panel(cx: &mut Context, p: BrowserProps) {
         // Rows also show favourites and key tags: rebuilt when those
         // change too, not just the list.
         let decorations = Memo::new(move |_| (p.keys.get().len(), p.favourites.get(), p.key.get(), p.scale_mask.get()));
+        // A lesson running: Learn shows it, rather than the list.
+        let running = Memo::new(move |_| p.lessons_active.get().is_some());
         ScrollView::new(cx, move |cx| {
+            Binding::new(cx, running, move |cx| {
             Binding::new(cx, decorations, move |cx| {
             Binding::new(cx, shown, move |cx| {
                 let items = shown.get();
                 if p.section.get() == Section::Learn {
-                    learn_list(cx, p);
+                    if running.get() {
+                        crate::lessons::panel::lesson_panel(cx, p.lesson);
+                    } else {
+                        learn_list(cx, p);
+                    }
                     return;
                 }
                 if items.is_empty() {
@@ -476,6 +487,7 @@ fn panel(cx: &mut Context, p: BrowserProps) {
                 for item in items {
                     result_row(cx, p, item);
                 }
+            });
             });
             });
         })

@@ -276,7 +276,6 @@ fn main() -> Result<(), ApplicationError> {
             selected_track,
             playing,
             synth_state,
-            sidebar_open,
             piano_roll_open_clip,
             tl_playhead,
             synth_patches,
@@ -305,7 +304,10 @@ fn main() -> Result<(), ApplicationError> {
             browser::preview::BrowserPreview::new(preview_player.clone(), tl_arrangement, interval_key, interval_scale_mask),
         );
         let browser_props =
-            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, interval_open, lessons_active, lessons_done, zoom);
+            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, interval_open, lessons_active, lessons_done, zoom, lesson_bar_props);
+        // Whether the lesson panel (the sidebar on Learn) is on screen.
+        let (browser_open, browser_section) = (browser_model.open, browser_model.section);
+        let lesson_panel_shown = Memo::new(move |_| browser_open.get() && browser_section.get() == browser::Section::Learn);
         browser_model.build(cx);
         browser::view::DragTracker.build(cx);
         browser::start_key_analysis(cx);
@@ -530,7 +532,7 @@ fn main() -> Result<(), ApplicationError> {
                 browser::view::panel_area(cx, browser_props);
 
                 VStack::new(cx, move |cx| {
-                    lessons::bar::lesson_bar(cx, lesson_bar_props);
+                    lessons::bar::lesson_bar(cx, lesson_bar_props, lesson_panel_shown);
                     analyzer::analyzer_strip(cx, analyzer_props, theme);
                     timeline::timeline_view(
                         cx,

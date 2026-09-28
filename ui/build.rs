@@ -338,6 +338,9 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   border-radius: {radius_md}px;
   border-width: 1px;
 }}
+.lesson-card {{
+  border-width: 1px;
+}}
 .pill {{
   height: {control}px;
   border-radius: {radius_pill}px;
@@ -835,6 +838,9 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".side-row.is-lesson-target .body", vec![("color", c("signal"))]);
     rule(".lesson-bar", vec![("background-color", c("bg-raised"))]);
     rule(".lesson-dots", vec![("color", c("signal"))]);
+    // The lesson panel's current step.
+    rule(".lesson-card", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
+    rule(".lesson-step.is-done:hover", vec![("background-color", c("bg-300"))]);
     rule(".side-row.side-next .body", vec![("color", c("signal"))]);
     // The sidebar. ON / selected states use the app's `active` accent
     // (design/tokens.json retired bg-400 for them); hover is bg-300.
