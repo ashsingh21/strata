@@ -308,11 +308,18 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                     // Its text lines up with the status line under it.
                     .padding_left(Pixels(0.0))
                     .padding_right(Pixels(SPACE_1))
+                    // Shorter than a standard control, so the name and the
+                    // status line under it sit centred in the header with
+                    // room below.
+                    .height(Pixels(18.0))
                     .on_press(move |_cx| menus.toggle(file_menu_open));
                 }
             });
             Label::new(cx, status).class("value").font_size(12.0);
         })
+        .gap(Pixels(2.0))
+        .top(Stretch(1.0))
+        .bottom(Stretch(1.0))
         .width(Pixels(120.0))
         .height(Auto);
 
