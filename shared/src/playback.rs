@@ -124,7 +124,7 @@ pub fn instrument_params(
     use crate::arrangement::Instrument;
     let t = automated.track(track)?;
     let mut params = match t.instrument? {
-        Instrument::Drums => crate::synth::SynthParams { drums: true, ..Default::default() },
+        Instrument::Drums => crate::synth::SynthParams { drums: true, drum_pads: t.drum_pads, ..Default::default() },
         Instrument::Carve => {
             let mut patch = patch?.clone();
             arr.apply_synth_automation(track, tick, &mut patch);
@@ -311,6 +311,7 @@ mod tests {
         effects: vec![],
         effect_slots: vec![],
         fx: crate::arrangement::EffectGraph::new(),
+        drum_pads: Default::default(),
         }
     }
 

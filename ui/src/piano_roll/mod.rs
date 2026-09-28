@@ -172,6 +172,21 @@ pub fn piano_roll_view(
                 })
                 .size(Pixels(20.0));
                 Label::new(cx, swing.map(|s| format!("{:.0}%", s * 100.0))).class("value").width(Pixels(30.0));
+                Button::new(cx, |cx| Label::new(cx, "Humanize"))
+                    .class("btn")
+                    .class("sm")
+                    .class("quiet")
+                    .tooltip(|cx| {
+                        Tooltip::new(cx, |cx| {
+                            Label::new(cx, "Nudges every hit's strength and timing a little, like a drummer. Undo takes it back.");
+                        })
+                        .arrow(false)
+                    })
+                    .on_press(move |cx| {
+                        if let Some(clip) = open_clip.get() {
+                            cx.emit(TimelineEvent::HumanizeClip(clip));
+                        }
+                    });
             })
             .toggle_class("hidden", is_drums.map(|d| !*d))
             .gap(Pixels(tokens::SPACE_2))

@@ -275,6 +275,7 @@ fn midi_track(arr: &mut Arrangement, instrument: Instrument) -> shared::arrangem
         effects: vec![],
         effect_slots: vec![],
         fx: EffectGraph::new(),
+        drum_pads: Default::default(),
     });
     id
 }
@@ -352,6 +353,7 @@ fn pattern(index: usize, bpm: f64, sample_rate: u32) -> Option<(Vec<f32>, String
         effects: vec![],
         effect_slots: vec![],
         fx: EffectGraph::new(),
+        drum_pads: Default::default(),
     });
     let assets = crate::timeline::assets_dir();
     for bar in 0..template.bars {

@@ -111,7 +111,13 @@ struct Paint {
     starts: Vec<Ticks>,
     /// A new step's length (one Snap step).
     length: Ticks,
+    /// How hard new steps hit: normal, an accent (Shift) or a ghost (Alt).
+    velocity: u8,
 }
+
+/// Shift-click writes an accent, Alt-click a ghost note (drum clips).
+const ACCENT_VELOCITY: u8 = 127;
+const GHOST_VELOCITY: u8 = 45;
 
 pub struct Grid {
     arrangement: Signal<Arrangement>,
@@ -291,6 +297,17 @@ impl View for Grid {
                     cx.emit(PianoRollEvent::SetLabelMode(self.label_mode.get().next()));
                     return;
                 }
+                // A pad's name in a drum clip: mute or unmute that pad.
+                if lx < 0.0 && ly >= 0.0 && self.drums() {
+                    let row = (ly / ROW_H) as usize;
+                    let track = self.arrangement.get().clip(clip_id).map(|c| c.track);
+                    if let (Some(&pitch), Some(track)) = (rows.get(row), track) {
+                        if let Some(pad) = shared::drums::pad_index(pitch) {
+                            cx.emit(TimelineEvent::ToggleDrumPadMute { track, pad });
+                        }
+                    }
+                    return;
+                }
                 if lx < 0.0 || ly < 0.0 {
                     return;
                 }
@@ -334,13 +351,30 @@ impl View for Grid {
                         // along the row, adding steps - or erasing them if
                         // it began on a hit. Committed on release.
                         if self.drums() {
-                            let hit = Self::note_at(&notes, snapped, pitch);
+                            let (shift, alt) = (cx.modifiers().shift(), cx.modifiers().alt());
+                            let velocity = if shift {
+                                ACCENT_VELOCITY
+                            } else if alt {
+                                GHOST_VELOCITY
+                            } else {
+                                DEFAULT_VELOCITY
+                            };
+                            // Snap applies even with Alt held: here Alt means ghost.
                             let step = self.snap.get().ticks().unwrap_or(PPQ / 4);
+                            let snapped = raw_tick.div_euclid(step).max(0) * step;
+                            let snapped = snapped.clamp(0, clip_length - 1);
+                            let hit = Self::note_at(&notes, snapped, pitch);
+                            // Shift/Alt on a hit re-voices it instead of erasing.
+                            if let (Some(hit), true) = (hit, shift || alt) {
+                                cx.emit(TimelineEvent::SetNoteVelocities { clip: clip_id, notes: vec![(hit.start, hit.pitch)], velocity });
+                                return;
+                            }
                             self.paint = Some(Paint {
                                 pitch,
                                 erase: hit.is_some(),
                                 starts: vec![hit.map(|h| h.start).unwrap_or(snapped)],
                                 length: step.min(clip_length - snapped).max(1),
+                                velocity,
                             });
                             cx.capture();
                             cx.needs_redraw();
@@ -426,7 +460,7 @@ impl View for Grid {
                         let notes = paint
                             .starts
                             .iter()
-                            .map(|&start| MidiNote { start, length: paint.length, pitch: paint.pitch, velocity: DEFAULT_VELOCITY })
+                            .map(|&start| MidiNote { start, length: paint.length, pitch: paint.pitch, velocity: paint.velocity })
                             .collect();
                         cx.emit(TimelineEvent::AddMidiNotesAt { clip, notes });
                     }
@@ -461,6 +495,19 @@ impl View for Grid {
         }
         let label_mode = self.label_mode.get();
         let selected = self.selected.get();
+        // A drum clip's muted pads (their notes and names are drawn faint).
+        let muted_pads: Vec<u8> = if drums {
+            let arr = self.arrangement.get();
+            let track = self.open_clip.get().and_then(|id| arr.clip(id)).and_then(|c| arr.track(c.track));
+            shared::drums::DRUM_KIT
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| track.is_some_and(|t| t.drum_pads.get(*i).is_some_and(|p| p.mute)))
+                .map(|(_, pad)| pad.note)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let clip_color = self.clip_color();
         let degrees = degrees_in_mask(self.scale_mask.get());
 
@@ -489,6 +536,10 @@ impl View for Grid {
                 if i % 2 == 1 {
                     fill(canvas, vg::Rect::new(gx, y0, gx + gw, y1), p.bg_000);
                 }
+                // A muted pad's row: its name on a darker ground, faint.
+                if muted_pads.contains(&pitch) {
+                    fill(canvas, vg::Rect::new(bounds.x, y0, bounds.x + LABEL_W, y1), p.bg_200);
+                }
             } else if rel == 0 {
                 fill(canvas, vg::Rect::new(gx, y0, gx + gw, y1), p.selection);
                 fill(canvas, vg::Rect::new(bounds.x, y0 + 2.0, bounds.x + 3.0, y1 - 2.0), p.ink);
@@ -511,7 +562,7 @@ impl View for Grid {
                 (false, LabelMode::Sargam) => (sargam_name(rel).to_string(), note_with_octave(pitch)),
             };
             let baseline = y0 + ROW_H * 0.5 + 4.0;
-            text(canvas, &big, bounds.x + 10.0, baseline, 12.0, p.ink);
+            text(canvas, &big, bounds.x + 10.0, baseline, 12.0, if muted_pads.contains(&pitch) { p.ink_faint } else { p.ink });
             text(canvas, &small, bounds.x + 44.0, baseline, 11.0, p.ink_muted);
         }
 
@@ -626,7 +677,14 @@ impl View for Grid {
             let is_selected = selected.contains(&key_of_note);
             let is_sounding = playhead >= note.start && playhead < note.start + note.length;
             let rect = vg::Rect::new(x0, y0, x1, y1);
-            fill(canvas, rect, if is_sounding { p.signal } else { clip_color });
+            let color = if is_sounding {
+                p.signal
+            } else if muted_pads.contains(&note.pitch) {
+                Color::rgba(clip_color.r(), clip_color.g(), clip_color.b(), 70)
+            } else {
+                clip_color
+            };
+            fill(canvas, rect, color);
 
             let mut edge = vg::Paint::default();
             edge.set_style(vg::PaintStyle::Stroke);

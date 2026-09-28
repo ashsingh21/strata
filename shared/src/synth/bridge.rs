@@ -71,6 +71,8 @@ pub struct SynthParams {
     /// This slot is a Drum Kit, not a Carve: notes trigger kit samples and
     /// the synth voice fields above are ignored. Set by the caller.
     pub drums: bool,
+    /// A Drum Kit slot's per-pad settings (`Track::drum_pads`).
+    pub drum_pads: [crate::drums::PadSettings; crate::drums::DRUM_KIT.len()],
 }
 
 impl SynthParams {
@@ -99,6 +101,7 @@ impl SynthParams {
             effect_count: 0,
             effects: [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN],
             drums: false,
+            drum_pads: Default::default(),
         }
     }
 }

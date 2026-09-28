@@ -69,6 +69,10 @@ pub struct Track {
     /// existed.
     #[serde(default)]
     pub fx: EffectGraph,
+    /// A Drum Kit track's per-pad mute, level and tuning, in `DRUM_KIT`
+    /// order. `default` so older projects load with every pad as sampled.
+    #[serde(default)]
+    pub drum_pads: [crate::drums::PadSettings; crate::drums::DRUM_KIT.len()],
     /// Old shape (a flat `Vec<EffectSlot>`, no positions/graph) - read-
     /// only, kept only so `Project::migrate` can convert it into `fx`
     /// once. Never written to a new save (`skip_serializing`).
@@ -1234,6 +1238,7 @@ mod effect_graph_tests {
             height: 56.0,
             instrument: None,
             fx: EffectGraph::new(),
+            drum_pads: Default::default(),
             effect_slots: vec![],
             effects: vec![],
         });
@@ -1292,6 +1297,7 @@ mod track_name_tests {
                 effects: vec![],
                 effect_slots: vec![],
                 fx: EffectGraph::new(),
+                drum_pads: Default::default(),
             });
         }
         arr

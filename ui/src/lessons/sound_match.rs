@@ -37,6 +37,7 @@ pub fn measure(patch: &SynthState) -> Analysis {
         effects: vec![],
         effect_slots: vec![],
         fx: EffectGraph::new(),
+        drum_pads: Default::default(),
     });
     let id = arr.alloc_id();
     let note = MidiNote { start: 0, length: MATCH_NOTE_16THS * PPQ / 4, pitch: MATCH_NOTE, velocity: 100 };

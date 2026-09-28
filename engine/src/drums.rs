@@ -3,7 +3,7 @@
 //! sources the arrangement's audio clips use, so nothing here allocates or
 //! touches the disk. Note-offs are ignored: a drum hit always plays out.
 
-use shared::drums::pad_for_note;
+use shared::drums::{pad_for_note, pad_index, PadSettings, DRUM_KIT};
 use shared::playback::DecodedSource;
 use shared::synth::{NoteEvent, ALL_NOTES_OFF};
 
@@ -36,6 +36,8 @@ pub struct DrumEngine {
     sample_rate: f32,
     fade_step: f32,
     counter: u64,
+    /// The track's per-pad mute, level and tuning.
+    pads: [PadSettings; DRUM_KIT.len()],
 }
 
 impl DrumEngine {
@@ -45,7 +47,12 @@ impl DrumEngine {
             sample_rate,
             fade_step: 1.0 / (FADE_MS * 0.001 * sample_rate),
             counter: 0,
+            pads: Default::default(),
         }
+    }
+
+    pub fn set_pads(&mut self, pads: [PadSettings; DRUM_KIT.len()]) {
+        self.pads = pads;
     }
 
     pub fn handle_note_event(&mut self, event: NoteEvent, sources: &[DecodedSource]) {
@@ -59,6 +66,10 @@ impl DrumEngine {
             return;
         }
         let Some(pad) = pad_for_note(event.note) else { return };
+        let settings = pad_index(event.note).map(|i| self.pads[i]).unwrap_or_default();
+        if settings.mute {
+            return;
+        }
         // Not decoded yet (or failed to decode): nothing to play.
         let Some(source) = sources.iter().position(|s| &*s.source == pad.sample) else { return };
 
@@ -82,9 +93,10 @@ impl DrumEngine {
             note: event.note,
             source,
             pos: 0.0,
-            step: sources[source].sample_rate as f64 / self.sample_rate as f64,
+            // Retuned by the pad's pitch: faster is higher.
+            step: sources[source].sample_rate as f64 / self.sample_rate as f64 * 2f64.powf(settings.pitch as f64 / 12.0),
             // A gentle curve: soft hits are quieter, not inaudible.
-            gain: velocity * velocity.sqrt(),
+            gain: velocity * velocity.sqrt() * 10f32.powf(settings.gain_db / 20.0),
             fade: 1.0,
             fading: false,
             started: self.counter,
@@ -172,5 +184,25 @@ mod tests {
         d.handle_note_event(hit(0), &[]);
         d.handle_note_event(hit(shared::drums::KICK), &[]);
         assert_eq!(d.process(&[]), (0.0, 0.0));
+    }
+
+    #[test]
+    fn pad_settings_mute_level_and_tune() {
+        let sources = [source("drums/kick.wav", 48_000, 480)];
+        let play = |settings: PadSettings| {
+            let mut d = DrumEngine::new(48_000.0);
+            let mut pads = [PadSettings::default(); DRUM_KIT.len()];
+            pads[pad_index(shared::drums::KICK).unwrap()] = settings;
+            d.set_pads(pads);
+            d.handle_note_event(hit(shared::drums::KICK), &sources);
+            let out: Vec<f32> = (0..1000).map(|_| d.process(&sources).0).collect();
+            (out.iter().filter(|x| **x != 0.0).count(), out[0])
+        };
+        let (plain_len, plain_level) = play(PadSettings::default());
+        assert_eq!(play(PadSettings { mute: true, ..Default::default() }).0, 0, "a muted pad is silent");
+        let (_, quieter) = play(PadSettings { gain_db: -6.0, ..Default::default() });
+        assert!((quieter / plain_level - 0.501).abs() < 0.01, "-6 dB is half the level: {}", quieter / plain_level);
+        let (octave_up_len, _) = play(PadSettings { pitch: 12.0, ..Default::default() });
+        assert!((octave_up_len as f32 - plain_len as f32 / 2.0).abs() <= 2.0, "an octave up plays twice as fast: {octave_up_len} vs {plain_len}");
     }
 }

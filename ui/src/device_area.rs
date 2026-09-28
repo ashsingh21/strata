@@ -158,7 +158,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
             }
             Panel::Drums(track) => {
                 let color = p.arrangement.get().track(track).map(|t| t.color).unwrap_or(shared::arrangement::ClipColor::Coral);
-                crate::drum_kit_panel::drum_kit_panel(cx, color);
+                crate::drum_kit_panel::drum_kit_panel(cx, color, track, p.arrangement, p.theme);
             }
             Panel::NoInstrument(track) => empty_state(cx, "No instrument on this track", move |cx| {
                 Button::new(cx, |cx| Label::new(cx, "Add Carve"))

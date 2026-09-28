@@ -945,6 +945,7 @@ pub(super) fn add_track(s: &mut Snapshot, name: &str, instrument: Option<Instrum
         effects: vec![],
         effect_slots: vec![],
         fx: Default::default(),
+        drum_pads: Default::default(),
     };
     let index = s.arrangement.tracks.len();
     Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] }.apply(&mut s.arrangement);

@@ -335,6 +335,7 @@ mod tests {
             effects: vec![],
             effect_slots: vec![],
             fx,
+            drum_pads: Default::default(),
         });
         (arr, node)
     }

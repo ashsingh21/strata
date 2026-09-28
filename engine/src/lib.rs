@@ -375,6 +375,9 @@ where
                         drum_engines[slot].handle_note_event(off, &current_sources);
                         slot_is_drums[slot] = next.drums;
                     }
+                    if let Some(drums) = drum_engines.get_mut(slot) {
+                        drums.set_pads(next.drum_pads);
+                    }
                     if let Some(engine) = synth_engines.get_mut(slot) {
                         engine.set_params(next);
                     }

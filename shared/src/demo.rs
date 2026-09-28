@@ -71,6 +71,7 @@ impl Builder {
             effects: vec![],
             effect_slots: vec![],
             fx: EffectGraph::new(),
+            drum_pads: Default::default(),
         });
         id
     }

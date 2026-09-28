@@ -32,6 +32,22 @@ pub const DRUM_KIT: [DrumPad; 5] = [
     DrumPad { note: OPEN_HAT, name: "Open Hat", sample: "drums/hihat_open.wav", chokes: &[] },
 ];
 
+/// One pad's own settings on a Drum Kit track (indexed like `DRUM_KIT`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PadSettings {
+    /// Silent: new hits on this pad are ignored.
+    pub mute: bool,
+    /// Its level, in dB (0 = as sampled).
+    pub gain_db: f32,
+    /// Its tuning, in semitones (the sample plays faster or slower).
+    pub pitch: f32,
+}
+
+/// Where `note`'s pad sits in `DRUM_KIT` (and so in a track's settings).
+pub fn pad_index(note: u8) -> Option<usize> {
+    DRUM_KIT.iter().position(|p| p.note == note)
+}
+
 pub fn pad_for_note(note: u8) -> Option<&'static DrumPad> {
     DRUM_KIT.iter().find(|p| p.note == note)
 }

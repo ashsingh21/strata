@@ -108,6 +108,7 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
                 slot_gain[i] = db_to_gain(p.gain_db);
                 slot_fx[i].set_state(p.effect_count, &p.effects);
                 is_drums[i] = p.drums;
+                drums[i].set_pads(p.drum_pads);
                 synths[i].set_params(p);
             }
         }
@@ -260,6 +261,7 @@ mod tests {
             effects: vec![],
             effect_slots: vec![],
             fx: Default::default(),
+            drum_pads: Default::default(),
         });
         let clip = arr.alloc_id();
         arr.clips.push(Clip {
@@ -400,6 +402,7 @@ mod tests {
             effects: vec![],
             effect_slots: vec![],
             fx: Default::default(),
+            drum_pads: Default::default(),
         });
         let id = arr.alloc_id();
         arr.clips.push(Clip {

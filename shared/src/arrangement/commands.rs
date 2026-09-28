@@ -571,6 +571,7 @@ mod tests {
             effects: vec![],
             effect_slots: vec![],
             fx: crate::arrangement::EffectGraph::new(),
+            drum_pads: Default::default(),
         });
         arr
     }
@@ -922,6 +923,7 @@ mod tests {
             effects: vec![],
             effect_slots: vec![],
             fx: crate::arrangement::EffectGraph::new(),
+            drum_pads: Default::default(),
         }
     }
 

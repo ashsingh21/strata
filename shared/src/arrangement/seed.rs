@@ -42,6 +42,7 @@ pub fn seed_arrangement() -> Arrangement {
         effects: vec![],
         effect_slots: vec![],
         fx: crate::arrangement::EffectGraph::new(),
+        drum_pads: Default::default(),
     });
     arr.tracks.push(Track {
         id: bass,
@@ -57,6 +58,7 @@ pub fn seed_arrangement() -> Arrangement {
         effects: vec![],
         effect_slots: vec![],
         fx: crate::arrangement::EffectGraph::new(),
+        drum_pads: Default::default(),
     });
     arr.tracks.push(Track {
         id: lead,
@@ -72,6 +74,7 @@ pub fn seed_arrangement() -> Arrangement {
         effects: vec![],
         effect_slots: vec![],
         fx: crate::arrangement::EffectGraph::new(),
+        drum_pads: Default::default(),
     });
     arr.tracks.push(Track {
         id: pad,
@@ -87,6 +90,7 @@ pub fn seed_arrangement() -> Arrangement {
         effects: vec![],
         effect_slots: vec![],
         fx: crate::arrangement::EffectGraph::new(),
+        drum_pads: Default::default(),
     });
 
     // -- Drums: one continuous take, sliced into three clips. ---------

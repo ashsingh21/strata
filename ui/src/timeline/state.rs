@@ -427,6 +427,14 @@ pub enum TimelineEvent {
     Undo,
     Redo,
     SetSnap(SnapGrid),
+    /// Small, repeatable random changes to every note's strength and
+    /// timing, so a programmed part sounds played. One undo step.
+    HumanizeClip(ClipId),
+    /// A Drum Kit pad's mute, level or tuning (like a knob, not an undo
+    /// step).
+    SetDrumPad { track: TrackId, pad: usize, settings: shared::drums::PadSettings },
+    /// Mute or unmute one pad (a click on its row's name in the step grid).
+    ToggleDrumPadMute { track: TrackId, pad: usize },
     /// A MIDI clip's swing, 0 (straight) to 1 (see `Clip::swing`). Like
     /// a knob, not an undo step.
     SetClipSwing { clip: ClipId, swing: f32 },
@@ -637,6 +645,7 @@ impl TimelineState {
                         effects: vec![],
                         effect_slots: vec![],
                         fx: shared::arrangement::EffectGraph::new(),
+                        drum_pads: Default::default(),
                     };
                     let clip = Clip {
                         id: clip_id,
@@ -689,6 +698,7 @@ impl TimelineState {
                 effects: vec![],
                 effect_slots: vec![],
                 fx: shared::arrangement::EffectGraph::new(),
+                drum_pads: Default::default(),
             };
             stack.do_command(Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] }, arr);
         });
@@ -967,6 +977,30 @@ impl Model for TimelineState {
                 });
             }
             TimelineEvent::SetSnap(grid) => self.snap.set(*grid),
+            TimelineEvent::SetDrumPad { track, pad, settings } => {
+                self.with_arrangement(|arr, _| {
+                    if let Some(p) = arr.track_mut(*track).and_then(|t| t.drum_pads.get_mut(*pad)) {
+                        *p = *settings;
+                    }
+                });
+            }
+            TimelineEvent::ToggleDrumPadMute { track, pad } => {
+                self.with_arrangement(|arr, _| {
+                    if let Some(p) = arr.track_mut(*track).and_then(|t| t.drum_pads.get_mut(*pad)) {
+                        p.mute = !p.mute;
+                    }
+                });
+            }
+            TimelineEvent::HumanizeClip(clip) => {
+                let arr = self.arrangement.get();
+                let Some(c) = arr.clip(*clip) else { return };
+                let ClipContent::Midi { notes, .. } = &c.content else { return };
+                let len = c.content_len();
+                let moved: Vec<(MidiNote, MidiNote)> = notes.iter().map(|n| (*n, humanized(n, len))).collect();
+                let removes = moved.iter().map(|(from, _)| Command::RemoveMidiNote { clip: *clip, start: from.start, pitch: from.pitch });
+                let adds = moved.iter().map(|(_, to)| Command::AddMidiNote { clip: *clip, note: *to });
+                self.do_command(Command::Batch(removes.chain(adds).collect()));
+            }
             TimelineEvent::SetClipSwing { clip, swing } => {
                 let swing = swing.clamp(0.0, 1.0);
                 self.with_arrangement(|arr, _| {
@@ -1432,6 +1466,7 @@ impl Model for TimelineState {
                             effects: vec![],
                             effect_slots: vec![],
                             fx: shared::arrangement::EffectGraph::new(),
+                            drum_pads: Default::default(),
                         };
                         commands.push(Command::InsertTrack {
                             track: Box::new(track),
@@ -1569,6 +1604,7 @@ impl Model for TimelineState {
                             effects: vec![],
                             effect_slots: vec![],
                             fx: shared::arrangement::EffectGraph::new(),
+                            drum_pads: Default::default(),
                         };
                         stack.do_command(
                             Command::InsertTrack {
@@ -1618,4 +1654,17 @@ fn random_gain_variation_db() -> f32 {
     let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
     let unit = (nanos % 1000) as f32 / 1000.0; // 0..1
     (unit - 0.5) * 4.0 // -2..2
+}
+
+/// `note`, a little off: strength up to 12 either way, timing up to 12
+/// ticks (about a hundredth of a beat) either way, kept inside the
+/// pattern; a note on the downbeat stays put. Seeded by the note itself,
+/// so the result is repeatable rather than different on every press.
+fn humanized(note: &MidiNote, pattern_len: Ticks) -> MidiNote {
+    let mut h = (note.start as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (note.pitch as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    h ^= h >> 31;
+    let velocity = (note.velocity as i32 + (h % 25) as i32 - 12).clamp(1, 127) as u8;
+    let nudge = ((h >> 16) % 25) as Ticks - 12;
+    let start = if note.start == 0 { 0 } else { (note.start + nudge).clamp(0, pattern_len - 1) };
+    MidiNote { start, velocity, ..*note }
 }

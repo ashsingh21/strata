@@ -704,6 +704,7 @@ fn add_track(arr: &mut Arrangement, name: &str, color: ClipColor, instrument: In
         effects: vec![],
         effect_slots: vec![],
         fx: EffectGraph::new(),
+        drum_pads: Default::default(),
     });
     id
 }
