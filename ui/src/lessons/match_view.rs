@@ -117,13 +117,15 @@ impl View for MatchGraph {
             Graph::Live => "Output spectrum: low \u{2192} high pitch",
         };
         canvas.draw_str(title, vg::Point::new(b.x + 4.0, b.y + 11.0), &font, &label);
-        // The key, top right (the live analyzer has one line: no key).
-        if self.graph != Graph::Live {
+        // The key, top right (the live analyzer only has one while it's
+        // averaging: the average filled, now as the line).
+        let (filled, lined) = if self.graph == Graph::Live { ("Average", "Now") } else { ("Target", "Yours") };
+        if self.graph != Graph::Live || self.yours.get().is_some() {
         let key_x = b.x + b.w - 100.0;
         canvas.draw_path(&vg::Path::rect(vg::Rect::new(key_x, b.y + 4.0, key_x + 10.0, b.y + 11.0), None), &paint(p.signal));
-        canvas.draw_str("Target", vg::Point::new(key_x + 14.0, b.y + 11.0), &font, &label);
+        canvas.draw_str(filled, vg::Point::new(key_x + 14.0, b.y + 11.0), &font, &label);
         canvas.draw_path(&vg::Path::rect(vg::Rect::new(key_x + 54.0, b.y + 7.0, key_x + 64.0, b.y + 8.5), None), &paint(p.ink));
-        canvas.draw_str("Yours", vg::Point::new(key_x + 68.0, b.y + 11.0), &font, &label);
+        canvas.draw_str(lined, vg::Point::new(key_x + 68.0, b.y + 11.0), &font, &label);
         }
 
         // The target: a filled shape.

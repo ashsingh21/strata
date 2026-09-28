@@ -269,7 +269,7 @@ fn main() -> Result<(), ApplicationError> {
 
         let analyzer_model = analyzer::AnalyzerModel::new(analyzer_rx.take().expect("the app is built once"), engine_sample_rate);
         let analyzer_open = analyzer_model.open;
-        let analyzer_live = analyzer_model.live;
+        let analyzer_props = analyzer::AnalyzerProps::of(&analyzer_model);
         analyzer_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
@@ -484,7 +484,7 @@ fn main() -> Result<(), ApplicationError> {
 
                 VStack::new(cx, move |cx| {
                     lessons::bar::lesson_bar(cx, lesson_bar_props);
-                    analyzer::analyzer_strip(cx, analyzer_open, analyzer_live, theme);
+                    analyzer::analyzer_strip(cx, analyzer_props, theme);
                     timeline::timeline_view(
                         cx,
                         theme,
