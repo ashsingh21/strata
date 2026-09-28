@@ -89,6 +89,96 @@ pub fn save_analyzer_open(open: bool) {
     save_key("analyzer_open", serde_json::json!(open));
 }
 
+/// A browser list of item ids (favourites, history).
+pub fn load_browser_list(key: &str) -> Vec<String> {
+    load_all()
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+pub fn save_browser_list(key: &str, ids: &[String]) {
+    save_key(key, serde_json::json!(ids));
+}
+
+/// The browser's user collections.
+pub fn load_browser_collections() -> Vec<crate::browser::Collection> {
+    let Some(list) = load_all().get("browser_collections").and_then(|v| v.as_array()).cloned() else { return vec![] };
+    list.iter()
+        .filter_map(|c| {
+            Some(crate::browser::Collection {
+                name: c.get("name")?.as_str()?.to_string(),
+                color: serde_json::from_value(c.get("color")?.clone()).ok()?,
+                items: c.get("items")?.as_array()?.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+            })
+        })
+        .collect()
+}
+
+pub fn save_browser_collections(collections: &[crate::browser::Collection]) {
+    let list: Vec<serde_json::Value> = collections
+        .iter()
+        .map(|c| serde_json::json!({ "name": c.name, "color": serde_json::to_value(c.color).unwrap_or_default(), "items": c.items }))
+        .collect();
+    save_key("browser_collections", serde_json::Value::Array(list));
+}
+
+/// The sidebar panel's width and section, per project (by its file; an
+/// unsaved project shares one entry).
+pub fn load_browser_layout(project: Option<&std::path::Path>) -> Option<(f32, String)> {
+    let key = project.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let entry = load_all().get("browser_layout")?.get(&key)?.clone();
+    Some((entry.get("width")?.as_f64()? as f32, entry.get("section")?.as_str()?.to_string()))
+}
+
+pub fn save_browser_layout(project: Option<&std::path::Path>, width: f32, section: &str) {
+    let key = project.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut all = load_all().get("browser_layout").and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    all.insert(key, serde_json::json!({ "width": width, "section": section }));
+    save_key("browser_layout", serde_json::Value::Object(all));
+}
+
+/// Analysed sample keys ("Fits key"), by source and file size: (size,
+/// key or none for an unpitched sound).
+pub fn load_sample_keys() -> std::collections::HashMap<String, (u64, Option<crate::browser::keys::SampleKey>)> {
+    let Some(map) = load_all().get("sample_keys").and_then(|v| v.as_object().cloned()) else { return Default::default() };
+    map.into_iter()
+        .filter_map(|(source, v)| {
+            let size = v.get("size")?.as_u64()?;
+            let key = v.get("root").and_then(|r| r.as_u64()).map(|root| crate::browser::keys::SampleKey {
+                root: root as u8,
+                minor: v.get("minor").and_then(|m| m.as_bool()).unwrap_or(false),
+                notes: v.get("notes").and_then(|n| n.as_u64()).unwrap_or(0) as u16,
+            });
+            Some((source, (size, key)))
+        })
+        .collect()
+}
+
+pub fn save_sample_keys(keys: &std::collections::HashMap<std::sync::Arc<str>, (u64, Option<crate::browser::keys::SampleKey>)>) {
+    let map: serde_json::Map<String, serde_json::Value> = keys
+        .iter()
+        .map(|(source, (size, key))| {
+            let v = match key {
+                Some(k) => serde_json::json!({ "size": size, "root": k.root, "minor": k.minor, "notes": k.notes }),
+                None => serde_json::json!({ "size": size }),
+            };
+            (source.to_string(), v)
+        })
+        .collect();
+    save_key("sample_keys", serde_json::Value::Object(map));
+}
+
+/// The browser preview's volume, dB.
+pub fn load_preview_volume() -> Option<f32> {
+    load_all().get("preview_volume")?.as_f64().map(|v| v as f32)
+}
+
+pub fn save_preview_volume(db: f32) {
+    save_key("preview_volume", serde_json::json!(db));
+}
+
 /// The lower panel's height (see `crate::splitter`), logical pixels.
 pub fn load_lower_panel_height() -> Option<f32> {
     load_all().get("lower_panel_height")?.as_f64().map(|h| h as f32)

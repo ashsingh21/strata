@@ -198,6 +198,14 @@ pub fn timeline_view(
                 // frame - see PlayheadOverlay's own doc comment.
                 ZStack::new(cx, move |cx| {
                     LaneArea::new(cx, arrangement, transform, selection, playhead, theme, recording_preview, live_peaks, tool, missing_sources)
+                        // A browser result dropped on the timeline: the
+                        // lanes work out which track and when.
+                        .on_drop(|cx, _| {
+                            if let Some(item) = crate::browser::view::dragged() {
+                                let lanes = cx.current();
+                                cx.emit_to(lanes, lanes::LaneDrop(item.id));
+                            }
+                        })
                         .position_type(PositionType::Absolute)
                         .height(Stretch(1.0))
                         .width(Stretch(1.0));

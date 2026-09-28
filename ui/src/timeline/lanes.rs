@@ -34,6 +34,9 @@ const EDGE_GRAB_PX: f32 = 6.0;
 const BREAKPOINT_GRAB_PX: f32 = 6.0;
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
+/// A browser result (its id) was dropped on the lanes, at the pointer.
+pub struct LaneDrop(pub String);
+
 #[derive(Clone, Copy, PartialEq)]
 enum RowKind {
     Track(TrackId),
@@ -207,6 +210,7 @@ impl View for LaneArea {
     }
 
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|LaneDrop(item), _| self.on_browser_drop(cx, item.clone()));
         event.map(|window_event, _| match window_event {
             // Vizia delivers a second (or third) click on the same pixel as
             // a Double/TripleClick *instead of* a MouseDown. Our own
@@ -258,6 +262,23 @@ impl LaneArea {
     fn local_pos(&self, cx: &EventContext) -> (f32, f32) {
         let bounds = cx.lbounds();
         (cx.lmouse().0 - bounds.x, cx.lmouse().1 - bounds.y)
+    }
+
+    /// Onto the track under the pointer (or, below the tracks, a new one),
+    /// at the beat nearest the pointer.
+    fn on_browser_drop(&mut self, cx: &mut EventContext, item: String) {
+        let (lx, ly) = self.local_pos(cx);
+        let transform = self.transform.get();
+        let arr = self.arrangement.get();
+        let rows = build_rows(&arr);
+        let track = row_at_y(&rows, ly + transform.scroll_y as f32).and_then(|i| match rows[i].kind {
+            RowKind::Track(t) => Some(t),
+            // An automation lane: the track it belongs to.
+            RowKind::Automation(lane) => arr.automation.iter().find(|l| l.id == lane).map(|l| l.track),
+        });
+        let beat = shared::arrangement::PPQ;
+        let tick = ((transform.x_to_tick(lx as f64) as f64 / beat as f64).round() as Ticks * beat).max(0);
+        cx.emit(crate::browser::BrowserEvent::DropOnTrack { item, track, tick });
     }
 
     fn on_mouse_down(&mut self, cx: &mut EventContext) {

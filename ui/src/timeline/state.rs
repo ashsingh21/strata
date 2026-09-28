@@ -538,6 +538,12 @@ pub enum TimelineEvent {
     /// relative to the assets dir, e.g. `"drums/kick.wav"`) as a new
     /// track - one clip, sized to the sample's own length, at tick 0.
     AddDrumSample(Arc<str>),
+    /// A sample dropped from the browser: onto `track` at `start` if it's
+    /// an audio track, else on a new track, starting at `start`.
+    AddSampleAt { source: Arc<str>, track: Option<TrackId>, start: Ticks },
+    /// A new MIDI track playing `instrument`, selected - a browser drop on
+    /// empty timeline space.
+    AddTrackWith(Option<Instrument>),
     /// A built-in multi-bar pattern (index into
     /// `beat_templates::TEMPLATES`) - one or more new tracks, each with
     /// every bar's worth of hits already placed, one undo step.
@@ -553,6 +559,88 @@ pub enum TimelineEvent {
 }
 
 impl TimelineState {
+    /// A sample (a `.wav` under the assets folder) as a clip: on `onto` at
+    /// `start` if that's an audio track, else on a new track of its own.
+    fn add_sample(&mut self, cx: &mut EventContext, source: Arc<str>, onto: Option<TrackId>, start: Ticks) {
+                let assets_dir = crate::timeline::assets_dir();
+                let path = assets_dir.join(&*source);
+                let Some(duration_seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
+                    eprintln!("timeline: failed to read {}", path.display());
+                    return;
+                };
+                let name = std::path::Path::new(&*source)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(display_name_from_stem)
+                    .unwrap_or_else(|| "Sample".to_string());
+
+                const COLORS: [ClipColor; 6] = [
+                    ClipColor::Coral,
+                    ClipColor::Amber,
+                    ClipColor::Teal,
+                    ClipColor::Blue,
+                    ClipColor::Violet,
+                    ClipColor::Pink,
+                ];
+                self.with_arrangement(|arr, stack| {
+                    // Onto an existing audio track, at the drop point.
+                    if let Some(track_id) = onto.filter(|t| arr.track(*t).is_some_and(|t| t.kind == TrackKind::Audio)) {
+                        let clip_id = arr.alloc_id();
+                        let length = arr.tempo_map.seconds_to_ticks(duration_seconds).max(1);
+                        let clip = Clip {
+                            id: clip_id,
+                            track: track_id,
+                            start: start.max(0),
+                            length,
+                            name: name.clone(),
+                            content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+                            recording: false,
+                            gain_db: 0.0,
+                        };
+                        stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
+                        return;
+                    }
+                    let track_id = arr.alloc_id();
+                    let clip_id = arr.alloc_id();
+                    let index = arr.tracks.len();
+                    let color = COLORS[index % COLORS.len()];
+                    let length = arr.tempo_map.seconds_to_ticks(duration_seconds).max(1);
+                    let track = Track {
+                        id: track_id,
+                        name: name.clone(),
+                        color,
+                        kind: TrackKind::Audio,
+                        mute: false,
+                        solo: false,
+                        arm: false,
+                        gain_db: 0.0,
+                        height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
+                        instrument: None,
+                        effects: vec![],
+                        effect_slots: vec![],
+                        fx: shared::arrangement::EffectGraph::new(),
+                    };
+                    let clip = Clip {
+                        id: clip_id,
+                        track: track_id,
+                        start: start.max(0),
+                        length,
+                        name: name.clone(),
+                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+                        recording: false,
+                        gain_db: 0.0,
+                    };
+                    stack.do_command(
+                        Command::InsertTrack { track: Box::new(track), index, clips: vec![clip], automation: vec![] },
+                        arr,
+                    );
+                });
+                crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
+                if let Some(tx) = &self.decode_request_tx {
+                    let _ = tx.send(source.clone());
+                }
+                }
+
     /// A new track at the bottom, named for what it plays, and selected
     /// (it's where the user is about to work).
     fn add_track(&mut self, cx: &mut EventContext, kind: TrackKind, instrument: Option<Instrument>) {
@@ -1172,68 +1260,9 @@ impl Model for TimelineState {
             }
             TimelineEvent::AddTrack(kind) => self.add_track(cx, *kind, Instrument::default_for(*kind)),
             TimelineEvent::AddDrumTrack => self.add_track(cx, TrackKind::Midi, Some(Instrument::Drums)),
-            TimelineEvent::AddDrumSample(source) => {
-                let assets_dir = crate::timeline::assets_dir();
-                let path = assets_dir.join(&**source);
-                let Some(duration_seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
-                    eprintln!("timeline: failed to read {}", path.display());
-                    return;
-                };
-                let name = std::path::Path::new(&**source)
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(display_name_from_stem)
-                    .unwrap_or_else(|| "Sample".to_string());
-
-                const COLORS: [ClipColor; 6] = [
-                    ClipColor::Coral,
-                    ClipColor::Amber,
-                    ClipColor::Teal,
-                    ClipColor::Blue,
-                    ClipColor::Violet,
-                    ClipColor::Pink,
-                ];
-                self.with_arrangement(|arr, stack| {
-                    let track_id = arr.alloc_id();
-                    let clip_id = arr.alloc_id();
-                    let index = arr.tracks.len();
-                    let color = COLORS[index % COLORS.len()];
-                    let length = arr.tempo_map.seconds_to_ticks(duration_seconds).max(1);
-                    let track = Track {
-                        id: track_id,
-                        name: name.clone(),
-                        color,
-                        kind: TrackKind::Audio,
-                        mute: false,
-                        solo: false,
-                        arm: false,
-                        gain_db: 0.0,
-                        height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
-                        instrument: None,
-                        effects: vec![],
-                        effect_slots: vec![],
-                        fx: shared::arrangement::EffectGraph::new(),
-                    };
-                    let clip = Clip {
-                        id: clip_id,
-                        track: track_id,
-                        start: 0,
-                        length,
-                        name: name.clone(),
-                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
-                        recording: false,
-                        gain_db: 0.0,
-                    };
-                    stack.do_command(
-                        Command::InsertTrack { track: Box::new(track), index, clips: vec![clip], automation: vec![] },
-                        arr,
-                    );
-                });
-                crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
-                if let Some(tx) = &self.decode_request_tx {
-                    let _ = tx.send(source.clone());
-                }
-            }
+            TimelineEvent::AddDrumSample(source) => self.add_sample(cx, source.clone(), None, 0),
+            TimelineEvent::AddSampleAt { source, track, start } => self.add_sample(cx, source.clone(), *track, *start),
+            TimelineEvent::AddTrackWith(instrument) => self.add_track(cx, TrackKind::Midi, *instrument),
             TimelineEvent::AddDrumPattern(template_index) => {
                 let Some(template) = crate::timeline::beat_templates::TEMPLATES.get(*template_index) else { return };
                 let assets_dir = crate::timeline::assets_dir();

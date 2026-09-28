@@ -1,5 +1,7 @@
 mod analyzer;
 mod app;
+mod browser;
+mod preview_player;
 mod bpm_field;
 mod canvas_text;
 mod compressor_curve;
@@ -66,6 +68,7 @@ fn main() -> Result<(), ApplicationError> {
             play_rx: preview_bridge.play_rx,
             retired_tx: preview_bridge.retired_tx,
             analyzer_tx: preview_bridge.analyzer_tx,
+            gain: preview_bridge.gain.clone(),
         },
     );
     // Without audio there's nothing to run - but a panic is invisible when
@@ -82,10 +85,11 @@ fn main() -> Result<(), ApplicationError> {
     };
     let engine_sample_rate = engine_handle.sample_rate;
     let analyzer_rx = std::cell::Cell::new(Some(preview_bridge.analyzer_rx));
-    let lesson_preview = std::cell::Cell::new(Some(shared::playback::PreviewSender {
+    let preview_player = crate::preview_player::PreviewPlayer::new(shared::playback::PreviewSender {
         play_tx: preview_bridge.play_tx,
         retired_rx: preview_bridge.retired_rx,
-    }));
+        gain: preview_bridge.gain,
+    }, engine_sample_rate);
     let playback_plan_tx = std::cell::RefCell::new(playback_bridge.plan_tx);
     let playback_decode_tx = playback_bridge.decode_tx;
     let record_command_tx = std::cell::RefCell::new(recorder_bridge.command_tx);
@@ -219,6 +223,7 @@ fn main() -> Result<(), ApplicationError> {
         let project_name = project_model.display_name;
         let export_status = project_model.export_status;
         let my_tracks = project_model.my_tracks;
+        let project_path = project_model.current_path;
         project_model.build(cx);
         let save_status = Memo::new(move |_| {
             let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
@@ -257,7 +262,7 @@ fn main() -> Result<(), ApplicationError> {
             piano_roll_open_clip,
             tl_playhead,
             synth_patches,
-            lesson_preview.take().expect("the app is built once"),
+            preview_player.clone(),
             engine_sample_rate,
         );
         let lesson_bar_props = lessons::bar::LessonBarProps::of(&lesson_model, theme);
@@ -266,6 +271,21 @@ fn main() -> Result<(), ApplicationError> {
         let lessons_active = lesson_model.active;
         let lessons_done = lesson_model.done;
         lesson_model.build(cx);
+
+        // The sidebar: rail, browser panel, preview dock.
+        let browser_model = browser::BrowserModel::new(
+            sidebar_open,
+            tl_arrangement,
+            selected_track,
+            my_tracks,
+            project_path,
+            browser::preview::BrowserPreview::new(preview_player.clone(), tl_arrangement, interval_key, interval_scale_mask),
+        );
+        let browser_props =
+            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, lessons_active, lessons_done);
+        browser_model.build(cx);
+        browser::view::DragTracker.build(cx);
+        browser::start_key_analysis(cx);
 
         let analyzer_model = analyzer::AnalyzerModel::new(analyzer_rx.take().expect("the app is built once"), engine_sample_rate);
         let analyzer_open = analyzer_model.open;
@@ -289,6 +309,7 @@ fn main() -> Result<(), ApplicationError> {
 
                 cx.emit(AppEvent::Tick);
                 cx.emit(analyzer::AnalyzerEvent::Tick);
+                cx.emit(browser::BrowserEvent::Tick);
                 let title = window_title.get();
                 if *last_title.borrow() != title {
                     *last_title.borrow_mut() = title.clone();
@@ -422,6 +443,8 @@ fn main() -> Result<(), ApplicationError> {
                 KeyChord::new(Modifiers::SUPER, Code::KeyB),
                 KeymapEntry::new(17u8, |cx| cx.emit(AppEvent::ToggleSidebar)),
             ),
+            (KeyChord::new(Modifiers::CTRL, Code::KeyF), KeymapEntry::new(28u8, |cx| cx.emit(browser::BrowserEvent::FocusSearch))),
+            (KeyChord::new(Modifiers::SUPER, Code::KeyF), KeymapEntry::new(29u8, |cx| cx.emit(browser::BrowserEvent::FocusSearch))),
             (KeyChord::new(Modifiers::CTRL, Code::KeyC), KeymapEntry::new(18u8, |cx| cx.emit(TimelineEvent::Copy))),
             (KeyChord::new(Modifiers::SUPER, Code::KeyC), KeymapEntry::new(19u8, |cx| cx.emit(TimelineEvent::Copy))),
             (KeyChord::new(Modifiers::CTRL, Code::KeyX), KeymapEntry::new(20u8, |cx| cx.emit(TimelineEvent::Cut))),
@@ -475,12 +498,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
             HStack::new(cx, move |cx| {
-                sidebar::sidebar(cx, tl_arrangement, selected_track, sidebar_open, lessons_active, lessons_done, my_tracks);
-                Element::new(cx)
-                    .class("hairline")
-                    .toggle_class("hidden", sidebar_open.map(|o| !*o))
-                    .width(Pixels(1.0))
-                    .height(Stretch(1.0));
+                browser::view::sidebar(cx, browser_props);
 
                 VStack::new(cx, move |cx| {
                     lessons::bar::lesson_bar(cx, lesson_bar_props);
@@ -565,6 +583,13 @@ fn main() -> Result<(), ApplicationError> {
                     })
                     .show_horizontal_scrollbar(false)
                     .class("lower-scroll")
+                    // A browser result dropped on the device panel: onto
+                    // the selected track.
+                    .on_drop(move |cx, _| {
+                        if let Some(item) = browser::view::dragged() {
+                            cx.emit(browser::BrowserEvent::DropOnTrack { item: item.id, track: selected_track.get(), tick: 0 });
+                        }
+                    })
                     .width(Stretch(1.0))
                     .height(lower_panel_height.map(|h| Pixels(*h)));
                 })
@@ -578,6 +603,8 @@ fn main() -> Result<(), ApplicationError> {
             sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status);
 
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);
+            // A dragged browser result's name, following the pointer.
+            browser::view::DragGhost::new(cx, browser_props);
             transport::header_menu_backdrop(cx, header_menus);
             // Selecting clips drops the Effects Board's node selection, so
             // Delete removes what was picked last (see TimelineState::fx_selected).
@@ -623,6 +650,7 @@ pub fn shortcut(label: &'static str) -> &'static str {
             "Ctrl+V" => "\u{2318}V",
             "Ctrl+D" => "\u{2318}D",
             "Ctrl+Shift+D" => "\u{21e7}\u{2318}D",
+            "Ctrl+F" => "\u{2318}F",
             other => other,
         };
     }

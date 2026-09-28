@@ -39,7 +39,7 @@ pub fn band_hz(i: usize) -> f32 {
 }
 
 /// In-place radix-2 FFT of `re`/`im` (length a power of two).
-fn fft(re: &mut [f32], im: &mut [f32]) {
+pub fn fft(re: &mut [f32], im: &mut [f32]) {
     let n = re.len();
     let mut j = 0;
     for i in 1..n {

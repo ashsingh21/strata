@@ -165,12 +165,11 @@ pub struct LessonModel {
     patches: Signal<BTreeMap<TrackId, SynthState>>,
     /// The preview playing (for the buttons' labels), and when it ends.
     pub previewing: Signal<Option<preview::Which>>,
-    preview_ends: Option<Instant>,
     /// Bumped per request, so a slow render can't start after a newer one.
     preview_generation: u64,
-    preview_tx: rtrb::Producer<shared::playback::PreviewBuffer>,
-    /// Played buffers handed back by the audio thread, freed here.
-    preview_retired: rtrb::Consumer<shared::playback::PreviewBuffer>,
+    player: crate::preview_player::SharedPlayer,
+    /// The player's token for the lesson preview playing.
+    preview_token: Option<u64>,
     sample_rate: u32,
     /// The app as it stood when the current step began.
     step_before: Option<preview::Take>,
@@ -224,7 +223,7 @@ impl LessonModel {
         open_clip: Signal<Option<shared::arrangement::ClipId>>,
         playhead: Signal<shared::arrangement::Ticks>,
         patches: Signal<BTreeMap<TrackId, SynthState>>,
-        preview: shared::playback::PreviewSender,
+        player: crate::preview_player::SharedPlayer,
         sample_rate: u32,
     ) -> Self {
         let highlight = Signal::new(None);
@@ -244,10 +243,9 @@ impl LessonModel {
             playhead,
             patches,
             previewing: Signal::new(None),
-            preview_ends: None,
             preview_generation: 0,
-            preview_tx: preview.play_tx,
-            preview_retired: preview.retired_rx,
+            player,
+            preview_token: None,
             sample_rate,
             step_before: None,
             last_change: None,
@@ -451,11 +449,12 @@ impl LessonModel {
     }
 
     fn stop_preview(&mut self) {
+        if let Some(token) = self.preview_token.take() {
+            self.player.borrow_mut().stop_if(token);
+        }
         if self.previewing.get().is_some() {
-            let _ = self.preview_tx.push(Arc::from(Vec::new()));
             self.previewing.set(None);
         }
-        self.preview_ends = None;
     }
 
     fn set_highlight(&mut self, target: Option<Target>) {
@@ -499,15 +498,14 @@ impl Model for LessonModel {
                 self.has_goal.set(has_goal);
             }
             LessonEvent::Tick => {
-                while self.preview_retired.pop().is_ok() {}
                 if self.release_keys.as_ref().is_some_and(|(at, _)| Instant::now() >= *at) {
                     for note in self.release_keys.take().map(|(_, n)| n).unwrap_or_default() {
                         cx.emit(crate::synth::state::SynthEvent::KeyRelease(note));
                     }
                 }
-                if self.previewing.get().is_some()
-                    && (self.playing.get() || self.preview_ends.is_some_and(|t| Instant::now() >= t))
-                {
+                // Ended, replaced (by a browser preview), or the song started.
+                let ours = self.preview_token.is_some() && self.player.borrow().current() == self.preview_token;
+                if self.previewing.get().is_some() && (self.playing.get() || !ours) {
                     self.stop_preview();
                 }
                 if let Some(id) = self.finished.take() {
@@ -573,10 +571,9 @@ impl Model for LessonModel {
                 if *generation != self.preview_generation || self.active.get().is_none() {
                     return;
                 }
-                let seconds = audio.len() as f64 / 2.0 / self.sample_rate as f64;
-                if self.preview_tx.push(audio.clone()).is_ok() {
+                if let Some(token) = self.player.borrow_mut().play(audio.to_vec(), false) {
+                    self.preview_token = Some(token);
                     self.previewing.set(Some(*which));
-                    self.preview_ends = Some(Instant::now() + Duration::from_secs_f64(seconds));
                 }
             }
         });

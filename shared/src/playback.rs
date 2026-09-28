@@ -304,11 +304,24 @@ mod tests {
 }
 
 /// A short, already-rendered stereo clip (interleaved, at the engine's
-/// rate) played straight to the output - the lessons' "Hear it" and
-/// before/after. An empty one stops whatever is previewing. Buffers the
-/// engine has finished with come back on `retired` so they're freed on
-/// the UI thread, never the audio thread.
-pub type PreviewBuffer = Arc<[f32]>;
+/// rate) played straight to the output - the lessons' "Hear it", the
+/// browser's previews. `looping` plays it round until replaced. An empty
+/// one stops whatever is previewing. Buffers the engine has finished
+/// with come back on `retired` so they're freed on the UI thread, never
+/// the audio thread.
+pub struct PreviewSound {
+    pub audio: Vec<f32>,
+    pub looping: bool,
+}
+
+pub type PreviewBuffer = Arc<PreviewSound>;
+
+/// The preview's volume (an `f32`'s bits, linear gain), changed live.
+pub type PreviewGain = Arc<std::sync::atomic::AtomicU32>;
+
+pub fn preview_gain(gain: f32) -> PreviewGain {
+    Arc::new(std::sync::atomic::AtomicU32::new(gain.to_bits()))
+}
 
 pub const PREVIEW_CAPACITY: usize = 8;
 
@@ -325,13 +338,14 @@ pub struct PreviewBridge {
     /// The output as heard (mono), for the live spectrum analyzer.
     pub analyzer_tx: rtrb::Producer<f32>,
     pub analyzer_rx: rtrb::Consumer<f32>,
+    pub gain: PreviewGain,
 }
 
 pub fn preview_bridge() -> PreviewBridge {
     let (play_tx, play_rx) = rtrb::RingBuffer::new(PREVIEW_CAPACITY);
     let (retired_tx, retired_rx) = rtrb::RingBuffer::new(PREVIEW_CAPACITY * 2);
     let (analyzer_tx, analyzer_rx) = rtrb::RingBuffer::new(ANALYZER_CAPACITY);
-    PreviewBridge { play_tx, play_rx, retired_tx, retired_rx, analyzer_tx, analyzer_rx }
+    PreviewBridge { play_tx, play_rx, retired_tx, retired_rx, analyzer_tx, analyzer_rx, gain: preview_gain(1.0) }
 }
 
 /// The UI's ends of a `PreviewBridge`: send buffers to play, and take
@@ -339,6 +353,7 @@ pub fn preview_bridge() -> PreviewBridge {
 pub struct PreviewSender {
     pub play_tx: rtrb::Producer<PreviewBuffer>,
     pub retired_rx: rtrb::Consumer<PreviewBuffer>,
+    pub gain: PreviewGain,
 }
 
 /// The engine's ends of a `PreviewBridge`: previews in, and the output
@@ -347,4 +362,5 @@ pub struct PreviewEnds {
     pub play_rx: rtrb::Consumer<PreviewBuffer>,
     pub retired_tx: rtrb::Producer<PreviewBuffer>,
     pub analyzer_tx: rtrb::Producer<f32>,
+    pub gain: PreviewGain,
 }

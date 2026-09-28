@@ -408,7 +408,7 @@ where
                     if let Some((old, _)) = preview_now.take() {
                         let _ = preview.retired_tx.push(old);
                     }
-                    if next.is_empty() {
+                    if next.audio.is_empty() {
                         let _ = preview.retired_tx.push(next);
                     } else {
                         preview_now = Some((next, 0));
@@ -447,9 +447,10 @@ where
                     &current_plan,
                     &current_sources,
                     &mut preview_now,
+                    f32::from_bits(preview.gain.load(std::sync::atomic::Ordering::Relaxed)),
                     &mut preview.analyzer_tx,
                 );
-                if preview_now.as_ref().is_some_and(|(buf, pos)| *pos >= buf.len()) {
+                if preview_now.as_ref().is_some_and(|(buf, pos)| !buf.looping && *pos >= buf.audio.len()) {
                     if let Some((done, _)) = preview_now.take() {
                         let _ = preview.retired_tx.push(done);
                     }
@@ -487,6 +488,7 @@ fn write_block<T>(
     plan: &PlaybackPlan,
     sources: &[DecodedSource],
     preview: &mut Option<(shared::playback::PreviewBuffer, usize)>,
+    preview_gain: f32,
     analyzer: &mut rtrb::Producer<f32>,
 ) where
     T: Sample + FromSample<f32>,
@@ -553,9 +555,12 @@ fn write_block<T>(
         let (mut out_l, mut out_r) = master_effects.process(synth_l + click + clip_l, synth_r + click + clip_r);
         // A lesson preview: already mixed and mastered, added last.
         if let Some((buf, pos)) = preview.as_mut() {
-            if *pos + 1 < buf.len() {
-                out_l += buf[*pos];
-                out_r += buf[*pos + 1];
+            if buf.looping && *pos + 1 >= buf.audio.len() {
+                *pos = 0;
+            }
+            if *pos + 1 < buf.audio.len() {
+                out_l += buf.audio[*pos] * preview_gain;
+                out_r += buf.audio[*pos + 1] * preview_gain;
             }
             *pos += 2;
         }

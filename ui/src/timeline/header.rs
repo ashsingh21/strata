@@ -378,6 +378,13 @@ pub fn track_header<'a>(
     })
     .class("tl-head")
     .toggle_class("is-selected", selected_track.map(move |s| *s == Some(track_id)))
+    // A browser result dropped on the header: onto this track, at the
+    // playhead.
+    .on_drop(move |cx, _| {
+        if let Some(item) = crate::browser::view::dragged() {
+            cx.emit(crate::browser::BrowserEvent::DropOnTrack { item: item.id, track: Some(track_id), tick: playhead.get() });
+        }
+    })
     .on_press_down(move |cx| cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id)))
     .on_mouse_down(move |cx, button| {
         if button == MouseButton::Right {
