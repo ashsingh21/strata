@@ -964,6 +964,7 @@ pub(super) fn draw_clip(s: &mut Snapshot) {
         content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
         recording: false,
         gain_db: 0.0,
+        swing: 0.0,
     };
     Command::InsertClip { clip: Box::new(clip) }.apply(&mut s.arrangement);
     // A double-click opens the new clip in the editor.
@@ -1020,6 +1021,7 @@ pub(super) fn draw_clip_at(s: &mut Snapshot, bar: i64) {
         content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
         recording: false,
         gain_db: 0.0,
+        swing: 0.0,
     };
     Command::InsertClip { clip: Box::new(clip) }.apply(&mut s.arrangement);
     s.open_clip = Some(id);

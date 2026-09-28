@@ -151,6 +151,33 @@ pub fn piano_roll_view(
                     }
                 });
 
+            // Swing: drum clips' off-beat 16ths, pushed late as they play.
+            let swing = Memo::new(move |_| {
+                open_clip.get().and_then(|id| arrangement.get().clip(id).map(|c| c.swing)).unwrap_or(0.0)
+            });
+            let is_drums = Memo::new(move |_| open_clip.get().is_some_and(|id| is_drum_clip(&arrangement.get(), id)));
+            HStack::new(cx, move |cx| {
+                Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
+                Label::new(cx, "Swing").class("label");
+                crate::knob::Knob::plain(cx, swing, 0.0, theme, move |cx, value| {
+                    if let Some(clip) = open_clip.get() {
+                        cx.emit(TimelineEvent::SetClipSwing { clip, swing: value });
+                    }
+                })
+                .tooltip(|cx| {
+                    Tooltip::new(cx, |cx| {
+                        Label::new(cx, "Pushes the off-beat 16ths late, for a shuffle. Double-click for straight.");
+                    })
+                    .arrow(false)
+                })
+                .size(Pixels(20.0));
+                Label::new(cx, swing.map(|s| format!("{:.0}%", s * 100.0))).class("value").width(Pixels(30.0));
+            })
+            .toggle_class("hidden", is_drums.map(|d| !*d))
+            .gap(Pixels(tokens::SPACE_2))
+            .alignment(Alignment::Left)
+            .size(Auto);
+
             // The clip's whole length, typed: dragging a clip's edge out to
             // bar 128 took a while. Longer repeats the pattern; shorter
             // trims.
@@ -287,12 +314,7 @@ pub fn piano_roll_view(
             .width(Auto)
             .height(Auto);
             Label::new(cx, "Snap").class("label");
-            let snap_text = snap.map(|s| s.label().to_string());
-            Button::new(cx, move |cx| Label::new(cx, snap_text))
-                .class("readout")
-                .class("snap")
-                .lesson_target(crate::lessons::Target::Snap)
-                .on_press(|cx| cx.emit(TimelineEvent::CycleSnap));
+            crate::timeline::editor_snap_button(cx, snap);
             Button::new(cx, |cx| Label::new(cx, "Close"))
                 .class("btn")
                 .class("quiet")

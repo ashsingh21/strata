@@ -215,6 +215,7 @@ impl Command {
                     content: right_content,
                     recording: false,
                     gain_db: original.gain_db,
+                    swing: 0.0,
                 };
 
                 let clip = arr.clip_mut(clip_id).unwrap();
@@ -588,6 +589,7 @@ mod tests {
             },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         }
     }
 
@@ -724,6 +726,7 @@ mod tests {
             content: ClipContent::Midi { notes, loop_len: Some(PPQ * 4), link: None },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         1
     }
@@ -855,6 +858,7 @@ mod tests {
             content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         let mut stack = CommandStack::new();
 
@@ -982,6 +986,7 @@ mod tests {
             content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         let add = Command::AddMidiNote {
             clip: clip_id,

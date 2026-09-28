@@ -127,6 +127,7 @@ mod tests {
             content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60, velocity: DEFAULT_VELOCITY }], loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         arr
     }

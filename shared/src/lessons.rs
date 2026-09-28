@@ -664,6 +664,7 @@ fn add_clip(arr: &mut Arrangement, track: TrackId, name: &str, start_bar: i64, e
         content: ClipContent::Midi { notes, loop_len: Some(pattern_bars * BAR), link: None },
         recording: false,
         gain_db: 0.0,
+        swing: 0.0,
     });
 }
 
@@ -719,6 +720,7 @@ fn add_loop(arr: &mut Arrangement, track: TrackId, name: &str, notes: Vec<MidiNo
         content: ClipContent::Midi { notes, loop_len: Some(pattern_bars * BAR), link: None },
         recording: false,
         gain_db: 0.0,
+        swing: 0.0,
     });
 }
 

@@ -324,6 +324,7 @@ mod tests {
             content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0 },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         }
     }
 
@@ -357,6 +358,7 @@ mod tests {
             content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         let plan = PlaybackPlan::from_arrangement(&arr, 48_000);
         assert!(plan.clips.is_empty());

@@ -947,6 +947,7 @@ impl LaneArea {
                             content: ClipContent::Audio { source: "".into(), peaks: None, source_offset_samples: 0 },
                             recording: true,
                             gain_db: 0.0,
+                            swing: 0.0,
                         };
                         self.draw_clip(canvas, &palette, &frame, &preview_clip, track_color, x0, y0, x1, y1, false);
                         let peaks = self.live_peaks.get();

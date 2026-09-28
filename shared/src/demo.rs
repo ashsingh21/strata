@@ -100,6 +100,7 @@ impl Builder {
             content: ClipContent::Midi { notes, loop_len, link: None },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
     }
 

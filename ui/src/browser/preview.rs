@@ -281,7 +281,7 @@ fn midi_track(arr: &mut Arrangement, instrument: Instrument) -> shared::arrangem
 
 fn clip(arr: &mut Arrangement, track: shared::arrangement::TrackId, length: Ticks, content: ClipContent) {
     let id = arr.alloc_id();
-    arr.clips.push(Clip { id, track, start: 0, length, name: "Preview".into(), content, recording: false, gain_db: 0.0 });
+    arr.clips.push(Clip { swing: 0.0, id, track, start: 0, length, name: "Preview".into(), content, recording: false, gain_db: 0.0 });
 }
 
 fn preview_arrangement(bpm: f64) -> Arrangement {
@@ -368,6 +368,7 @@ fn pattern(index: usize, bpm: f64, sample_rate: u32) -> Option<(Vec<f32>, String
                 content: ClipContent::Audio { source: hit.sample.into(), peaks: None, source_offset_samples: 0 },
                 recording: false,
                 gain_db: 0.0,
+                swing: 0.0,
             });
         }
     }

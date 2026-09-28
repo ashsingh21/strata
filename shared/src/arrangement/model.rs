@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::peaks::PeakPyramid;
-use super::time::{TempoMap, Ticks};
+use super::time::{TempoMap, Ticks, PPQ};
 
 pub type TrackId = u32;
 pub type ClipId = u32;
@@ -631,6 +631,11 @@ pub struct Clip {
     /// repeated hits of the same sample aren't byte-for-byte identical.
     #[serde(default)]
     pub gain_db: f32,
+    /// MIDI clips: how much the off-beat 16ths (the "e" and "a" of each
+    /// beat) are pushed late when played, 0 = straight to 1 = half a 16th
+    /// late (75% swing). The notes stay on the grid; see `played_notes`.
+    #[serde(default)]
+    pub swing: f32,
 }
 
 impl Clip {
@@ -689,14 +694,19 @@ impl Clip {
     /// Every note as heard, with starts relative to the clip's start: the
     /// pattern repeated across the clip if it loops, and nothing past the
     /// clip's end (a note running over it is shortened). Empty for audio.
+    /// With `swing`, a note on an off-beat 16th is pushed late by up to
+    /// half a 16th.
     pub fn played_notes(&self) -> Vec<MidiNote> {
         let ClipContent::Midi { notes, loop_len, .. } = &self.content else { return Vec::new() };
+        let sixteenth = PPQ / 4;
+        let swing_by = (self.swing.clamp(0.0, 1.0) * (sixteenth / 2) as f32).round() as Ticks;
         let period = loop_len.map(|l| l.max(1)).unwrap_or(self.length.max(1));
         let mut out = Vec::new();
         let mut offset = 0;
         while offset < self.length {
             for n in notes.iter().filter(|n| n.start < period) {
-                let start = offset + n.start;
+                let swung = swing_by > 0 && n.start % (2 * sixteenth) == sixteenth;
+                let start = offset + n.start + if swung { swing_by } else { 0 };
                 if start >= self.length {
                     continue;
                 }
@@ -1316,5 +1326,44 @@ mod track_name_tests {
         for typed in ["MIDI", "Bass", "Drums loop", "MIDI one", "Drumsy"] {
             assert!(!Arrangement::is_automatic_midi_name(typed), "{typed}");
         }
+    }
+}
+
+#[cfg(test)]
+mod swing_tests {
+    use super::*;
+
+    fn clip(swing: f32) -> Clip {
+        let s = PPQ / 4;
+        let notes = (0..4).map(|i| MidiNote { start: i * s, length: s, pitch: 42, velocity: 100 }).collect();
+        Clip {
+            id: 1,
+            track: 1,
+            start: 0,
+            length: 2 * PPQ,
+            name: "Hats".into(),
+            content: ClipContent::Midi { notes, loop_len: Some(PPQ), link: None },
+            recording: false,
+            gain_db: 0.0,
+            swing,
+        }
+    }
+
+    #[test]
+    fn swing_pushes_only_the_off_beat_16ths_late() {
+        let s = PPQ / 4;
+        let starts = |c: &Clip| c.played_notes().iter().map(|n| n.start).collect::<Vec<_>>();
+        assert_eq!(starts(&clip(0.0)), vec![0, s, 2 * s, 3 * s, PPQ, PPQ + s, PPQ + 2 * s, PPQ + 3 * s]);
+        // Full swing: half a 16th late on the "e" and "a", every repeat.
+        let late = s / 2;
+        assert_eq!(starts(&clip(1.0)), vec![0, s + late, 2 * s, 3 * s + late, PPQ, PPQ + s + late, PPQ + 2 * s, PPQ + 3 * s + late]);
+    }
+
+    #[test]
+    fn a_clip_saved_without_swing_loads_straight() {
+        let mut json = serde_json::to_value(clip(0.5)).unwrap();
+        json.as_object_mut().unwrap().remove("swing");
+        let loaded: Clip = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.swing, 0.0);
     }
 }

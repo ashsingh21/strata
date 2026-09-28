@@ -85,3 +85,43 @@ pub fn item(
 pub fn separator(cx: &mut Context) {
     Element::new(cx).class("menu-sep").width(Stretch(1.0)).height(Pixels(1.0));
 }
+
+/// A menu mounted once at the window root, opened beside whichever button
+/// was pressed - for buttons inside the lower panel, which scrolls and so
+/// clips a popup of their own. The dropdown's anchor is zero wide (it can
+/// never catch a click) and moves onto the pressed button's left edge.
+#[derive(Clone, Copy)]
+pub struct Anchored {
+    host: Entity,
+    anchor: Signal<(f32, f32, f32)>,
+}
+
+impl Anchored {
+    /// Builds it; call last in the root view, so it draws over the rest.
+    pub fn build(cx: &mut Context, placement: Placement, content: impl Fn(&mut Context) + 'static) -> Self {
+        let anchor = Signal::new((0.0f32, 0.0f32, 0.0f32));
+        let host = menu(
+            cx,
+            placement,
+            |cx| {
+                Element::new(cx).width(Stretch(1.0)).height(Stretch(1.0));
+            },
+            content,
+        )
+        .position_type(PositionType::Absolute)
+        .left(anchor.map(|a| Pixels(a.0)))
+        .top(anchor.map(|a| Pixels(a.1)))
+        .width(Pixels(0.0))
+        .height(anchor.map(|a| Pixels(a.2)))
+        .entity();
+        Self { host, anchor }
+    }
+
+    /// A button's press: the menu, opened on that button.
+    pub fn open_from(self, cx: &mut EventContext) {
+        use crate::hidpi::Logical;
+        let b = cx.lbounds();
+        self.anchor.set((b.x, b.y, b.h));
+        cx.emit_to(self.host, PopupEvent::Open);
+    }
+}

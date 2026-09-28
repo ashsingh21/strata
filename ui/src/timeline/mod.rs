@@ -62,11 +62,7 @@ pub fn timeline_view(
         VStack::new(cx, move |cx| {
             HStack::new(cx, move |cx| {
                 Label::new(cx, "Snap").class("label");
-                let snap_label = snap.map(|s| s.label().to_string());
-                Button::new(cx, move |cx| Label::new(cx, snap_label))
-                    .class("readout")
-                    .class("snap")
-                    .on_press(|cx| cx.emit(TimelineEvent::CycleSnap));
+                snap_button(cx, snap);
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
@@ -374,4 +370,56 @@ fn add_track_button<'a>(cx: &'a mut Context, theme: Signal<ThemeId>, icon: crate
     .class("synth-seg-btn")
     .class("add-track-btn")
     .height(Stretch(1.0))
+}
+
+/// The Snap menu's items: 1/4 down to 1/32, triplets, off.
+fn snap_items(cx: &mut Context, snap: Signal<SnapGrid>) {
+    crate::menu::panel(cx, 96.0, move |cx| {
+        for grid in SnapGrid::ALL {
+            let on = snap.map(move |s| *s == grid);
+            crate::menu::item(cx, grid.label().to_string(), "", on, move |cx| cx.emit(TimelineEvent::SetSnap(grid)));
+        }
+    });
+}
+
+/// The timeline's Snap readout and its menu (one setting with the clip
+/// editor's).
+pub fn snap_button(cx: &mut Context, snap: Signal<SnapGrid>) {
+    crate::menu::menu(
+        cx,
+        Placement::BottomStart,
+        move |cx| {
+            let label = snap.map(|s| s.label().to_string());
+            Button::new(cx, move |cx| Label::new(cx, label))
+                .class("readout")
+                .class("snap")
+                .width(Auto)
+                .on_press(crate::menu::toggle);
+        },
+        move |cx| snap_items(cx, snap),
+    );
+}
+
+thread_local! {
+    /// The clip editor's Snap menu, at the window root (see `menu::Anchored`).
+    static SNAP_MENU: std::cell::Cell<Option<crate::menu::Anchored>> = const { std::cell::Cell::new(None) };
+}
+
+/// Mounts the clip editor's Snap menu; call last in the root view.
+pub fn snap_menu_host(cx: &mut Context, snap: Signal<SnapGrid>) {
+    SNAP_MENU.set(Some(crate::menu::Anchored::build(cx, Placement::BottomStart, move |cx| snap_items(cx, snap))));
+}
+
+/// The clip editor's Snap readout: opens the root Snap menu on itself.
+pub fn editor_snap_button(cx: &mut Context, snap: Signal<SnapGrid>) {
+    let label = snap.map(|s| s.label().to_string());
+    Button::new(cx, move |cx| Label::new(cx, label))
+        .class("readout")
+        .class("snap")
+        .lesson_target(crate::lessons::Target::Snap)
+        .on_press(|cx| {
+            if let Some(menu) = SNAP_MENU.get() {
+                menu.open_from(cx);
+            }
+        });
 }

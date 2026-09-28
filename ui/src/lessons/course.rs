@@ -295,7 +295,7 @@ pub const LESSONS: &[Lesson] = &[
                 |s| track_named(s, "Keys").map(|t| Target::Lane(t.id)),
             ),
             recipe(
-                "Long notes: click Snap (top right of the editor) until it says 1/4, then click A3 on beat 1 and on beat 3.",
+                "Long notes: set Snap (top right of the editor) to 1/4, then click A3 on beat 1 and on beat 3.",
                 "With Snap at 1/4, each click writes a note a whole beat long. Long notes ring into each other and connect.",
                 "A new note is as long as one step of Snap. A3 is the bottom row.",
                 |s| long_note_on(s, 0) && long_note_on(s, 2),
@@ -304,7 +304,7 @@ pub const LESSONS: &[Lesson] = &[
             recipe(
                 "A short stab: set Snap back to 1/16, then click C4 on beat 4.",
                 "A 16th-long note is a stab: it punctuates. Short notes next to long ones are what make a part breathe.",
-                "Click Snap until it says 1/16. C4 is the row above A3.",
+                "Pick 1/16 in the Snap menu. C4 is the row above A3.",
                 |s| short_note_on(s, 3),
                 |_| Some(Target::Snap),
             ),

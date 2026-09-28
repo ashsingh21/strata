@@ -67,26 +67,41 @@ impl ViewTransform {
 pub enum SnapGrid {
     Quarter,
     Eighth,
+    /// Three to a beat.
+    EighthTriplet,
     Sixteenth,
+    /// Six to a beat - triplet hi-hat rolls.
+    SixteenthTriplet,
+    ThirtySecond,
     Off,
 }
 
 impl SnapGrid {
-    /// Cycles 1/4 -> 1/8 -> 1/16 -> off -> 1/4, matching the corner readout.
+    /// Every value, coarsest first - the Snap menu's order.
+    pub const ALL: [SnapGrid; 7] = [
+        SnapGrid::Quarter,
+        SnapGrid::Eighth,
+        SnapGrid::EighthTriplet,
+        SnapGrid::Sixteenth,
+        SnapGrid::SixteenthTriplet,
+        SnapGrid::ThirtySecond,
+        SnapGrid::Off,
+    ];
+
+    /// The next value in `ALL`, wrapping round.
     pub fn cycled(self) -> Self {
-        match self {
-            SnapGrid::Quarter => SnapGrid::Eighth,
-            SnapGrid::Eighth => SnapGrid::Sixteenth,
-            SnapGrid::Sixteenth => SnapGrid::Off,
-            SnapGrid::Off => SnapGrid::Quarter,
-        }
+        let i = Self::ALL.iter().position(|&g| g == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
     }
 
     pub fn label(self) -> &'static str {
         match self {
             SnapGrid::Quarter => "1/4",
             SnapGrid::Eighth => "1/8",
+            SnapGrid::EighthTriplet => "1/8T",
             SnapGrid::Sixteenth => "1/16",
+            SnapGrid::SixteenthTriplet => "1/16T",
+            SnapGrid::ThirtySecond => "1/32",
             SnapGrid::Off => "Off",
         }
     }
@@ -96,8 +111,20 @@ impl SnapGrid {
         match self {
             SnapGrid::Quarter => Some(PPQ),
             SnapGrid::Eighth => Some(PPQ / 2),
+            SnapGrid::EighthTriplet => Some(PPQ / 3),
             SnapGrid::Sixteenth => Some(PPQ / 4),
+            SnapGrid::SixteenthTriplet => Some(PPQ / 6),
+            SnapGrid::ThirtySecond => Some(PPQ / 8),
             SnapGrid::Off => None,
+        }
+    }
+
+    /// The finest grid line an editor should draw for this snap: its own
+    /// step when that doesn't fall on 16ths (triplets, 32nds), else 16ths.
+    pub fn grid_step(self) -> Ticks {
+        match self.ticks() {
+            Some(step) if step < PPQ / 4 || (PPQ / 4) % step != 0 && step % (PPQ / 4) != 0 => step,
+            _ => PPQ / 4,
         }
     }
 }
@@ -184,11 +211,26 @@ mod tests {
     fn snap_grid_cycles_through_all_states() {
         let mut g = SnapGrid::Quarter;
         let mut seen = vec![g];
-        for _ in 0..3 {
+        for _ in 0..SnapGrid::ALL.len() - 1 {
             g = g.cycled();
             seen.push(g);
         }
-        assert_eq!(seen, vec![SnapGrid::Quarter, SnapGrid::Eighth, SnapGrid::Sixteenth, SnapGrid::Off]);
+        assert_eq!(seen, SnapGrid::ALL.to_vec());
         assert_eq!(g.cycled(), SnapGrid::Quarter);
+    }
+
+    /// Every step divides a beat evenly, so beats stay on the grid; the
+    /// drawn grid is 16ths unless the step doesn't fit them.
+    #[test]
+    fn snap_steps_fit_the_beat() {
+        for g in SnapGrid::ALL {
+            if let Some(step) = g.ticks() {
+                assert_eq!(PPQ % step, 0, "{}", g.label());
+            }
+        }
+        assert_eq!(SnapGrid::Quarter.grid_step(), PPQ / 4);
+        assert_eq!(SnapGrid::EighthTriplet.grid_step(), PPQ / 3);
+        assert_eq!(SnapGrid::SixteenthTriplet.grid_step(), PPQ / 6);
+        assert_eq!(SnapGrid::ThirtySecond.grid_step(), PPQ / 8);
     }
 }

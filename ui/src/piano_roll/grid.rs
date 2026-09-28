@@ -103,6 +103,16 @@ pub fn ticks_to_bbs(t: Ticks) -> String {
     format!("{}.{}.{}", bar + 1, beat + 1, sixteenth + 1)
 }
 
+#[derive(Clone)]
+struct Paint {
+    pitch: u8,
+    erase: bool,
+    /// Starts of the steps the stroke has covered so far.
+    starts: Vec<Ticks>,
+    /// A new step's length (one Snap step).
+    length: Ticks,
+}
+
 pub struct Grid {
     arrangement: Signal<Arrangement>,
     open_clip: Signal<Option<ClipId>>,
@@ -121,6 +131,10 @@ pub struct Grid {
     /// A velocity stem being dragged: the note and its live (uncommitted)
     /// velocity. Committed as one undoable edit on release.
     vel_drag: Option<(NoteKey, u8)>,
+    /// A drum clip's paint stroke in progress: along one pad's row,
+    /// adding steps (or, begun on a hit, erasing them). Previewed while
+    /// dragging, committed on release as one undo step.
+    paint: Option<Paint>,
     /// Wheel travel over the row labels in the current gesture, and when
     /// the last scroll arrived: one gesture moves one octave, so a
     /// trackpad flick (dozens of small steps, then momentum) doesn't fly
@@ -147,7 +161,7 @@ impl Grid {
         octave: Signal<i32>,
         chord: Signal<ChordShape>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, vel_drag: None, wheel: 0.0, wheel_at: None, wheel_moved: false }
+        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, vel_drag: None, paint: None, wheel: 0.0, wheel_at: None, wheel_moved: false }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(open_clip, |mut h| h.needs_redraw())
@@ -316,6 +330,22 @@ impl View for Grid {
                             _ => raw_tick,
                         }
                         .clamp(0, clip_length - 1);
+                        // A drum clip paints: this press starts a stroke
+                        // along the row, adding steps - or erasing them if
+                        // it began on a hit. Committed on release.
+                        if self.drums() {
+                            let hit = Self::note_at(&notes, snapped, pitch);
+                            let step = self.snap.get().ticks().unwrap_or(PPQ / 4);
+                            self.paint = Some(Paint {
+                                pitch,
+                                erase: hit.is_some(),
+                                starts: vec![hit.map(|h| h.start).unwrap_or(snapped)],
+                                length: step.min(clip_length - snapped).max(1),
+                            });
+                            cx.capture();
+                            cx.needs_redraw();
+                            return;
+                        }
                         if let Some(hit) = Self::note_at(&notes, snapped, pitch) {
                             cx.emit(TimelineEvent::RemoveMidiNoteAt { clip: clip_id, start: hit.start, pitch: hit.pitch });
                         } else {
@@ -351,7 +381,31 @@ impl View for Grid {
                 let (octaves, steps) = if cx.modifiers().shift() { (dir, 0) } else { (0, dir) };
                 cx.emit(TimelineEvent::MoveSelectedNotes { octaves, steps, key: self.key.get(), mask: self.scale_mask.get() });
             }
-            WindowEvent::MouseMove(_, y) => {
+            WindowEvent::MouseMove(x, y) => {
+                // Painting: the step under the pointer, on the stroke's row.
+                if let Some(mut paint) = self.paint.clone() {
+                    let Some((_, _, clip_length, notes)) = self.clip_info() else { return };
+                    let bounds = cx.lbounds();
+                    let px_per_tick = (bounds.w - LABEL_W) as f64 / clip_length as f64;
+                    let lx = crate::hidpi::l(cx, *x) - bounds.x - LABEL_W;
+                    if lx < 0.0 {
+                        return;
+                    }
+                    let tick = ((lx as f64 / px_per_tick) as Ticks).min(clip_length - 1);
+                    let step = self.snap.get().ticks().unwrap_or(PPQ / 4);
+                    let at = if paint.erase {
+                        Self::note_at(&notes, tick, paint.pitch).map(|n| n.start)
+                    } else {
+                        let snapped = tick.div_euclid(step) * step;
+                        Self::note_at(&notes, snapped, paint.pitch).is_none().then_some(snapped)
+                    };
+                    if let Some(at) = at.filter(|at| !paint.starts.contains(at)) {
+                        paint.starts.push(at);
+                        self.paint = Some(paint);
+                        cx.needs_redraw();
+                    }
+                    return;
+                }
                 if let Some((key, _)) = self.vel_drag {
                     let Some((_, _, _, notes)) = self.clip_info() else { return };
                     let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums(), self.octave.get());
@@ -361,6 +415,23 @@ impl View for Grid {
                 }
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
+                if let Some(paint) = self.paint.take() {
+                    cx.release();
+                    cx.needs_redraw();
+                    let Some(clip) = self.open_clip.get() else { return };
+                    if paint.erase {
+                        let notes = paint.starts.iter().map(|&start| (start, paint.pitch)).collect();
+                        cx.emit(TimelineEvent::RemoveMidiNotes { clip, notes });
+                    } else {
+                        let notes = paint
+                            .starts
+                            .iter()
+                            .map(|&start| MidiNote { start, length: paint.length, pitch: paint.pitch, velocity: DEFAULT_VELOCITY })
+                            .collect();
+                        cx.emit(TimelineEvent::AddMidiNotesAt { clip, notes });
+                    }
+                    return;
+                }
                 if let Some((key, velocity)) = self.vel_drag.take() {
                     cx.release();
                     if let (Some(clip), Some((_, _, _, notes))) = (self.open_clip.get(), self.clip_info()) {
@@ -458,9 +529,10 @@ impl View for Grid {
         }
         text(canvas, "Velocity", bounds.x + 10.0, lane_top + 18.0, 11.0, p.ink_muted);
 
-        // Vertical grid through rows and lane: bars, beats, sixteenths
-        // (sixteenths dropped when they'd sit closer than 6px).
-        let sixteenth = PPQ / 4;
+        // Vertical grid through rows and lane: bars, beats, and the finest
+        // lines Snap asks for - 16ths, or triplets and 32nds when chosen
+        // (dropped when they'd sit closer than 6px).
+        let sixteenth = self.snap.get().grid_step();
         let sixteenths_fit = (sixteenth as f64 * px_per_tick) >= 6.0;
         let mut t = 0;
         while t <= clip_length {
@@ -521,7 +593,27 @@ impl View for Grid {
         // a 2px ink outline when selected.
         // The notes a velocity drag in progress moves together.
         let drag_group = self.vel_drag.map(|(k, _)| self.velocity_group(&notes, k)).unwrap_or_default();
+        // A paint stroke in progress: its new steps drawn faintly; the
+        // ones it's erasing are skipped below.
+        let erasing: Vec<Ticks> = match &self.paint {
+            Some(p) if p.erase => p.starts.clone(),
+            _ => Vec::new(),
+        };
+        if let Some(paint) = self.paint.as_ref().filter(|p| !p.erase) {
+            if let Some(row) = rows.iter().position(|&r| r == paint.pitch) {
+                let y0 = top + row as f32 * ROW_H + 1.0;
+                let ghost = Color::rgba(clip_color.r(), clip_color.g(), clip_color.b(), 140);
+                for &start in &paint.starts {
+                    let x0 = tick_to_x(start) + 1.0;
+                    let x1 = tick_to_x(start + paint.length).min(gx + gw);
+                    fill(canvas, vg::Rect::new(x0, y0, x1, y0 + ROW_H - 3.0), ghost);
+                }
+            }
+        }
         for note in &notes {
+            if self.paint.as_ref().is_some_and(|p| p.pitch == note.pitch) && erasing.contains(&note.start) {
+                continue;
+            }
             let Some(row) = rows.iter().position(|&r| r == note.pitch) else { continue };
             let y0 = top + row as f32 * ROW_H + 1.0;
             let y1 = y0 + ROW_H - 3.0;

@@ -49,6 +49,7 @@ pub fn measure(patch: &SynthState) -> Analysis {
         content: ClipContent::Midi { notes: vec![note], loop_len: None, link: None },
         recording: false,
         gain_db: 0.0,
+        swing: 0.0,
     });
     let mut patch = patch.clone();
     patch.held_notes.clear();

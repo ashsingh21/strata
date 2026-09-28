@@ -627,6 +627,7 @@ mod decode_tests {
             content: shared::arrangement::ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         let decoded = super::decode_sources(&arr, 48_000);
         let d = decoded.iter().find(|d| d.source == source).unwrap();

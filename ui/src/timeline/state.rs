@@ -426,7 +426,10 @@ pub enum TimelineEvent {
     ReplaceArrangement(Box<Arrangement>),
     Undo,
     Redo,
-    CycleSnap,
+    SetSnap(SnapGrid),
+    /// A MIDI clip's swing, 0 (straight) to 1 (see `Clip::swing`). Like
+    /// a knob, not an undo step.
+    SetClipSwing { clip: ClipId, swing: f32 },
     ToggleFollow,
     SetTool(TimelineTool),
     /// A clip drawn directly on empty MIDI-track space (Draw tool), rather
@@ -469,6 +472,8 @@ pub enum TimelineEvent {
     /// `DeleteSelected` instead.
     AddMidiNotesAt { clip: ClipId, notes: Vec<MidiNote> },
     RemoveMidiNoteAt { clip: ClipId, start: Ticks, pitch: u8 },
+    /// A paint stroke that erased steps: one undo step.
+    RemoveMidiNotes { clip: ClipId, notes: Vec<(Ticks, u8)> },
     /// Ctrl/Cmd+C, X, V: clips on the timeline, or notes when the piano
     /// roll is open with a note selection.
     Copy,
@@ -608,6 +613,7 @@ impl TimelineState {
                             content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
                             recording: false,
                             gain_db: 0.0,
+                            swing: 0.0,
                         };
                         stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
                         return;
@@ -641,6 +647,7 @@ impl TimelineState {
                         content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
                         recording: false,
                         gain_db: 0.0,
+                        swing: 0.0,
                     };
                     stack.do_command(
                         Command::InsertTrack { track: Box::new(track), index, clips: vec![clip], automation: vec![] },
@@ -959,8 +966,14 @@ impl Model for TimelineState {
                     stack.redo(arr);
                 });
             }
-            TimelineEvent::CycleSnap => {
-                self.snap.update(|s| *s = s.cycled());
+            TimelineEvent::SetSnap(grid) => self.snap.set(*grid),
+            TimelineEvent::SetClipSwing { clip, swing } => {
+                let swing = swing.clamp(0.0, 1.0);
+                self.with_arrangement(|arr, _| {
+                    if let Some(c) = arr.clips.iter_mut().find(|c| c.id == *clip) {
+                        c.swing = swing;
+                    }
+                });
             }
             TimelineEvent::ToggleFollow => {
                 self.follow.update(|f| *f = !*f);
@@ -988,6 +1001,7 @@ impl Model for TimelineState {
                         content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
                         recording: false,
                         gain_db: 0.0,
+                        swing: 0.0,
                     };
                     stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
                 });
@@ -1312,6 +1326,11 @@ impl Model for TimelineState {
                     moved.iter().map(|(_, to)| (to.start, to.pitch)).collect(),
                 ));
             }
+            TimelineEvent::RemoveMidiNotes { clip, notes } => {
+                let commands =
+                    notes.iter().map(|&(start, pitch)| Command::RemoveMidiNote { clip: *clip, start, pitch }).collect();
+                self.do_command(Command::Batch(commands));
+            }
             TimelineEvent::RemoveMidiNoteAt { clip, start, pitch } => {
                 self.do_command(Command::RemoveMidiNote { clip: *clip, start: *start, pitch: *pitch });
             }
@@ -1327,6 +1346,7 @@ impl Model for TimelineState {
                         content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
                         recording: false,
                         gain_db: 0.0,
+                        swing: 0.0,
                     };
                     stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
                 });
@@ -1394,6 +1414,7 @@ impl Model for TimelineState {
                                     },
                                     recording: false,
                                     gain_db: 0.0,
+                                    swing: 0.0,
                                 });
                             }
                         }
@@ -1527,6 +1548,7 @@ impl Model for TimelineState {
                         // the exact same recording played back-to-back -
                         // real hits are never that identical.
                         gain_db: random_gain_variation_db(),
+                        swing: 0.0,
                     };
                     if let Some(track_id) = arr.tracks.iter().find(|t| t.name == pad.track_name).map(|t| t.id) {
                         stack.do_command(Command::InsertClip { clip: Box::new(new_clip(track_id)) }, arr);

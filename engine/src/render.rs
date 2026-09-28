@@ -271,6 +271,7 @@ mod tests {
             content: ClipContent::Midi { notes, loop_len: None, link: None },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         arr
     }
@@ -410,6 +411,7 @@ mod tests {
             content: ClipContent::Audio { source: Arc::from("sq.wav"), peaks: None, source_offset_samples: 0 },
             recording: false,
             gain_db: 0.0,
+            swing: 0.0,
         });
         let square: Vec<f32> = (0..48_000).map(|i| if (i / 50) % 2 == 0 { 1.0 } else { -1.0 }).collect();
         let source = DecodedSource { source: Arc::from("sq.wav"), sample_rate: 48_000, channels: 1, samples: Arc::from(square) };
