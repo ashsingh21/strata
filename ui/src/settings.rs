@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 fn path() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../settings.json"))
+    crate::paths::data_dir().join("settings.json")
 }
 
 fn load_all() -> serde_json::Map<String, serde_json::Value> {

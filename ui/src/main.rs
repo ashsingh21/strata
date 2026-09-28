@@ -18,6 +18,7 @@ mod hidpi;
 mod interval_input;
 mod key_menu;
 mod menu;
+mod paths;
 mod knob;
 mod lessons;
 mod meter;
