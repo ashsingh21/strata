@@ -133,6 +133,12 @@ pub struct SynthModel {
     pub octave_shift: Signal<i8>,
     pub meter_l: Signal<f32>,
     pub meter_r: Signal<f32>,
+    /// Every track's meter (L, R), 0..1 like the other meters, with their
+    /// fall-off - the track header faders show them. Instrument tracks'
+    /// come from `SynthTelemetry`, audio tracks' from `bus_peaks`.
+    pub track_levels: Signal<HashMap<TrackId, (f32, f32)>>,
+    track_db: HashMap<TrackId, (f32, f32)>,
+    bus_peaks: Signal<[(f32, f32); shared::playback::MAX_BUS_TRACKS]>,
     pub help_open: Signal<bool>,
     /// The LFO pill being dragged, if any (drop targets light up).
     pub lfo_drag: Signal<Option<usize>>,
@@ -178,6 +184,7 @@ impl SynthModel {
         patches: Vec<(TrackId, SynthState)>,
         selected_track: Signal<Option<TrackId>>,
         playhead: Signal<shared::arrangement::Ticks>,
+        bus_peaks: Signal<[(f32, f32); shared::playback::MAX_BUS_TRACKS]>,
     ) -> Self {
         // Start on the first track with an instrument, showing its patch.
         let patches: BTreeMap<TrackId, SynthState> = patches.into_iter().collect();
@@ -199,6 +206,9 @@ impl SynthModel {
             octave_shift: Signal::new(0),
             meter_l: Signal::new(0.0),
             meter_r: Signal::new(0.0),
+            track_levels: Signal::new(HashMap::new()),
+            track_db: HashMap::new(),
+            bus_peaks,
             help_open: Signal::new(false),
             lfo_drag: Signal::new(None),
             params_tx,
@@ -213,6 +223,43 @@ impl SynthModel {
     }
 
     /// The engine slot playing `track`'s Carve, if it has one.
+    /// Every track's meter from this tick's peaks: an instrument track's
+    /// slot, an audio track's bus (its index in the track list), with the
+    /// same rise and fall-off as the master meter.
+    fn update_track_levels(&mut self, slot_peaks: &[(f32, f32); MAX_INSTRUMENTS], decay: f32) {
+        let bus = self.bus_peaks.get();
+        let raw: Vec<(TrackId, (f32, f32))> = self.arrangement.with(|arr| {
+            arr.tracks
+                .iter()
+                .enumerate()
+                .map(|(index, t)| {
+                    let peak = if t.instrument.is_some() {
+                        self.slot_of(t.id).map(|s| slot_peaks[s as usize])
+                    } else if t.kind == TrackKind::Audio {
+                        bus.get(index).copied()
+                    } else {
+                        None
+                    };
+                    (t.id, peak.unwrap_or((0.0, 0.0)))
+                })
+                .collect()
+        });
+        let fall = |db: f32, peak: f32| {
+            let target = gain_to_db(peak).max(METER_FLOOR_DB);
+            if target > db { target } else { (db - decay).max(target) }
+        };
+        let mut levels = HashMap::with_capacity(raw.len());
+        for (id, (l, r)) in raw {
+            let db = self.track_db.entry(id).or_insert((METER_FLOOR_DB, METER_FLOOR_DB));
+            *db = (fall(db.0, l), fall(db.1, r));
+            levels.insert(id, (db_to_meter_fraction(db.0), db_to_meter_fraction(db.1)));
+        }
+        self.track_db.retain(|id, _| levels.contains_key(id));
+        if levels != self.track_levels.get() {
+            self.track_levels.set(levels);
+        }
+    }
+
     fn slot_of(&self, track: TrackId) -> Option<u8> {
         self.slots.iter().position(|s| *s == Some(track)).map(|i| i as u8)
     }
@@ -428,7 +475,11 @@ impl Model for SynthModel {
                 let mut peak_l = 0.0f32;
                 let mut peak_r = 0.0f32;
                 let mut phases = None;
+                let mut slot_peaks = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
                 while let Ok(SynthTelemetry { peaks, lfo_phases }) = self.telemetry_rx.pop() {
+                    for (peak, p) in slot_peaks.iter_mut().zip(peaks) {
+                        *peak = (peak.0.max(p.0), peak.1.max(p.1));
+                    }
                     if let Some(slot) = shown {
                         peak_l = peak_l.max(peaks[slot].0);
                         peak_r = peak_r.max(peaks[slot].1);
@@ -446,6 +497,7 @@ impl Model for SynthModel {
                 self.meter_db_r = if target_r > self.meter_db_r { target_r } else { (self.meter_db_r - decay).max(target_r) };
                 self.meter_l.set(db_to_meter_fraction(self.meter_db_l));
                 self.meter_r.set(db_to_meter_fraction(self.meter_db_r));
+                self.update_track_levels(&slot_peaks, decay);
 
                 // Every instrument's latest patch to its slot (the engine
                 // keeps the latest per slot).

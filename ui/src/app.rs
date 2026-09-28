@@ -48,6 +48,9 @@ pub struct AppData {
     pub sample_rate: u32,
     /// Master output peak in dBFS, with meter ballistics.
     pub output_db: Signal<f32>,
+    /// Each audio track's loudest peak since the last tick, by bus slot
+    /// (for the track header meters - see `SynthModel::track_levels`).
+    pub bus_peaks: Signal<[(f32, f32); shared::playback::MAX_BUS_TRACKS]>,
     cpu_peak: f32,
     cpu_peak_age: f32,
     taps: Vec<Instant>,
@@ -123,6 +126,7 @@ impl AppData {
             block_frames: Signal::new(0),
             sample_rate: engine.sample_rate,
             output_db: Signal::new(METER_FLOOR_DB),
+            bus_peaks: Signal::new([(0.0, 0.0); shared::playback::MAX_BUS_TRACKS]),
             cpu_peak: 0.0,
             cpu_peak_age: 0.0,
             taps: Vec::with_capacity(8),
@@ -265,15 +269,24 @@ impl AppData {
         let mut latest_position = None;
         let mut latest_sample_counter = None;
         let mut cpu = 0.0f32;
-        while let Ok(Telemetry { peak_l: l, peak_r: r, position, sample_counter, cpu_load, block_frames }) = self.telemetry.pop() {
+        let mut bus_peaks = [(0.0f32, 0.0f32); shared::playback::MAX_BUS_TRACKS];
+        while let Ok(Telemetry { peak_l: l, peak_r: r, position, sample_counter, cpu_load, block_frames, bus_peaks: buses }) =
+            self.telemetry.pop()
+        {
             peak_l = peak_l.max(l);
             peak_r = peak_r.max(r);
+            for (peak, bus) in bus_peaks.iter_mut().zip(buses) {
+                *peak = (peak.0.max(bus.0), peak.1.max(bus.1));
+            }
             latest_position = Some(position);
             latest_sample_counter = Some(sample_counter);
             cpu = cpu.max(cpu_load);
             if block_frames != self.block_frames.get() {
                 self.block_frames.set(block_frames);
             }
+        }
+        if bus_peaks != self.bus_peaks.get() {
+            self.bus_peaks.set(bus_peaks);
         }
         self.cpu_peak_age += dt;
         if cpu >= self.cpu_peak || self.cpu_peak_age > 0.5 {

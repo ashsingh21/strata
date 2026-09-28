@@ -125,6 +125,7 @@ fn main() -> Result<(), ApplicationError> {
         let sample_rate = app_data.sample_rate;
 
         let zoom = app_data.zoom;
+        let app_data_bus_peaks = app_data.bus_peaks;
         app_data.build(cx);
         // The zoom from last time.
         cx.emit(AppEvent::ApplyZoom);
@@ -218,8 +219,10 @@ fn main() -> Result<(), ApplicationError> {
             loaded_project.as_ref().map(|p| p.instruments.clone()).unwrap_or_default(),
             selected_track,
             tl_playhead,
+            app_data_bus_peaks,
         );
         let synth_state = synth_model.state;
+        timeline::header::set_track_levels(synth_model.track_levels);
         let synth_lfo_phases = (synth_model.lfo1_phase, synth_model.lfo2_phase);
         let synth_octave_shift = synth_model.octave_shift;
         let synth_meter_l = synth_model.meter_l;

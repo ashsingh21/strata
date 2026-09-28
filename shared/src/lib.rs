@@ -152,6 +152,10 @@ pub struct Telemetry {
     pub cpu_load: f32,
     /// Frames in this block (the device's buffer size).
     pub block_frames: u32,
+    /// Each audio track's peak (L, R) after its fader, by bus slot (its
+    /// index in the track list) - the track header meters. Instrument
+    /// tracks' are in `SynthTelemetry::peaks`.
+    pub bus_peaks: [(f32, f32); playback::MAX_BUS_TRACKS],
 }
 
 /// Generous relative to a typical block size, so the producer never blocks

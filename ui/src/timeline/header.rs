@@ -374,6 +374,9 @@ pub fn track_header<'a>(
         .pointer_events(automated.map(|a| if *a { PointerEvents::None } else { PointerEvents::Auto }))
         .toggle_class("is-automated", automated)
         .lesson_target(crate::lessons::Target::Fader(track_id))
+        .meter(Memo::new(move |_| {
+            TRACK_LEVELS.get().and_then(|levels| levels.with(|l| l.get(&track_id).copied())).unwrap_or((0.0, 0.0))
+        }))
         .on_release(move |cx, position| {
             gain_preview.set(None);
             crate::context_menu::touched(track_id, shared::arrangement::AutomationTarget::TrackGain);
@@ -382,7 +385,7 @@ pub fn track_header<'a>(
                 gain_db: fader_pos_to_gain_db(position),
             });
         })
-        .width(Pixels(16.0))
+        .width(Pixels(18.0))
         .height(Stretch(1.0));
     })
     .gap(Pixels(tokens::SPACE_3))
@@ -422,6 +425,17 @@ pub fn track_header<'a>(
     })
     .width(Pixels(crate::timeline::HEAD_WIDTH))
     .height(height.map(|h| Pixels(*h)))
+}
+
+thread_local! {
+    /// Every track's meter (see `SynthModel::track_levels`), for the
+    /// header faders - set once in `main`, like the lesson highlight.
+    static TRACK_LEVELS: std::cell::Cell<Option<Signal<std::collections::HashMap<TrackId, (f32, f32)>>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+pub fn set_track_levels(levels: Signal<std::collections::HashMap<TrackId, (f32, f32)>>) {
+    TRACK_LEVELS.set(Some(levels));
 }
 
 pub fn automation_header<'a>(

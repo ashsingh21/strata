@@ -186,7 +186,7 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
                 l += fl * g;
                 r += fr * g;
             }
-            let (cl, cr) = mix_audio_clips(&plan, &job.sources, sample as i64, &mut bus_fx, &mut bus_smooth, clip_fade_samples(srf));
+            let (cl, cr) = mix_audio_clips(&plan, &job.sources, sample as i64, &mut bus_fx, &mut bus_smooth, clip_fade_samples(srf), &mut [(0.0, 0.0); MAX_BUS_TRACKS]);
             let (ol, or) = master_fx.process(l + cl, r + cr);
             let (ol, or) = master_limiter.process(ol, or);
             if sample >= start + latency {

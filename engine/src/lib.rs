@@ -516,6 +516,7 @@ fn write_block<T>(
     let mut peak_l = 0.0f32;
     let mut peak_r = 0.0f32;
     let mut synth_peaks = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
+    let mut bus_peaks = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut frames = 0u64;
 
     for frame in output.chunks_mut(channels) {
@@ -555,7 +556,7 @@ fn write_block<T>(
         *click_env *= click_decay_coeff;
 
         let (clip_l, clip_r) = if playing {
-            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth, clip_fade_samples(sample_rate))
+            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth, clip_fade_samples(sample_rate), &mut bus_peaks)
         } else {
             (0.0, 0.0)
         };
@@ -617,6 +618,7 @@ fn write_block<T>(
         sample_counter: *sample_counter,
         cpu_load,
         block_frames: frames as u32,
+        bus_peaks,
     });
     let mut lfo_phases = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
     for (engine, phases) in synth_engines.iter().zip(lfo_phases.iter_mut()) {
@@ -652,6 +654,7 @@ fn mix_audio_clips(
     bus_effects: &mut [EffectChain],
     bus_gain_smooth: &mut [SmoothedGain],
     fade: i64,
+    bus_peaks: &mut [(f32, f32); MAX_BUS_TRACKS],
 ) -> (f32, f32) {
     let mut bus_raw = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut bus_gain_db = [0.0f32; MAX_BUS_TRACKS];
@@ -699,8 +702,12 @@ fn mix_audio_clips(
         let (raw_l, raw_r) = bus_raw[slot];
         let (fx_l, fx_r) = bus_effects[slot].process(raw_l, raw_r);
         let gain = bus_gain_smooth[slot].next(db_to_gain(bus_gain_db[slot]));
-        out_l += fx_l * gain;
-        out_r += fx_r * gain;
+        let (l, r) = (fx_l * gain, fx_r * gain);
+        out_l += l;
+        out_r += r;
+        let peak = &mut bus_peaks[slot];
+        peak.0 = peak.0.max(l.abs());
+        peak.1 = peak.1.max(r.abs());
     }
     (out_l, out_r)
 }
@@ -733,5 +740,59 @@ mod gain_smoothing_tests {
             g.next(0.0);
         }
         assert!(g.current < 0.01, "should have settled within ~30 ms (got {})", g.current);
+    }
+}
+
+#[cfg(test)]
+mod track_meter_tests {
+    use super::*;
+    use shared::arrangement::{empty_arrangement, Clip, ClipColor, ClipContent, EffectGraph, Track, TrackKind, DEFAULT_TRACK_HEIGHT, PPQ};
+
+    /// An audio track's level reaches its header meter by its bus slot
+    /// (its place in the track list), after its fader.
+    #[test]
+    fn audio_tracks_report_their_level_by_bus_slot() {
+        let mut arr = empty_arrangement();
+        for (i, kind) in [TrackKind::Midi, TrackKind::Audio].into_iter().enumerate() {
+            arr.tracks.push(Track {
+                id: i as u32 + 1,
+                name: format!("T{i}"),
+                color: ClipColor::Coral,
+                kind,
+                mute: false,
+                solo: false,
+                arm: false,
+                gain_db: -6.0,
+                height: DEFAULT_TRACK_HEIGHT,
+                instrument: None,
+                effects: vec![],
+                effect_slots: vec![],
+                fx: EffectGraph::new(),
+                drum_pads: Default::default(),
+            });
+        }
+        arr.clips.push(Clip {
+            id: 10,
+            track: 2,
+            start: 0,
+            length: 4 * PPQ,
+            name: "Take".into(),
+            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0 },
+            recording: false,
+            gain_db: 0.0,
+            swing: 0.0,
+        });
+        let sr = 48_000;
+        let plan = PlaybackPlan::from_arrangement(&arr, sr);
+        let sources = [DecodedSource { source: "take.wav".into(), sample_rate: sr, channels: 1, samples: vec![0.5f32; sr as usize].into() }];
+        let mut fx: Vec<EffectChain> = (0..MAX_BUS_TRACKS).map(|_| EffectChain::new(sr as f32)).collect();
+        let mut smooth = [SmoothedGain::new(sr as f32); MAX_BUS_TRACKS];
+        let mut peaks = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
+        for pos in 0..4800 {
+            mix_audio_clips(&plan, &sources, pos, &mut fx, &mut smooth, clip_fade_samples(sr as f32), &mut peaks);
+        }
+        assert!(peaks[0] == (0.0, 0.0), "the MIDI track has no audio");
+        // 0.5 through a -6 dB fader (after its glide from unity).
+        assert!((0.24..=0.5).contains(&peaks[1].0), "{:?}", peaks[1]);
     }
 }

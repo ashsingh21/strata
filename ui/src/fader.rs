@@ -12,6 +12,9 @@ const CAP_HEIGHT: f32 = 22.0;
 const CAP_BORDER: f32 = 1.0;
 const CENTER_LINE_HEIGHT: f32 = 2.0;
 const TRACK_WIDTH: f32 = 2.0;
+/// The level meter's two bars, either side of the track hairline.
+const METER_BAR_WIDTH: f32 = 3.0;
+const METER_GAP: f32 = 2.0;
 
 const DRAG_SCALAR_DIVISOR: f32 = 1.0; // delta is divided by bounds.h directly.
 const FINE_SCALAR: f32 = 0.2;
@@ -31,6 +34,8 @@ pub struct Fader<V: SignalGet<f32> + Copy + 'static> {
     continuous: f32,
     on_changing: Option<ChangeCallback>,
     on_release: Option<ChangeCallback>,
+    /// A level meter (L, R, each 0..1) drawn along the fader, if any.
+    meter: Option<Memo<(f32, f32)>>,
 }
 
 impl<V: SignalGet<f32> + Copy + 'static> Fader<V> {
@@ -51,6 +56,7 @@ impl<V: SignalGet<f32> + Copy + 'static> Fader<V> {
             continuous: initial,
             on_changing: Some(Box::new(on_changing)),
             on_release: None,
+            meter: None,
         }
         .build(cx, |_| {})
         .bind(value, |mut handle| handle.needs_redraw())
@@ -67,11 +73,19 @@ pub trait FaderModifiers {
     /// there instead, passing a no-op to `on_changing`; the cap still
     /// tracks the live drag position via the view's own local state.
     fn on_release(self, on_release: impl 'static + Fn(&mut EventContext, f32)) -> Self;
+
+    /// Shows `level` (L, R, each 0..1 as the other meters) along the
+    /// fader: what the track sounds like, beside where its volume is set.
+    fn meter(self, level: Memo<(f32, f32)>) -> Self;
 }
 
 impl<V: SignalGet<f32> + Copy + 'static> FaderModifiers for Handle<'_, Fader<V>> {
     fn on_release(self, on_release: impl 'static + Fn(&mut EventContext, f32)) -> Self {
         self.modify(|fader| fader.on_release = Some(Box::new(on_release)))
+    }
+
+    fn meter(self, level: Memo<(f32, f32)>) -> Self {
+        self.modify(|fader| fader.meter = Some(level)).bind(level, |mut handle| handle.needs_redraw())
     }
 }
 
@@ -155,6 +169,31 @@ impl<V: SignalGet<f32> + Copy + 'static> View for Fader<V> {
         let value = if self.is_dragging { self.continuous } else { self.value.get() }.clamp(0.0, 1.0);
 
         let center_x = bounds.x + bounds.w * 0.5;
+
+        // The meter, under everything else: a bar each side of the hairline,
+        // green up to -12 dB and amber above, like the master meter.
+        if let Some(level) = self.meter {
+            let (l, r) = level.get();
+            let bar = |paint: &vg::Paint, x0: f32, from: f32, to: f32| {
+                let rect = vg::Rect::new(x0, bounds.y + bounds.h * (1.0 - to), x0 + METER_BAR_WIDTH, bounds.y + bounds.h * (1.0 - from));
+                canvas.draw_path(&vg::Path::rect(rect, None), paint);
+            };
+            let mut trough = vg::Paint::default();
+            trough.set_color(palette.bg_200);
+            let mut low = vg::Paint::default();
+            low.set_color(palette.signal);
+            let mut high = vg::Paint::default();
+            high.set_color(palette.warn);
+            let left_x = center_x - TRACK_WIDTH * 0.5 - METER_GAP - METER_BAR_WIDTH;
+            let right_x = center_x + TRACK_WIDTH * 0.5 + METER_GAP;
+            for (x, level) in [(left_x, l), (right_x, r)] {
+                bar(&trough, x, 0.0, 1.0);
+                bar(&low, x, 0.0, level.clamp(0.0, 1.0).min(crate::meter::HOT_THRESHOLD));
+                if level > crate::meter::HOT_THRESHOLD {
+                    bar(&high, x, crate::meter::HOT_THRESHOLD, level.min(1.0));
+                }
+            }
+        }
 
         // Cap: vertically centred at (1 - value) from the top.
         let cap_center_y = bounds.y + bounds.h * (1.0 - value);
