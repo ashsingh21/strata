@@ -51,6 +51,7 @@ headers, and `zenity` for file dialogs).
 | Ctrl/⌘ B | Show or hide the sidebar panel |
 | Ctrl/⌘ F | Search the browser |
 | Ctrl/⌘ T | Cycle themes: Studio, Daylight, Midnight, High contrast, Paper |
+| Ctrl/⌘ +, −, 0 | Zoom the whole UI in, out, back to 100% (also in Settings) |
 
 ## Package for macOS
 

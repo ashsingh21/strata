@@ -22,3 +22,8 @@ opt-level = 3
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Vizia with a user zoom (vendor/vizia_core-0.4.0/SHOR-PATCH.md): the whole
+# UI scaled on top of the screen's own scale.
+[patch.crates-io]
+vizia_core = { path = "vendor/vizia_core-0.4.0" }

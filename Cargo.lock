@@ -3248,8 +3248,6 @@ dependencies = [
 [[package]]
 name = "vizia_core"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e73c532f5891094f3cd2041d0d4f758cfe91157260fffbc1d8f2a72808d4eef7"
 dependencies = [
  "accesskit",
  "bitflags 2.13.2",

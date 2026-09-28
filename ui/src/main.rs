@@ -124,7 +124,10 @@ fn main() -> Result<(), ApplicationError> {
         let block_frames = app_data.block_frames;
         let sample_rate = app_data.sample_rate;
 
+        let zoom = app_data.zoom;
         app_data.build(cx);
+        // The zoom from last time.
+        cx.emit(AppEvent::ApplyZoom);
 
         let piano_roll_model = PianoRollModel::new();
         let piano_roll_open_clip = piano_roll_model.open_clip;
@@ -299,7 +302,7 @@ fn main() -> Result<(), ApplicationError> {
             browser::preview::BrowserPreview::new(preview_player.clone(), tl_arrangement, interval_key, interval_scale_mask),
         );
         let browser_props =
-            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, interval_open, lessons_active, lessons_done);
+            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, interval_open, lessons_active, lessons_done, zoom);
         browser_model.build(cx);
         browser::view::DragTracker.build(cx);
         browser::start_key_analysis(cx);
@@ -472,6 +475,15 @@ fn main() -> Result<(), ApplicationError> {
                     }
                 }),
             ),
+            // Zoom the whole UI: Ctrl/Cmd + (or =), -, 0.
+            (KeyChord::new(Modifiers::CTRL, Code::Equal), KeymapEntry::new(30u8, |cx| cx.emit(AppEvent::Zoom(1)))),
+            (KeyChord::new(Modifiers::SUPER, Code::Equal), KeymapEntry::new(31u8, |cx| cx.emit(AppEvent::Zoom(1)))),
+            (KeyChord::new(Modifiers::CTRL | Modifiers::SHIFT, Code::Equal), KeymapEntry::new(32u8, |cx| cx.emit(AppEvent::Zoom(1)))),
+            (KeyChord::new(Modifiers::SUPER | Modifiers::SHIFT, Code::Equal), KeymapEntry::new(33u8, |cx| cx.emit(AppEvent::Zoom(1)))),
+            (KeyChord::new(Modifiers::CTRL, Code::Minus), KeymapEntry::new(34u8, |cx| cx.emit(AppEvent::Zoom(-1)))),
+            (KeyChord::new(Modifiers::SUPER, Code::Minus), KeymapEntry::new(35u8, |cx| cx.emit(AppEvent::Zoom(-1)))),
+            (KeyChord::new(Modifiers::CTRL, Code::Digit0), KeymapEntry::new(36u8, |cx| cx.emit(AppEvent::ResetZoom))),
+            (KeyChord::new(Modifiers::SUPER, Code::Digit0), KeymapEntry::new(37u8, |cx| cx.emit(AppEvent::ResetZoom))),
             (
                 KeyChord::new(Modifiers::empty(), Code::Home),
                 KeymapEntry::new(25u8, |cx| if !text_input_focused(cx) { cx.emit(AppEvent::Rewind) }),

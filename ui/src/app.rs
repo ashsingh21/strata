@@ -22,6 +22,8 @@ pub(crate) const METER_DECAY_DB_PER_SEC: f32 = 20.0;
 
 pub struct AppData {
     pub theme: Signal<ThemeId>,
+    /// The whole UI's zoom, on top of the screen's own scale (1.0 = 100%).
+    pub zoom: Signal<f64>,
 
     // Transport.
     pub playing: Signal<bool>,
@@ -62,6 +64,11 @@ pub struct AppData {
 #[derive(Debug)]
 pub enum AppEvent {
     ToggleTheme,
+    /// One step bigger (+1) or smaller (-1); `ResetZoom` back to 100%.
+    Zoom(i32),
+    ResetZoom,
+    /// Applies the remembered zoom at startup.
+    ApplyZoom,
     /// Pick a colour theme (Settings).
     SetTheme(crate::tokens::ThemeId),
     /// Switch the recording input to this device now (`None`: the OS
@@ -104,6 +111,7 @@ impl AppData {
         Self {
             // Remembered across launches (settings.json).
             theme: Signal::new(crate::settings::load_theme().and_then(|id| ThemeId::from_id(&id)).unwrap_or(ThemeId::Studio)),
+            zoom: Signal::new(crate::settings::load_zoom().map_or(1.0, snap_zoom)),
             playing: Signal::new(false),
             loop_on: Signal::new(false),
             record_armed: Signal::new(false),
@@ -143,6 +151,29 @@ impl Model for AppData {
                 self.theme.set(*theme);
                 crate::settings::save_theme(theme.id());
                 repaint_all(cx);
+            }
+            AppEvent::Zoom(dir) => {
+                let now = self.zoom.get();
+                let i = ZOOM_STEPS.iter().position(|&z| z == now).unwrap_or(2) as i32;
+                let next = ZOOM_STEPS[(i + dir).clamp(0, ZOOM_STEPS.len() as i32 - 1) as usize];
+                // Bigger only while everything still fits: the layout is
+                // made for at least 1280x700 (see `main`), and zoomed in
+                // the window holds fewer of those points.
+                if next > now {
+                    let screen = cx.scale_factor() as f64 / now;
+                    let (w, h) = (cx.cache.get_width(Entity::root()) as f64, cx.cache.get_height(Entity::root()) as f64);
+                    if w / (screen * next) < MIN_LAYOUT.0 || h / (screen * next) < MIN_LAYOUT.1 {
+                        return;
+                    }
+                }
+                set_zoom(cx, self.zoom, next);
+            }
+            AppEvent::ResetZoom => set_zoom(cx, self.zoom, 1.0),
+            AppEvent::ApplyZoom => {
+                let zoom = self.zoom.get();
+                if zoom != 1.0 {
+                    cx.set_user_scale(zoom);
+                }
             }
             AppEvent::ToggleTheme => {
                 self.theme.update(|t| *t = t.next());
@@ -277,6 +308,22 @@ impl AppData {
 /// until the pointer next moved over them. The anchor below is never
 /// hovered, so it is never already queued, and restyling it restyles
 /// everything under the root.
+/// The zoom levels Ctrl/Cmd +/- step through.
+pub const ZOOM_STEPS: [f64; 8] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+/// The smallest layout (logical points) everything is made to fit.
+pub const MIN_LAYOUT: (f64, f64) = (1280.0, 700.0);
+
+/// The nearest step to a saved zoom.
+fn snap_zoom(zoom: f64) -> f64 {
+    ZOOM_STEPS.iter().copied().min_by(|a, b| (a - zoom).abs().total_cmp(&(b - zoom).abs())).unwrap_or(1.0)
+}
+
+fn set_zoom(cx: &mut EventContext, signal: Signal<f64>, zoom: f64) {
+    signal.set(zoom);
+    crate::settings::save_zoom(zoom);
+    cx.set_user_scale(zoom);
+}
+
 fn repaint_all(cx: &mut EventContext) {
     if let Some(anchor) = RESTYLE_ANCHOR.with(|a| a.get()) {
         cx.with_current(anchor, |cx| cx.needs_restyle());

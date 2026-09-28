@@ -86,6 +86,8 @@ pub struct BrowserProps {
     lessons_active: Signal<Option<(usize, usize)>>,
     lessons_done: Signal<Vec<String>>,
     ghost: Signal<Option<(f32, f32, String)>>,
+    /// The UI zoom, shown (and stepped) in the Settings menu.
+    zoom: Signal<f64>,
 }
 
 impl BrowserProps {
@@ -98,6 +100,7 @@ impl BrowserProps {
         theory_open: Signal<bool>,
         lessons_active: Signal<Option<(usize, usize)>>,
         lessons_done: Signal<Vec<String>>,
+        zoom: Signal<f64>,
     ) -> Self {
         let ghost = Signal::new(None);
         GHOST.set(Some(ghost));
@@ -133,6 +136,7 @@ impl BrowserProps {
             lessons_active,
             lessons_done,
             ghost,
+            zoom,
         }
     }
 }
@@ -240,6 +244,37 @@ fn settings_menu(cx: &mut Context, p: BrowserProps) {
                 .gap(Pixels(2.0))
                 .width(Pixels(140.0))
                 .height(Auto);
+
+                // Zoom: the whole UI bigger or smaller (Ctrl/Cmd +, -, 0).
+                Label::new(cx, "Zoom").class("label");
+                HStack::new(cx, move |cx| {
+                    Button::new(cx, |cx| Label::new(cx, "\u{2212}"))
+                        .class("btn")
+                        .class("sm")
+                        .width(Pixels(28.0))
+                        .on_press(|cx| cx.emit(crate::app::AppEvent::Zoom(-1)));
+                    Button::new(cx, move |cx| Label::new(cx, p.zoom.map(|z| format!("{:.0}%", z * 100.0))).class("value"))
+                        .class("btn")
+                        .class("sm")
+                        .class("quiet")
+                        .tooltip(|cx| {
+                            Tooltip::new(cx, |cx| {
+                                Label::new(cx, "Back to 100%");
+                            })
+                            .arrow(false)
+                        })
+                        .width(Stretch(1.0))
+                        .on_press(|cx| cx.emit(crate::app::AppEvent::ResetZoom));
+                    Button::new(cx, |cx| Label::new(cx, "+"))
+                        .class("btn")
+                        .class("sm")
+                        .width(Pixels(28.0))
+                        .on_press(|cx| cx.emit(crate::app::AppEvent::Zoom(1)));
+                })
+                .gap(Pixels(2.0))
+                .alignment(Alignment::Center)
+                .width(Pixels(140.0))
+                .height(Pixels(26.0));
             })
             .class("panel")
             .class("context-menu")

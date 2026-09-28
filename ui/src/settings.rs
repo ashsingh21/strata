@@ -52,6 +52,15 @@ pub fn save_theme(id: &str) {
     save_key("theme", serde_json::json!(id));
 }
 
+/// The UI zoom (1.0 = normal).
+pub fn load_zoom() -> Option<f64> {
+    load_all().get("zoom")?.as_f64()
+}
+
+pub fn save_zoom(zoom: f64) {
+    save_key("zoom", serde_json::json!(zoom));
+}
+
 pub fn load_sidebar_open() -> Option<bool> {
     load_all().get("sidebar_open")?.as_bool()
 }
