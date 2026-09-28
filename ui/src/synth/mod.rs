@@ -142,7 +142,15 @@ fn knob(
         .pointer_events(automated.map(|a| if *a { PointerEvents::None } else { PointerEvents::Auto }))
         .width(Auto)
         .height(Pixels(slot));
-        Label::new(cx, label).class(if size == KnobSize::Lg { "label-lg" } else { "label" });
+        // An oscillator's Shape knob is named for what it does to the wave
+        // that's selected ("To saw" on a triangle) - "Shape" didn't say
+        // which way it would go.
+        let shown_label = state.map(move |s| match param {
+            SynthParam::Osc1Shape => shared::synth::shape_label(s.osc1.waveform),
+            SynthParam::Osc2PulseWidth => shared::synth::shape_label(s.osc2.waveform),
+            _ => label,
+        });
+        Label::new(cx, shown_label).class(if size == KnobSize::Lg { "label-lg" } else { "label" });
         Label::new(cx, text).class("value");
     })
     .class("knob-col")

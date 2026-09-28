@@ -95,7 +95,7 @@ impl View for WaveDisplay {
         );
 
         let n = 176usize;
-        let samples = waveform_points(osc.waveform, 2.0, n);
+        let samples = waveform_points(osc.waveform, osc.knob_b, 2.0, n);
         let points: Vec<(f32, f32)> = samples
             .iter()
             .enumerate()

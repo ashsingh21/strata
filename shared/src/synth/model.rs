@@ -48,7 +48,7 @@ impl LfoTarget {
         match self {
             LfoTarget::Cutoff => "Cutoff",
             LfoTarget::Pitch => "Pitch",
-            LfoTarget::PulseWidth => "Pulse width",
+            LfoTarget::PulseWidth => "Osc 2 shape",
             LfoTarget::Resonance => "Resonance",
         }
     }

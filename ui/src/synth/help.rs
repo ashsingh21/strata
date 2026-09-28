@@ -80,11 +80,11 @@ const PAGES: &[Page] = &[
               "Odd harmonics only, falling off gently: hollow, woody, reedy (think clarinet, or 8-bit game music). \
                Its width can be changed (see PW) - narrowing it thins the sound out and makes it nasal.",
               "Punchy and hollow; sits well an octave above a sine sub."),
-            e("Shape (Osc 1) / PW (Osc 2)",
-              "The same kind of control on both oscillators - it bends the waveform. At 0% every shape is pure. Turning it up: \
-               sine gains an added 2nd harmonic (fatter, slightly organ-like); triangle leans over toward a saw (brighter); \
-               saw rounds off toward a triangle (softer); square changes its pulse width - 50% is the classic hollow square, \
-               towards 5% or 95% it becomes a thin, nasal pulse.",
+            e("Shape (both oscillators)",
+              "Bends the waveform, and is named for what it does to the one selected - watch the picture above it change. \
+               Harmonic (sine): adds a 2nd harmonic, fatter and slightly organ-like. To saw (triangle): leans it over toward a saw, \
+               brighter. To triangle (saw): rounds it off toward a triangle, softer. Width (square): its pulse width - 50% is the \
+               classic hollow square, towards 5% or 95% it becomes a thin, nasal pulse.",
               "On a saw bass, keep it near 0% for maximum bite."),
         ],
     },
@@ -214,9 +214,9 @@ const PAGES: &[Page] = &[
                Pitch: vibrato - a few Hz at low depth sounds like a singer; slow and shallow sounds like a warped tape.",
               "On a deep bass keep pitch vibrato at 0 - a wobbling pitch in the low end sounds out of tune. A tiny, slow cutoff LFO adds life."),
             e("Routing an LFO",
-              "Press an LFO pill (LFO 1 / LFO 2) and release it over any knob that lights up: Cutoff, Resonance, Tune (pitch) or Pulse width. \
+              "Press an LFO pill (LFO 1 / LFO 2) and release it over any knob that lights up: Cutoff, Resonance, Tune (pitch) or Oscillator 2's Shape. \
                That LFO now moves that knob, and the knob grows a blue ring showing how far it swings. The target button under the LFO's knobs cycles through the same four.",
-              "Pulse width at slow rate and medium depth is classic PWM: a square wave that shimmers and thickens."),
+              "On a square, Oscillator 2's Width at slow rate and medium depth is classic PWM: a square wave that shimmers and thickens."),
             e("Unison: Voices, Detune, Width",
               "Plays up to 4 copies of both oscillators per note, spread in pitch by Detune (the cents between the outermost copies) and across the stereo field by Width. \
                This is the 'supersaw' effect: thick, wide and chorused. It costs CPU per copy.",

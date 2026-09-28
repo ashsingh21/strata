@@ -5,18 +5,35 @@
 
 use super::model::{Envelope, FilterType, Waveform};
 
-/// `n` samples of one or more cycles of `waveform`, in -1..1.
-pub fn waveform_points(waveform: Waveform, cycles: f32, n: usize) -> Vec<f32> {
+/// `n` samples of one or more cycles of `waveform` with its Shape knob at
+/// `shape` (0..1), in -1..1 - the same shapes the engine plays, so the
+/// picture shows which way the knob bends the wave.
+pub fn waveform_points(waveform: Waveform, shape: f32, cycles: f32, n: usize) -> Vec<f32> {
+    let shape = shape.clamp(0.0, 1.0);
     (0..n)
         .map(|i| {
             let t = i as f32 / (n - 1).max(1) as f32;
             let phase = (t * cycles).fract();
             match waveform {
-                Waveform::Sine => (phase * std::f32::consts::TAU).sin(),
-                Waveform::Triangle => 4.0 * (phase - (phase + 0.5).floor()).abs() - 1.0,
-                Waveform::Saw => 2.0 * (phase - phase.round()),
+                // A second harmonic folded in.
+                Waveform::Sine => {
+                    let fold = shape * 0.6;
+                    let x = phase * std::f32::consts::TAU;
+                    (x.sin() + fold * (2.0 * x).sin()) / (1.0 + fold)
+                }
+                // Up over `duty`, down over the rest: a triangle leans into
+                // a saw, a saw rounds into a triangle.
+                Waveform::Triangle | Waveform::Saw => {
+                    let duty = if waveform == Waveform::Triangle { 0.5 + shape * 0.48 } else { 1.0 - shape * 0.5 }.clamp(0.01, 0.99);
+                    if phase < duty {
+                        -1.0 + 2.0 * phase / duty
+                    } else {
+                        1.0 - 2.0 * (phase - duty) / (1.0 - duty)
+                    }
+                }
+                // High for `shape` of the cycle: its width.
                 Waveform::Square => {
-                    if phase < 0.5 {
+                    if phase < shape.clamp(0.05, 0.95) {
                         1.0
                     } else {
                         -1.0
@@ -25,6 +42,17 @@ pub fn waveform_points(waveform: Waveform, cycles: f32, n: usize) -> Vec<f32> {
             }
         })
         .collect()
+}
+
+/// What the Shape knob does to `waveform`, as its label: the direction it
+/// bends the wave.
+pub fn shape_label(waveform: Waveform) -> &'static str {
+    match waveform {
+        Waveform::Sine => "Harmonic",
+        Waveform::Triangle => "To saw",
+        Waveform::Saw => "To triangle",
+        Waveform::Square => "Width",
+    }
 }
 
 /// `n` samples of the filter's magnitude response (0..1, normalized to its
@@ -91,14 +119,14 @@ mod tests {
 
     #[test]
     fn sine_wave_hits_extremes() {
-        let points = waveform_points(Waveform::Sine, 1.0, 100);
+        let points = waveform_points(Waveform::Sine, 0.0, 1.0, 100);
         assert!(points.iter().cloned().fold(0.0f32, f32::max) > 0.99);
         assert!(points.iter().cloned().fold(0.0f32, f32::min) < -0.99);
     }
 
     #[test]
     fn triangle_wave_hits_extremes_and_stays_in_range() {
-        let points = waveform_points(Waveform::Triangle, 2.0, 200);
+        let points = waveform_points(Waveform::Triangle, 0.0, 2.0, 200);
         assert!(points.iter().cloned().fold(0.0f32, f32::max) > 0.95);
         assert!(points.iter().cloned().fold(0.0f32, f32::min) < -0.95);
         assert!(points.iter().all(|&v| (-1.0..=1.0).contains(&v)));
@@ -106,8 +134,23 @@ mod tests {
 
     #[test]
     fn square_wave_is_bilevel() {
-        let points = waveform_points(Waveform::Square, 2.0, 50);
+        let points = waveform_points(Waveform::Square, 0.5, 2.0, 50);
         assert!(points.iter().all(|&v| v == 1.0 || v == -1.0));
+    }
+
+    /// The knob bends each wave toward its neighbour: a triangle turned up
+    /// is nearly a saw, a saw turned up is nearly a triangle, a narrow
+    /// square is high for less of its cycle.
+    #[test]
+    fn shape_bends_each_wave_toward_its_neighbour() {
+        let n = 400;
+        let close = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| (x - y).abs()).sum::<f32>() / a.len() as f32;
+        let saw = waveform_points(Waveform::Saw, 0.0, 1.0, n);
+        let triangle = waveform_points(Waveform::Triangle, 0.0, 1.0, n);
+        assert!(close(&waveform_points(Waveform::Triangle, 1.0, 1.0, n), &saw) < 0.05);
+        assert!(close(&waveform_points(Waveform::Saw, 1.0, 1.0, n), &triangle) < 0.01);
+        let high = |shape| waveform_points(Waveform::Square, shape, 1.0, n).iter().filter(|&&v| v > 0.0).count();
+        assert!(high(0.2) < high(0.5));
     }
 
     #[test]
