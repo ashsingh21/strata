@@ -285,10 +285,30 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                         .on_cancel(move |_cx| renaming.set(false))
                         .width(Pixels(126.0));
                 } else {
-                    Button::new(cx, move |cx| Label::new(cx, project_name).class("title").font_size(14.0))
-                        .class("btn")
-                        .class("quiet")
-                        .on_press(move |_cx| menus.toggle(file_menu_open));
+                    // The project menu: the name is its button, with a
+                    // chevron like the Key dropdown's.
+                    Button::new(cx, move |cx| {
+                        HStack::new(cx, move |cx| {
+                            Label::new(cx, project_name)
+                                .class("title")
+                                .font_size(14.0)
+                                .text_wrap(false)
+                                .text_overflow(TextOverflow::Ellipsis)
+                                .hoverable(false);
+                            Label::new(cx, "\u{2304}").class("value").font_size(13.0).hoverable(false);
+                        })
+                        .gap(Pixels(SPACE_1))
+                        .alignment(Alignment::Left)
+                        .size(Auto)
+                        .hoverable(false)
+                    })
+                    .class("btn")
+                    .class("quiet")
+                    .toggle_class("is-on", file_menu_open)
+                    // Its text lines up with the status line under it.
+                    .padding_left(Pixels(0.0))
+                    .padding_right(Pixels(SPACE_1))
+                    .on_press(move |_cx| menus.toggle(file_menu_open));
                 }
             });
             Label::new(cx, status).class("value").font_size(12.0);

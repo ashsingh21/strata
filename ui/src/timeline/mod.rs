@@ -110,33 +110,32 @@ pub fn timeline_view(
                     }
                 });
 
-                // Quiet actions under the last track, not a toolbar.
+                // Adding a track: one grouped control under the last track,
+                // styled like Select / Draw above, each kind with the icon
+                // the sidebar uses for it.
                 HStack::new(cx, move |cx| {
-                    Button::new(cx, |cx| Label::new(cx, "+ Audio track"))
-                        .class("btn")
-                        .class("quiet")
-                        .on_press(|cx| {
-                            cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Audio))
-                        });
-                    Button::new(cx, |cx| Label::new(cx, "+ MIDI track"))
-                        .class("btn")
-                        .class("quiet")
-                        .lesson_target(crate::lessons::Target::AddMidiTrack)
-                        .on_press(|cx| {
-                            cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi))
-                        });
-                    // A MIDI track playing the Drum Kit (one-shot samples
-                    // are in the sidebar's Drum samples).
-                    Button::new(cx, |cx| Label::new(cx, "+ Drums"))
-                        .class("btn")
-                        .class("quiet")
-                        .lesson_target(crate::lessons::Target::AddDrumTrack)
-                        .on_press(|cx| cx.emit(TimelineEvent::AddDrumTrack));
+                    Label::new(cx, "Add").class("label");
+                    HStack::new(cx, move |cx| {
+                        use crate::browser::icon::IconKind;
+                        add_track_button(cx, theme, IconKind::Sample, "Audio")
+                            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "An audio track: record into it, or drop samples on it"); }).arrow(false))
+                            .on_press(|cx| cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Audio)));
+                        add_track_button(cx, theme, IconKind::Instrument, "MIDI")
+                            .lesson_target(crate::lessons::Target::AddMidiTrack)
+                            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "A MIDI track, playing the Carve synth"); }).arrow(false))
+                            .on_press(|cx| cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi)));
+                        add_track_button(cx, theme, IconKind::Pattern, "Drums")
+                            .lesson_target(crate::lessons::Target::AddDrumTrack)
+                            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "A MIDI track playing the Drum Kit"); }).arrow(false))
+                            .on_press(|cx| cx.emit(TimelineEvent::AddDrumTrack));
+                    })
+                    .class("synth-seg")
+                    .size(Auto);
                 })
-                .gap(Pixels(tokens::SPACE_1))
-                .padding_left(Pixels(tokens::SPACE_1))
-                .padding_top(Pixels(tokens::SPACE_1))
-                .height(Pixels(tokens::SIZE_CONTROL + tokens::SPACE_2))
+                .alignment(Alignment::Left)
+                .gap(Pixels(tokens::SPACE_2))
+                .padding_left(Pixels(tokens::SPACE_3))
+                .height(Pixels(tokens::SIZE_CONTROL + tokens::SPACE_3))
                 .width(Pixels(HEAD_WIDTH));
             })
             .class("tl-heads")
@@ -357,3 +356,17 @@ pub fn sample_display_name(category: &SampleCategory, filename: &str) -> String 
     state::display_name_from_stem(stem)
 }
 
+/// One of the "Add" group's buttons: an icon and the kind of track.
+fn add_track_button<'a>(cx: &'a mut Context, theme: Signal<ThemeId>, icon: crate::browser::icon::IconKind, label: &'static str) -> Handle<'a, Button> {
+    Button::new(cx, move |cx| {
+        HStack::new(cx, move |cx| {
+            crate::browser::icon::Icon::new(cx, icon, 12.0, Signal::new(false), theme, crate::browser::icon::muted_or_ink);
+            Label::new(cx, label).hoverable(false);
+        })
+        .alignment(Alignment::Center)
+        .gap(Pixels(5.0))
+        .size(Auto)
+        .hoverable(false)
+    })
+    .class("synth-seg-btn")
+}
