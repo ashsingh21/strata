@@ -35,6 +35,11 @@ pub fn status_bar(
         Label::new(cx, save_status).class("value");
     })
     .class("statusbar")
+    // Inline: the stylesheet's `padding: 0px 12px` isn't valid Vizia CSS
+    // (one length only), so the text sat against the window's edges - and
+    // under the rounded corners on macOS.
+    .padding_left(Pixels(crate::tokens::SPACE_3))
+    .padding_right(Pixels(crate::tokens::SPACE_4))
     .gap(Pixels(crate::tokens::SPACE_3))
     .alignment(Alignment::Left)
     .width(Stretch(1.0))
