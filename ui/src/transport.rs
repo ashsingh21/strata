@@ -59,159 +59,36 @@ pub struct HeaderProps {
     /// The current project's display name (its file stem, or "Untitled"
     /// before its first save) - see `crate::project`.
     pub project_name: Signal<String>,
-    pub menus: HeaderMenus,
     /// The live spectrum analyzer's strip is showing.
     pub analyzer_open: Signal<bool>,
 }
 
-/// Open/closed state of the header's drop-down menus (File, time
-/// signature, input device). Created in `main.rs` rather than inside
-/// `header()` so the click-outside backdrop can be mounted at the window
-/// root - see `header_menu_backdrop`.
-#[derive(Clone, Copy)]
-pub struct HeaderMenus {
-    pub file: Signal<bool>,
-    pub time_sig: Signal<bool>,
-    pub input_device: Signal<bool>,
-    /// The key and scale menu (see `key_menu`).
-    pub key: Signal<bool>,
-}
-
-impl HeaderMenus {
-    pub fn new() -> Self {
-        Self { file: Signal::new(false), time_sig: Signal::new(false), input_device: Signal::new(false), key: Signal::new(false) }
-    }
-
-    fn any_open(self) -> bool {
-        self.file.get() || self.time_sig.get() || self.input_device.get() || self.key.get()
-    }
-
-    pub fn close_all(self) {
-        self.file.set(false);
-        self.time_sig.set(false);
-        self.input_device.set(false);
-        self.key.set(false);
-    }
-
-    /// Opens/closes `which`, closing any other open menu - only one drop-
-    /// down at a time.
-    pub fn toggle(self, which: Signal<bool>) {
-        let was_open = which.get();
-        self.close_all();
-        which.set(!was_open);
-    }
-}
-
-/// Transparent full-window layer under the header's menus (z-index 170 vs
-/// the menus' 180, same as the timeline's context menu): any click
-/// outside an open menu closes it. Mounted at the window root, since the
-/// header itself only spans the top strip.
-pub fn header_menu_backdrop(cx: &mut Context, menus: HeaderMenus) {
-    let any_open = Memo::new(move |_| menus.any_open());
-    Element::new(cx)
-        .class("context-menu-backdrop")
-        .toggle_class("hidden", any_open.map(|o| !*o))
-        .on_mouse_down(move |_cx, _| menus.close_all())
-        .position_type(PositionType::Absolute)
-        .top(Pixels(0.0))
-        .left(Pixels(0.0))
-        .width(Stretch(1.0))
-        .height(Stretch(1.0));
+/// The project name's menu: file actions, undo and rename.
+fn file_menu(cx: &mut Context, project_name: Signal<String>, renaming: Signal<bool>, rename_draft: Signal<String>) {
+    use crate::menu::{item, separator};
+    crate::menu::panel(cx, 200.0, move |cx| {
+        item(cx, "New".to_string(), "", false, |cx| cx.emit(ProjectEvent::New));
+        item(cx, "Open...".to_string(), "", false, |cx| cx.emit(ProjectEvent::OpenDialog));
+        separator(cx);
+        item(cx, "Save".to_string(), "Ctrl+S", false, |cx| cx.emit(ProjectEvent::Save));
+        item(cx, "Save As...".to_string(), "", false, |cx| cx.emit(ProjectEvent::SaveAsDialog));
+        item(cx, "Export Audio...".to_string(), "", false, |cx| cx.emit(ProjectEvent::ExportDialog));
+        item(cx, "Start Lesson 1".to_string(), "", false, |cx| cx.emit(ProjectEvent::StartLesson(0)));
+        separator(cx);
+        // Undo/Redo were keyboard-only; listed here (with their keys)
+        // so they're discoverable.
+        item(cx, "Undo".to_string(), "Ctrl+Z", false, |cx| cx.emit(TimelineEvent::Undo));
+        item(cx, "Redo".to_string(), "Ctrl+Shift+Z", false, |cx| cx.emit(TimelineEvent::Redo));
+        separator(cx);
+        item(cx, "Rename...".to_string(), "", false, move |_cx| {
+            rename_draft.set(project_name.get());
+            renaming.set(true);
+        });
+    });
 }
 
 fn vsep(cx: &mut Context) {
     Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(22.0));
-}
-
-/// One row of the File menu - same shape as the timeline's right-click
-/// menu (`context_menu.rs`), but that one always closes via
-/// `TimelineEvent::CloseContextMenu`, so this is its own copy rather than
-/// a shared helper, parameterized on whichever `Signal<bool>` this menu
-/// closes with.
-fn file_menu_item(
-    cx: &mut Context,
-    label: &'static str,
-    menu_open: Signal<bool>,
-    action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
-) {
-    file_menu_item_with_shortcut(cx, label, "", menu_open, action);
-}
-
-/// A File-menu row with a right-aligned shortcut hint - same shape as the
-/// timeline context menu's `item_with_shortcut`.
-fn file_menu_item_with_shortcut(
-    cx: &mut Context,
-    label: &'static str,
-    shortcut: &'static str,
-    menu_open: Signal<bool>,
-    action: impl Fn(&mut EventContext) + Send + Sync + Copy + 'static,
-) {
-    HStack::new(cx, move |cx| {
-        // Children aren't hit-testable (same as Vizia's own Button does to
-        // its content): `on_press` only fires when the press targets the row
-        // itself, so a hoverable label made clicks on the text do nothing.
-        Label::new(cx, label).class("body").hoverable(false);
-        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0)).hoverable(false);
-        let shortcut = crate::shortcut(shortcut);
-        if !shortcut.is_empty() {
-            Label::new(cx, shortcut).class("value").hoverable(false);
-        }
-    })
-    .class("menu-item")
-    .gap(Pixels(SPACE_3))
-    .on_press(move |cx| {
-        action(cx);
-        menu_open.set(false);
-    })
-    .cursor(CursorIcon::Hand)
-    .alignment(Alignment::Left)
-    .width(Stretch(1.0))
-    .height(Pixels(28.0));
-}
-
-/// One row of the input-device menu - same shape as `file_menu_item`,
-/// but the label is a runtime device name (not `&'static str`) and each
-/// row lights up when it's the current selection. `device` is `None`
-/// for the "Default" row, `Some(name)` for a specific device - both
-/// just replace `RecorderModel::selected_input_device` wholesale.
-fn input_device_menu_item(
-    cx: &mut Context,
-    label: &str,
-    device: Option<std::sync::Arc<str>>,
-    selected: Signal<Option<std::sync::Arc<str>>>,
-    menu_open: Signal<bool>,
-) {
-    let label = label.to_string();
-    let device_for_check = device.clone();
-    let is_selected = Memo::new(move |_| selected.get() == device_for_check);
-    HStack::new(cx, move |cx| {
-        // Real device names ("HD-Audio Generic, ALC1220 Alt Analog") run
-        // well past this menu's fixed width - without this they overflowed
-        // straight off the edge of the window instead of staying inside
-        // the menu's own box. Same `.text_wrap(false).text_overflow(...)`
-        // pair Vizia's own `Select` widget uses for exactly this.
-        // Not hit-testable, so a click on the text reaches the row's on_press.
-        Label::new(cx, label.clone())
-            .class("body")
-            .hoverable(false)
-            .text_wrap(false)
-            .text_overflow(TextOverflow::Ellipsis)
-            .width(Stretch(1.0));
-    })
-    .class("menu-item")
-    .toggle_class("is-on", is_selected)
-    .on_press(move |cx| {
-        cx.emit(RecorderModelEvent::SetInputDevice(device.clone()));
-        menu_open.set(false);
-    })
-    .cursor(CursorIcon::Hand)
-    .alignment(Alignment::Left)
-    .width(Stretch(1.0))
-    .height(Pixels(28.0));
-}
-
-fn file_menu_sep(cx: &mut Context) {
-    Element::new(cx).class("menu-sep").width(Stretch(1.0)).height(Pixels(1.0));
 }
 
 /// One transport button: a drawn glyph, its colour following its state.
@@ -249,11 +126,6 @@ fn elapsed_text(position: Position, bpm: f64) -> String {
 pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + Copy + 'static) {
     let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, project_name, .. } =
         props;
-    let menus = props.menus;
-    let file_menu_open = menus.file;
-    let input_device_menu_open = menus.input_device;
-    // Where the input menu opens: under its button (header coordinates).
-    let input_menu_left: Signal<f32> = Signal::new(0.0);
     let renaming: Signal<bool> = Signal::new(false);
     let rename_draft: Signal<String> = Signal::new(project_name.get());
 
@@ -289,6 +161,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                 } else {
                     // The project menu: the name is its button, with a
                     // chevron like the Key dropdown's.
+                    crate::menu::menu(cx, Placement::BottomStart, move |cx| {
                     Button::new(cx, move |cx| {
                         HStack::new(cx, move |cx| {
                             Label::new(cx, project_name)
@@ -306,7 +179,6 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                     })
                     .class("btn")
                     .class("quiet")
-                    .toggle_class("is-on", file_menu_open)
                     // Its text lines up with the status line under it.
                     .padding_left(Pixels(0.0))
                     .padding_right(Pixels(SPACE_1))
@@ -314,7 +186,9 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                     // status line under it sit centred in the header with
                     // room below.
                     .height(Pixels(18.0))
-                    .on_press(move |_cx| menus.toggle(file_menu_open));
+                    .width(Auto)
+                    .on_press(crate::menu::toggle);
+                    }, move |cx| file_menu(cx, project_name, renaming, rename_draft));
                 }
             });
             Label::new(cx, status).class("value").font_size(12.0);
@@ -325,44 +199,6 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .width(Pixels(120.0))
         .height(Auto);
 
-        // The File menu. Built once and toggled with `.hidden` (`display: none`, same as
-        // every other overlay in the app) rather than conditionally
-        // constructed via `Binding` - a freshly built entity is a plausible
-        // reason a click landing right as it appears wouldn't resolve to
-        // it correctly.
-        VStack::new(cx, move |cx| {
-            file_menu_item(cx, "New", file_menu_open, |cx| cx.emit(ProjectEvent::New));
-            file_menu_item(cx, "Open...", file_menu_open, |cx| cx.emit(ProjectEvent::OpenDialog));
-            file_menu_sep(cx);
-            file_menu_item_with_shortcut(cx, "Save", "Ctrl+S", file_menu_open, |cx| cx.emit(ProjectEvent::Save));
-            file_menu_item(cx, "Save As...", file_menu_open, |cx| cx.emit(ProjectEvent::SaveAsDialog));
-            file_menu_item(cx, "Export Audio...", file_menu_open, |cx| cx.emit(ProjectEvent::ExportDialog));
-            file_menu_item(cx, "Start Lesson 1", file_menu_open, |cx| cx.emit(ProjectEvent::StartLesson(0)));
-            file_menu_sep(cx);
-            // Undo/Redo were keyboard-only; listed here (with their keys)
-            // so they're discoverable.
-            file_menu_item_with_shortcut(cx, "Undo", "Ctrl+Z", file_menu_open, |cx| cx.emit(TimelineEvent::Undo));
-            file_menu_item_with_shortcut(cx, "Redo", "Ctrl+Shift+Z", file_menu_open, |cx| cx.emit(TimelineEvent::Redo));
-            file_menu_sep(cx);
-            file_menu_item(cx, "Rename...", file_menu_open, move |_cx| {
-                rename_draft.set(project_name.get());
-                renaming.set(true);
-            });
-        })
-        .class("panel")
-        .class("context-menu")
-        .toggle_class("hidden", file_menu_open.map(|o| !*o))
-        .position_type(PositionType::Absolute)
-        .top(Pixels(HEADER_HEIGHT))
-        .left(Pixels(SPACE_3))
-        .gap(Pixels(2.0))
-        .padding_top(Pixels(SPACE_2))
-        .padding_bottom(Pixels(SPACE_2))
-        .padding_left(Pixels(SPACE_1))
-        .padding_right(Pixels(SPACE_1))
-        .width(Pixels(200.0))
-        .height(Auto);
-
         vsep(cx);
 
         Label::new(cx, "Key").class("label").font_size(12.0);
@@ -371,9 +207,8 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         });
         Button::new(cx, move |cx| Label::new(cx, key_text).font_size(13.0))
             .class("btn")
-            .toggle_class("is-on", menus.key)
             .lesson_target(crate::lessons::Target::KeyMenu)
-            .on_press(crate::key_menu::toggle_under);
+            .on_press(crate::key_menu::open_from);
 
         // Right-click for an exact typed value - drag/scroll (BpmField's
         // own gesture) is great for coarse changes but painfully slow (or
@@ -457,54 +292,36 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             .class("quiet")
             .on_press(|cx| cx.emit(AppEvent::Tap));
 
-        let time_sig_menu_open = menus.time_sig;
         let time_sig_text = Memo::new(move |_| {
             let sig = props.arrangement.get().tempo_map.time_signature_at(0);
             format!("{}/{}", sig.numerator, sig.denominator)
         });
-        Button::new(cx, move |cx| Label::new(cx, time_sig_text).font_size(13.0))
-            .class("readout")
-            .on_press(move |_cx| menus.toggle(time_sig_menu_open));
-
-        // A common preset list rather
-        // than free-form numerator/denominator fields, since those are
-        // the overwhelming majority of what anyone actually picks.
-        VStack::new(cx, move |cx| {
-            for &(num, den) in TIME_SIGNATURE_PRESETS {
-                let label = format!("{num}/{den}");
-                let is_current = Memo::new(move |_| {
-                    let sig = props.arrangement.get().tempo_map.time_signature_at(0);
-                    sig.numerator == num && sig.denominator == den
+        // A common preset list rather than free-form numerator /
+        // denominator fields, since those are the overwhelming majority of
+        // what anyone actually picks.
+        crate::menu::menu(
+            cx,
+            Placement::BottomStart,
+            move |cx| {
+                Button::new(cx, move |cx| Label::new(cx, time_sig_text).font_size(13.0))
+                    .class("readout")
+                    .width(Auto)
+                    .on_press(crate::menu::toggle);
+            },
+            move |cx| {
+                crate::menu::panel(cx, 100.0, move |cx| {
+                    for &(num, den) in TIME_SIGNATURE_PRESETS {
+                        let is_current = Memo::new(move |_| {
+                            let sig = props.arrangement.get().tempo_map.time_signature_at(0);
+                            sig.numerator == num && sig.denominator == den
+                        });
+                        crate::menu::item(cx, format!("{num}/{den}"), "", is_current, move |cx| {
+                            cx.emit(TimelineEvent::SetTimeSignature { numerator: num, denominator: den });
+                        });
+                    }
                 });
-                HStack::new(cx, move |cx| {
-                    // Not hit-testable, so a click on the text reaches the row.
-                    Label::new(cx, label.clone()).class("body").hoverable(false);
-                })
-                .class("menu-item")
-                .toggle_class("is-on", is_current)
-                .on_press(move |cx| {
-                    cx.emit(TimelineEvent::SetTimeSignature { numerator: num, denominator: den });
-                    time_sig_menu_open.set(false);
-                })
-                .cursor(CursorIcon::Hand)
-                .alignment(Alignment::Left)
-                .width(Stretch(1.0))
-                .height(Pixels(28.0));
-            }
-        })
-        .class("panel")
-        .class("context-menu")
-        .toggle_class("hidden", time_sig_menu_open.map(|o| !*o))
-        .position_type(PositionType::Absolute)
-        .top(Pixels(HEADER_HEIGHT))
-        .left(Pixels(320.0))
-        .gap(Pixels(2.0))
-        .padding_top(Pixels(SPACE_2))
-        .padding_bottom(Pixels(SPACE_2))
-        .padding_left(Pixels(SPACE_1))
-        .padding_right(Pixels(SPACE_1))
-        .width(Pixels(100.0))
-        .height(Auto);
+            },
+        );
 
         // The transport, grouped.
         HStack::new(cx, move |cx| {
@@ -580,73 +397,60 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             // Capped with an ellipsis: device names are arbitrary OS strings,
             // and an uncapped one widened the header past the window edge.
             // A drop-down like Key's: mic icon, the device, a chevron.
-            with_tip(
-                Button::new(cx, move |cx| {
-                    HStack::new(cx, move |cx| {
-                        Glyph::new(cx, GlyphKind::Mic, Signal::new(true), theme, crate::glyph::ink_when_on)
-                            .size(Pixels(13.0))
-                            .hoverable(false);
-                        Label::new(cx, device_label)
-                            .font_size(13.0)
-                            .text_wrap(false)
-                            .text_overflow(TextOverflow::Ellipsis)
-                            .max_width(Pixels(130.0))
-                            .hoverable(false);
-                        Label::new(cx, "\u{2304}").font_size(13.0).hoverable(false);
-                    })
-                    .gap(Pixels(SPACE_2))
-                    .alignment(Alignment::Center)
-                    .size(Auto)
-                    .hoverable(false)
-                }),
-                "Recording input device",
-            )
-                .class("btn")
-                .on_press(move |cx| {
-                    // Opening: list again, so a just-plugged-in interface is there.
-                    if !input_device_menu_open.get() {
+            crate::menu::menu(
+                cx,
+                Placement::BottomStart,
+                move |cx| {
+                    with_tip(
+                        Button::new(cx, move |cx| {
+                            HStack::new(cx, move |cx| {
+                                Glyph::new(cx, GlyphKind::Mic, Signal::new(true), theme, crate::glyph::ink_when_on)
+                                    .size(Pixels(13.0))
+                                    .hoverable(false);
+                                Label::new(cx, device_label)
+                                    .font_size(13.0)
+                                    .text_wrap(false)
+                                    .text_overflow(TextOverflow::Ellipsis)
+                                    .max_width(Pixels(130.0))
+                                    .hoverable(false);
+                                Label::new(cx, "\u{2304}").font_size(13.0).hoverable(false);
+                            })
+                            .gap(Pixels(SPACE_2))
+                            .alignment(Alignment::Center)
+                            .size(Auto)
+                            .hoverable(false)
+                        }),
+                        "Recording input device",
+                    )
+                    .class("btn")
+                    .width(Auto)
+                    .on_press(|cx| {
+                        // List again, so a just-plugged-in interface is there.
                         cx.emit(crate::recorder::RecorderModelEvent::RefreshInputDevices);
-                        // Under the button, kept inside the window. The
-                        // header starts right of the sidebar's rail.
-                        let header_left = crate::browser::RAIL_WIDTH + 1.0;
-                        use crate::hidpi::Logical;
-                        let window_w = cx.with_current(Entity::root(), |cx| cx.lbounds().w);
-                        let x = cx.lbounds().x - header_left;
-                        input_menu_left.set(x.min(window_w - header_left - INPUT_MENU_WIDTH - SPACE_3).max(0.0));
-                    }
-                    menus.toggle(input_device_menu_open);
-                });
+                        crate::menu::toggle(cx);
+                    });
+                },
+                // Built as it opens, so it lists the devices found just now.
+                move |cx| {
+                    crate::menu::panel(cx, INPUT_MENU_WIDTH, move |cx| {
+                        let selected = props.selected_input_device;
+                        let found = props.available_input_devices.get();
+                        for device in std::iter::once(None).chain(found.iter().cloned().map(Some)) {
+                            let label = device.as_ref().map(|d| d.to_string()).unwrap_or_else(|| "Default".to_string());
+                            let check = device.clone();
+                            let is_current = Memo::new(move |_| selected.get() == check);
+                            crate::menu::item(cx, label, "", is_current, move |cx| {
+                                cx.emit(RecorderModelEvent::SetInputDevice(device.clone()));
+                            });
+                        }
+                    });
+                },
+            );
         })
         .gap(Pixels(SPACE_2))
         .alignment(Alignment::Center)
         .size(Auto);
 
-        // Opens under its button (see its on_press).
-        VStack::new(cx, move |cx| {
-            input_device_menu_item(cx, "Default", None, props.selected_input_device, input_device_menu_open);
-            for device in props.available_input_devices.get().iter() {
-                input_device_menu_item(
-                    cx,
-                    device,
-                    Some(device.clone()),
-                    props.selected_input_device,
-                    input_device_menu_open,
-                );
-            }
-        })
-        .class("panel")
-        .class("context-menu")
-        .toggle_class("hidden", input_device_menu_open.map(|o| !*o))
-        .position_type(PositionType::Absolute)
-        .top(Pixels(HEADER_HEIGHT))
-        .left(input_menu_left.map(|x| Pixels(*x)))
-        .gap(Pixels(2.0))
-        .padding_top(Pixels(SPACE_2))
-        .padding_bottom(Pixels(SPACE_2))
-        .padding_left(Pixels(SPACE_1))
-        .padding_right(Pixels(SPACE_1))
-        .width(Pixels(INPUT_MENU_WIDTH))
-        .height(Auto);
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 

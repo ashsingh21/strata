@@ -17,6 +17,7 @@ mod glyph;
 mod hidpi;
 mod interval_input;
 mod key_menu;
+mod menu;
 mod knob;
 mod lessons;
 mod meter;
@@ -475,7 +476,6 @@ fn main() -> Result<(), ApplicationError> {
         ])
         .build(cx);
 
-        let header_menus = transport::HeaderMenus::new();
         VStack::new(cx, move |cx| {
             // The rail runs the full height; the header and everything
             // under it sit to its right.
@@ -502,7 +502,6 @@ fn main() -> Result<(), ApplicationError> {
                     arrangement: tl_arrangement,
                     save_status,
                     project_name,
-                    menus: header_menus,
                     analyzer_open,
                 },
                 tl_bpm,
@@ -626,8 +625,8 @@ fn main() -> Result<(), ApplicationError> {
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, tl_clipboard_nonempty);
             // A dragged browser result's name, following the pointer.
             browser::view::DragGhost::new(cx, browser_props);
-            transport::header_menu_backdrop(cx, header_menus);
-            key_menu::key_menu(cx, header_menus, interval_key, interval_scale_mask, interval_open);
+            // The key menu's one dropdown, over everything (see key_menu).
+            key_menu::host(cx, interval_key, interval_scale_mask, interval_open);
             // Selecting clips drops the Effects Board's node selection, so
             // Delete removes what was picked last (see TimelineState::fx_selected).
             Binding::new(cx, tl_selection, move |_cx| {

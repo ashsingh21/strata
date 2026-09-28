@@ -1,7 +1,14 @@
 //! The song's key and scale, picked from one menu: the 12 notes, then the
-//! scales. Opened by the header's Key button and the clip editor's key
-//! button - it opens under whichever was pressed - and links to the Theory
-//! view (the scale explorer) at the bottom.
+//! scales. Opened by the header's Key button, the clip editor's and
+//! Theory's, and it links to the Theory view (the scale explorer) at the
+//! bottom.
+//!
+//! One Vizia dropdown at the window root serves all three: pressing a Key
+//! button moves the dropdown's anchor onto that button's left edge (zero
+//! wide, so it never catches a click) and opens it, so it opens beside the button, moves to stay in
+//! the window, and closes on a click elsewhere or Escape. A dropdown of
+//! the button's own would be cut off - two of the buttons are inside the
+//! lower panel, which scrolls and so clips what's drawn outside it.
 
 use std::cell::Cell;
 
@@ -12,41 +19,51 @@ use shared::theory::{note_name, SCALE_PRESETS};
 use crate::hidpi::Logical;
 use crate::interval_input::state::IntervalInputEvent;
 use crate::tokens::{self, SPACE_1, SPACE_2};
-use crate::transport::HeaderMenus;
 
 const MENU_WIDTH: f32 = 300.0;
-/// About how tall the menu is: it opens above its button when there's no
-/// room below (the clip editor's button sits low in the window).
-const MENU_HEIGHT: f32 = 440.0;
 /// Scale rows: compact, so 12 of them don't make a tower.
 const ROW_HEIGHT: f32 = 24.0;
 
 thread_local! {
-    static MENU: Cell<Option<(HeaderMenus, Signal<(f32, f32)>)>> = const { Cell::new(None) };
+    /// The key, the scale and whether Theory is open - set once in `main`,
+    /// so every Key button's menu can read them without threading them
+    /// through each view's props.
+    static SIGNALS: Cell<Option<(Signal<u8>, Signal<u16>, Signal<bool>)>> = const { Cell::new(None) };
+    /// The root dropdown, and where its anchor sits (x, y, height).
+    static HOST: Cell<Option<(Entity, Signal<(f32, f32, f32)>)>> = const { Cell::new(None) };
 }
 
-/// Opens (or closes) the menu under the button handling this press.
-pub fn toggle_under(cx: &mut EventContext) {
-    let Some((menus, at)) = MENU.get() else { return };
-    if !menus.key.get() {
-        let button = cx.lbounds();
-        let (window_w, window_h) = cx.with_current(Entity::root(), |cx| {
-            let b = cx.lbounds();
-            (b.w, b.h)
-        });
-        let x = button.x.min(window_w - MENU_WIDTH - SPACE_2).max(SPACE_2);
-        let below = button.y + button.h + SPACE_1;
-        let y = if below + MENU_HEIGHT > window_h { (button.y - MENU_HEIGHT - SPACE_1).max(SPACE_2) } else { below };
-        at.set((x, y));
-    }
-    menus.toggle(menus.key);
+/// The menu's dropdown, mounted once, last, at the window root.
+pub fn host(cx: &mut Context, key: Signal<u8>, scale_mask: Signal<u16>, theory_open: Signal<bool>) {
+    SIGNALS.set(Some((key, scale_mask, theory_open)));
+    let anchor = Signal::new((0.0f32, 0.0f32, 0.0f32));
+    let dropdown = crate::menu::menu(
+        cx,
+        Placement::BottomStart,
+        |cx| {
+            Element::new(cx).hoverable(false).width(Stretch(1.0)).height(Stretch(1.0));
+        },
+        content,
+    )
+    .position_type(PositionType::Absolute)
+    .left(anchor.map(|a| Pixels(a.0)))
+    .top(anchor.map(|a| Pixels(a.1)))
+    .width(Pixels(0.0))
+    .height(anchor.map(|a| Pixels(a.2)))
+    .entity();
+    HOST.set(Some((dropdown, anchor)));
 }
 
-/// The menu itself, mounted at the window root (above everything, with
-/// the header menus' click-outside backdrop under it).
-pub fn key_menu(cx: &mut Context, menus: HeaderMenus, key: Signal<u8>, scale_mask: Signal<u16>, theory_open: Signal<bool>) {
-    let at = Signal::new((0.0f32, 0.0f32));
-    MENU.set(Some((menus, at)));
+/// A Key button's press: the menu, opened on that button.
+pub fn open_from(cx: &mut EventContext) {
+    let Some((dropdown, anchor)) = HOST.get() else { return };
+    let b = cx.lbounds();
+    anchor.set((b.x, b.y, b.h));
+    cx.emit_to(dropdown, PopupEvent::Open);
+}
+
+fn content(cx: &mut Context) {
+    let Some((key, scale_mask, theory_open)) = SIGNALS.get() else { return };
     VStack::new(cx, move |cx| {
         Label::new(cx, "Key").class("label");
         for row in 0..2u8 {
@@ -83,7 +100,7 @@ pub fn key_menu(cx: &mut Context, menus: HeaderMenus, key: Signal<u8>, scale_mas
                             .height(Pixels(ROW_HEIGHT))
                             .on_press(move |cx| {
                                 cx.emit(IntervalInputEvent::SetScaleMask(mask));
-                                menus.close_all();
+                                crate::menu::close(cx);
                             });
                     }
                 })
@@ -107,15 +124,11 @@ pub fn key_menu(cx: &mut Context, menus: HeaderMenus, key: Signal<u8>, scale_mas
                 if !theory_open.get() {
                     cx.emit(IntervalInputEvent::ToggleOpen);
                 }
-                menus.close_all();
+                crate::menu::close(cx);
             });
     })
     .class("panel")
     .class("context-menu")
-    .toggle_class("hidden", menus.key.map(|o| !*o))
-    .position_type(PositionType::Absolute)
-    .left(at.map(|(x, _)| Pixels(*x)))
-    .top(at.map(|(_, y)| Pixels(*y)))
     .gap(Pixels(SPACE_1))
     .padding_top(Pixels(SPACE_2))
     .padding_bottom(Pixels(SPACE_2))

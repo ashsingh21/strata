@@ -245,7 +245,7 @@ pub fn piano_roll_view(
                     .class("btn")
                     .class("sm")
                     .lesson_target(crate::lessons::Target::KeyMenu)
-                    .on_press(crate::key_menu::toggle_under);
+                    .on_press(crate::key_menu::open_from);
             })
             .toggle_class("hidden", drums)
             .gap(Pixels(tokens::SPACE_2))

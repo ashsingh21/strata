@@ -215,11 +215,12 @@ fn rail(cx: &mut Context, p: BrowserProps) {
 /// dropdown: it opens beside its button, keeps itself inside the window,
 /// and closes on a click elsewhere or Escape.
 fn settings_menu(cx: &mut Context, p: BrowserProps) {
-    Dropdown::new(
+    crate::menu::menu(
         cx,
+        Placement::RightEnd,
         move |cx| {
             let never = Memo::new(|_| false);
-            rail_button(cx, p, IconKind::Settings, "Settings", never).on_press(|cx| cx.emit(PopupEvent::Switch));
+            rail_button(cx, p, IconKind::Settings, "Settings", never).on_press(crate::menu::toggle);
         },
         move |cx| {
             VStack::new(cx, move |cx| {
@@ -232,7 +233,7 @@ fn settings_menu(cx: &mut Context, p: BrowserProps) {
                             .width(Stretch(1.0))
                             .on_press(move |cx| {
                                 cx.emit(crate::app::AppEvent::SetTheme(theme));
-                                cx.emit(PopupEvent::Close);
+                                crate::menu::close(cx);
                             });
                     }
                 })
@@ -246,11 +247,7 @@ fn settings_menu(cx: &mut Context, p: BrowserProps) {
             .padding(Pixels(tokens::SPACE_2))
             .size(Auto);
         },
-    )
-    .placement(Placement::RightEnd)
-    .show_arrow(false)
-    .arrow_size(Pixels(6.0))
-    .size(Auto);
+    );
 }
 
 fn results_memo(p: BrowserProps) -> Memo<Vec<Item>> {
@@ -353,8 +350,9 @@ fn panel(cx: &mut Context, p: BrowserProps) {
                         .on_press(|cx| cx.emit(BrowserEvent::ToggleFitsKey));
                     Label::new(cx, Memo::new(move |_| super::key_label(p.key.get(), p.scale_mask.get()))).class("value").text_wrap(false);
                     Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-                    Dropdown::new(
+                    crate::menu::menu(
                         cx,
+                        Placement::BottomEnd,
                         move |cx| {
                             Button::new(cx, move |cx| Label::new(cx, p.sort.map(|s| format!("{} \u{25be}", s.label()))))
                                 .class("btn")
@@ -363,7 +361,7 @@ fn panel(cx: &mut Context, p: BrowserProps) {
                                 // Vizia sizes a dropdown's children to stretch,
                                 // which is nothing inside an Auto dropdown.
                                 .width(Auto)
-                                .on_press(|cx| cx.emit(PopupEvent::Switch));
+                                .on_press(crate::menu::toggle);
                         },
                         move |cx| {
                             VStack::new(cx, move |cx| {
@@ -374,7 +372,7 @@ fn panel(cx: &mut Context, p: BrowserProps) {
                                         .width(Stretch(1.0))
                                         .on_press(move |cx| {
                                             cx.emit(BrowserEvent::SetSort(sort));
-                                            cx.emit(PopupEvent::Close);
+                                            crate::menu::close(cx);
                                         });
                                 }
                             })
@@ -383,11 +381,7 @@ fn panel(cx: &mut Context, p: BrowserProps) {
                             .width(Pixels(96.0))
                             .height(Auto);
                         },
-                    )
-                    .placement(Placement::BottomEnd)
-                    .show_arrow(false)
-                    .arrow_size(Pixels(4.0))
-                    .size(Auto);
+                    );
                 })
                 .toggle_class("hidden", !section.filters())
                 .alignment(Alignment::Left)

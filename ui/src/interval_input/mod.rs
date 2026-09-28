@@ -49,7 +49,7 @@ pub fn interval_input_view(
                 Button::new(cx, move |cx| Label::new(cx, key_text))
                     .class("btn")
                     .class("sm")
-                    .on_press(crate::key_menu::toggle_under);
+                    .on_press(crate::key_menu::open_from);
 
                 crate::synth::segmented::segmented(
                     cx,
