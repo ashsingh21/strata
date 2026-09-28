@@ -22,3 +22,10 @@ opt-level = 3
 
 [profile.dev.package."*"]
 opt-level = 2
+
+# Windows: winit's windows-sys import library, minus its icu.dll entries.
+# Skia bundles its own ICU; with Windows' ICU declared too, the linker sent
+# some of Skia's ICU calls to Windows' icu.dll (a different ICU version -
+# and missing under Wine). See vendor/windows_x86_64_msvc-0.52.6/README-shor.md.
+[patch.crates-io]
+windows_x86_64_msvc = { path = "vendor/windows_x86_64_msvc-0.52.6" }

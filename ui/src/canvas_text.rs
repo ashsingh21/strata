@@ -12,6 +12,12 @@ pub const PLEX_SANS_SEMIBOLD: &[u8] = include_bytes!("../../design/fonts/IBMPlex
 
 pub const PLEX_SANS: [&[u8]; 3] = [PLEX_SANS_REGULAR, PLEX_SANS_MEDIUM, PLEX_SANS_SEMIBOLD];
 
+/// The few symbols the UI uses that Plex doesn't have (menu chevrons, ▸ ■,
+/// ♭ ♯, ⌘ ⇧...): a 14-glyph subset of DejaVu Sans, next in the stylesheet's
+/// font list. Without it those came out as empty boxes wherever the system
+/// has no font with them (seen under Wine).
+pub const SHOR_SYMBOLS: &[u8] = include_bytes!("../../design/fonts/ShorSymbols.ttf");
+
 thread_local! {
     /// Built once per (UI) thread: parsing the font data on every draw
     /// call would be wasted work at 60 fps.

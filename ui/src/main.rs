@@ -102,6 +102,7 @@ fn main() -> Result<(), ApplicationError> {
         for font in canvas_text::PLEX_SANS {
             cx.add_font_mem(font);
         }
+        cx.add_font_mem(canvas_text::SHOR_SYMBOLS);
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");
         cx.add_stylesheet(include_style!("styles/studio.css")).expect("failed to add studio.css");
         cx.add_stylesheet(include_style!("styles/themes.css")).expect("failed to add themes.css");
