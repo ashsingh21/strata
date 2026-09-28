@@ -651,12 +651,16 @@ fn main() -> Result<(), ApplicationError> {
         .width(Stretch(1.0));
     })
     .title("Shor")
+    // Opens filling the screen (the space between the menu bar and the
+    // Dock on a Mac), whatever its size: 1440x900 ran off the bottom of a
+    // 13" MacBook. The size is for when it's un-maximized.
     .inner_size((1440, 900))
-    // The header row is one fixed-content strip (no wrapping); below ~1400px
-    // its right end (CPU/Out meters, input device) was cut off, and below
-    // ~800px tall the timeline has no room once the 320px Effects Board
-    // is open.
-    .min_inner_size(Some((1200, 700)))
+    .maximized(true)
+    // The header row is one fixed-content strip (no wrapping): it drops
+    // its elapsed time and CPU meter when narrow, which fits it down to
+    // 1280px - the smallest a 13" Mac offers. Below ~700px tall the
+    // timeline has no room once the 320px Effects Board is open.
+    .min_inner_size(Some((1280, 700)))
     .ignore_default_theme()
     .run()
 }

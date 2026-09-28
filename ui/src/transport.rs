@@ -123,11 +123,19 @@ fn elapsed_text(position: Position, bpm: f64) -> String {
     format!("{:02}:{:06.3}", minutes as u32, seconds - minutes * 60.0)
 }
 
+/// The header's width (logical px) below which it drops its least-needed
+/// readouts: what it has in a 1440px window, less a little.
+const NARROW_HEADER: f32 = 1380.0;
+
 pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + Copy + 'static) {
     let HeaderProps { theme, playing, loop_on, record_armed, click_on, position, project_name, .. } =
         props;
     let renaming: Signal<bool> = Signal::new(false);
     let rename_draft: Signal<String> = Signal::new(project_name.get());
+    // Narrower than the row's natural width (a 13" laptop's screen): the
+    // elapsed time and the CPU meter step aside, or the Out meter was cut
+    // off the right edge.
+    let narrow: Signal<bool> = Signal::new(false);
 
     HStack::new(cx, move |cx| {
         // Project and what's happening to it.
@@ -358,7 +366,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                 .height(Pixels(13.0))
                 .toggle_class("hidden", recording.map(|r| !*r));
             Label::new(cx, bar_text).class("readout-big").width(Pixels(70.0));
-            Label::new(cx, time_text).class("value").font_size(12.0);
+            Label::new(cx, time_text).class("value").font_size(12.0).toggle_class("hidden", narrow);
         })
         .class("readout")
         .class("position")
@@ -472,15 +480,27 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .on_press(|cx| cx.emit(crate::analyzer::AnalyzerEvent::Toggle));
 
         // CPU: the audio callback's share of its real-time budget.
-        Label::new(cx, "CPU").class("label").font_size(12.0);
+        // Rebuilt rather than toggled `hidden`: shown again that way, it
+        // stayed collapsed.
         let cpu = props.cpu_load;
-        HStack::new(cx, move |cx| {
-            Element::new(cx).class("bar-fill").width(cpu.map(|c| Percentage((c * 100.0).clamp(0.0, 100.0))));
-        })
-        .class("bar")
-        .width(Pixels(32.0))
-        .height(Pixels(4.0));
-        Label::new(cx, cpu.map(|c| format!("{:.0}%", c * 100.0))).class("value").font_size(12.0).width(Pixels(32.0));
+        Binding::new(cx, narrow, move |cx| {
+            if narrow.get() {
+                return;
+            }
+            HStack::new(cx, move |cx| {
+                Label::new(cx, "CPU").class("label").font_size(12.0);
+                HStack::new(cx, move |cx| {
+                    Element::new(cx).class("bar-fill").width(cpu.map(|c| Percentage((c * 100.0).clamp(0.0, 100.0))));
+                })
+                .class("bar")
+                .width(Pixels(32.0))
+                .height(Pixels(4.0));
+                Label::new(cx, cpu.map(|c| format!("{:.0}%", c * 100.0))).class("value").font_size(12.0).width(Pixels(32.0));
+            })
+            .gap(Pixels(6.0))
+            .alignment(Alignment::Left)
+            .size(Auto);
+        });
 
         // Output level: signal up to -12 dB, warn above. Labelled like CPU
         // beside it - unlabelled, a bare bar and "-inf" didn't say what
@@ -504,6 +524,12 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             .width(Pixels(38.0));
     })
     .class("transport")
+    .on_geo_changed(move |cx, _| {
+        let width = cx.bounds().w / cx.scale_factor();
+        if narrow.get() != (width < NARROW_HEADER) {
+            narrow.set(width < NARROW_HEADER);
+        }
+    })
     // Tighter than SPACE_2: the sidebar's rail now runs up beside the
     // header, and everything still has to fit at the default 1440px.
     .gap(Pixels(6.0))
