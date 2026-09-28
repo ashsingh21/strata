@@ -78,6 +78,8 @@ pub enum Target {
     OscWave(u8),
     /// Carve's Mono/Poly switch.
     VoiceMode,
+    /// Oscillator 2's Sync switch.
+    Sync,
     /// Carve's filter type switch (LP 24 / LP 12 / BP / HP).
     FilterType,
     /// LFO 1 or 2's pill (drag it onto a knob).

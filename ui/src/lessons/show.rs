@@ -732,6 +732,23 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 move_note(s, 5 * PPQ, 69, 68);
             }),
         ],
+        CARVE_SYNC_FM => vec![
+            b(play),
+            b(|s| {
+                s.synth.mix.osc2_db = -6.0;
+                s.synth.mix.osc1_db = -60.0;
+            }),
+            b(|s| s.synth.osc2.sync = true),
+            b(|s| s.synth.osc2.octave = 2),
+            b(|s| {
+                s.synth.osc2.sync = false;
+                s.synth.osc2.octave = 0;
+            }),
+            b(|s| s.synth.osc2.knob_c = 0.3),
+            b(|s| s.synth.osc2.waveform = Waveform::Sine),
+            b(|s| s.synth.filter.cutoff_hz = 500.0),
+            b(|s| s.synth.filter.key_track = 1.0),
+        ],
         MIX_LEVELS => vec![b(play), b(|s| select_gain(s, "Drums", -6.0)), b(|s| select_gain(s, "Chords", -12.0))],
         MIX_EQ => vec![
             b(play),

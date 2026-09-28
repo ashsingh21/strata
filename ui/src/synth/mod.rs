@@ -356,6 +356,7 @@ fn osc2_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId
                 .class("btn")
                 .class("sm")
                 .toggle_class("is-on", sync)
+                .lesson_target(crate::lessons::Target::Sync)
                 .on_press(|cx| cx.emit(SynthEvent::ToggleOsc2Sync));
             waveform_seg(cx, state, theme, false);
         },

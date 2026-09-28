@@ -5,7 +5,7 @@
 use shared::arrangement::{Clip, ClipContent, EffectParam, Instrument, Ticks, EQ_LOW_CUT, PPQ};
 use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT, SNARE};
 use shared::lessons::{
-    BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
+    BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_SYNC_FM, CARVE_WAVES, CHORDS, FIRST_BEAT,
     RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
     PROJECT_ARRANGE, PROJECT_BASS, PROJECT_BASS_ROOTS, PROJECT_CHORDS, PROJECT_CHORDS_NOTES, PROJECT_FINISH, PROJECT_GROOVE,
     RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
@@ -933,6 +933,86 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "An LFO is a slow wave that moves another control: on Cutoff it's a sweep or wobble, on Pitch it's vibrato. \
                  Unison and reverb make any sound bigger.",
+            ),
+        ],
+    },
+    Lesson {
+        id: CARVE_SYNC_FM,
+        group: CARVE,
+        title: "Harder sounds: sync and FM",
+        steps: &[
+            act(
+                "Press Space: a low note, then a high one, on a plain saw.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Hear Oscillator 2 on its own: in the Mixer, turn Osc 2 up past \u{2212}12 dB and Osc 1 all the way down.",
+                "The Osc 1 and Osc 2 knobs in the Mixer.",
+                |s| carve(s).is_some_and(|p| p.mix.osc2_db > -12.0 && p.mix.osc1_db < -40.0),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[
+                        (p.mix.osc2_db > -12.0, Target::Knob(SynthParam::Osc2Level)),
+                        (p.mix.osc1_db < -40.0, Target::Knob(SynthParam::Osc1Level)),
+                    ])
+                },
+            ),
+            recipe(
+                "Switch on Sync, above Oscillator 2.",
+                "Sync restarts Oscillator 2 every time Oscillator 1 starts a cycle. Nothing changes yet: they're at the same pitch.",
+                "The Sync button, left of Oscillator 2's wave buttons.",
+                |s| carve(s).is_some_and(|p| p.osc2.sync),
+                |_| Some(Target::Sync),
+            ),
+            recipe(
+                "Now raise Oscillator 2's Octave to +2.",
+                "The note stays the same, but the tone turns hard and nasal. Oscillator 2 races ahead and gets cut off mid-cycle, over and over. That's the classic sync lead.",
+                "Two steps up on the Octave knob under Oscillator 2.",
+                |s| carve(s).is_some_and(|p| p.osc2.sync && p.osc2.octave >= 2),
+                |_| Some(Target::Knob(SynthParam::Osc2Octave)),
+            ),
+            act(
+                "Switch Sync off again, and put the Octave back to 0.",
+                "Click Sync, then turn the Octave knob back to the middle.",
+                |s| carve(s).is_some_and(|p| !p.osc2.sync && p.osc2.octave == 0),
+                |s| {
+                    let p = carve(s)?;
+                    first_unmet(&[(!p.osc2.sync, Target::Sync), (p.osc2.octave == 0, Target::Knob(SynthParam::Osc2Octave))])
+                },
+            ),
+            recipe(
+                "Now FM: turn Oscillator 2's FM up to about 30%.",
+                "Oscillator 1 bends Oscillator 2's pitch hundreds of times a second. That makes new overtones that aren't in either wave: metallic, clangy.",
+                "The FM knob under Oscillator 2. Anywhere from 20% to 50% is fine.",
+                |s| carve(s).is_some_and(|p| (0.2..=0.5).contains(&p.osc2.knob_c)),
+                |_| Some(Target::Knob(SynthParam::Osc2Fm)),
+            ),
+            recipe(
+                "Switch Oscillator 2 to the sine wave.",
+                "FM on a sine is the sound of electric pianos and bells: the overtones come from the FM, not from the wave.",
+                "The first of Oscillator 2's wave buttons.",
+                |s| carve(s).is_some_and(|p| p.osc2.waveform == Waveform::Sine && p.osc2.knob_c >= 0.2),
+                |_| Some(Target::OscWave(2)),
+            ),
+            recipe(
+                "One more control: turn Cutoff down to about 500 Hz. Listen to the high note.",
+                "The low note still sounds full, but the high one is dull: the filter cuts the same frequencies from both, and the high note has less below the cutoff.",
+                "The big Cutoff knob in the Filter. Anywhere below 700 Hz is fine.",
+                |s| carve(s).is_some_and(|p| p.filter.cutoff_hz <= 700.0),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            recipe(
+                "Turn Key track up to 100%.",
+                "Now the cutoff follows the notes, so it opens up for high notes. Both notes sound alike again. Basses and leads that play across a range need it.",
+                "The Key track knob in the Filter. 80% or more is fine.",
+                |s| carve(s).is_some_and(|p| p.filter.key_track >= 0.8),
+                |_| Some(Target::Knob(SynthParam::KeyTrack)),
+            ),
+            info(
+                "Sync makes tearing leads, FM makes bells and metal, and key tracking keeps a sound the same across the keyboard. \
+                 Try sync with the Octave at +1 and a little FM together - most hard leads use both.",
             ),
         ],
     },
@@ -2787,6 +2867,8 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("komal", "lowered, in Indian music: re, ga, dha and ni are the komal notes"),
     ("aroha", "a raag's way up; avaroha is its way down"),
     ("oscillator", "the part of a synth that makes the raw tone"),
+    ("sync", "oscillator 2 restarts whenever oscillator 1 does, for a hard, tearing tone"),
+    ("fm", "one oscillator bending another's pitch very fast, which makes new, metallic overtones"),
     ("wave", "the shape of a tone: sine is pure, saw is buzzy"),
     ("harmonic", "the quieter, higher tones inside every note: more of them sounds brighter"),
     ("filter", "takes some of a sound's brightness away"),

@@ -33,6 +33,7 @@ pub const CARVE_MIX: &str = "carve-mix";
 pub const CARVE_FILTER: &str = "carve-filter";
 pub const CARVE_ENVELOPES: &str = "carve-envelopes";
 pub const CARVE_MOVEMENT: &str = "carve-movement";
+pub const CARVE_SYNC_FM: &str = "carve-sync-fm";
 pub const RECIPE_BASS: &str = "recipe-bass";
 pub const RECIPE_FLUTE: &str = "recipe-flute";
 pub const RECIPE_HARP: &str = "recipe-harp";
@@ -186,6 +187,9 @@ fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
     match lesson {
         // Long notes: waves and detuning are easiest to hear held.
         CARVE_WAVES => ("Held note", steps(&[(0, 57, 14)]), 1),
+        // A low note then a high one, held: sync and FM change the tone
+        // while it rings, and key tracking is about the gap between them.
+        CARVE_SYNC_FM => ("Low and high", steps(&[(0, 45, 7), (8, 69, 7)]), 1),
         CARVE_MIX => ("Held note", steps(&[(0, 45, 14)]), 1),
         // Repeated eighths: filter and envelope changes show on every hit.
         CARVE_FILTER | CARVE_ENVELOPES => (
