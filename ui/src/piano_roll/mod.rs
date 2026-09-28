@@ -153,6 +153,43 @@ pub fn piano_roll_view(
                     }
                 });
 
+            // The clip's whole length, typed: dragging a clip's edge out to
+            // bar 128 took a while. Longer repeats the pattern; shorter
+            // trims.
+            let clip_bars = Memo::new(move |_| {
+                let arr = arrangement.get();
+                open_clip
+                    .get()
+                    .and_then(|id| arr.clip(id))
+                    .map(|c| ((c.length as f64 / (PPQ * 4) as f64).ceil().max(1.0) as i64).to_string())
+                    .unwrap_or_default()
+            });
+            Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
+            Label::new(cx, "Length").class("label");
+            // Editable: a Textbox needs a signal it can write, kept in step
+            // with the clip (a computed value made it read-only).
+            let length_draft = Signal::new(clip_bars.get());
+            Textbox::new(cx, length_draft)
+                .bind(clip_bars, move |_| length_draft.set(clip_bars.get()))
+                .on_edit(move |_, text| length_draft.set(text))
+                .on_submit(move |cx, text, _| {
+                    let Some(clip) = open_clip.get() else { return };
+                    if let Ok(bars) = text.trim().parse::<i64>() {
+                        cx.emit(TimelineEvent::SetClipBars { clip, bars: bars.clamp(1, 999) });
+                    }
+                })
+                .class("search")
+                .class("value")
+                .tooltip(|cx| {
+                    Tooltip::new(cx, |cx| {
+                        Label::new(cx, "The clip's length in bars: type one and press Enter. Its pattern repeats to fill it.");
+                    })
+                    .arrow(false)
+                })
+                .width(Pixels(44.0))
+                .height(Pixels(20.0));
+            Label::new(cx, "bars").class("value");
+
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
 
             // Note naming and the key only mean something for pitched

@@ -400,6 +400,9 @@ pub enum TimelineEvent {
     /// The piano roll's pattern control: makes a MIDI clip loop a pattern
     /// `bars` long (at least 1), growing the clip if it's shorter.
     SetPatternBars { clip: ClipId, bars: i64 },
+    /// A MIDI clip to exactly `bars` bars long (typed in the clip editor):
+    /// longer repeats its pattern, shorter trims it.
+    SetClipBars { clip: ClipId, bars: i64 },
     SplitAtPlayhead,
     DeleteSelected,
     DuplicateSelected,
@@ -700,6 +703,19 @@ impl Model for TimelineState {
                 match looped {
                     Some(looped) => self.do_command(Command::ReplaceClip { clip: Box::new(looped) }),
                     None => self.do_command(Command::TrimClip { clip: *clip, start, length }),
+                }
+            }
+            TimelineEvent::SetClipBars { clip, bars } => {
+                let arr = self.arrangement.get();
+                let Some(old) = arr.clip(*clip) else { return };
+                let bar = arr.tempo_map.time_signature_at(old.start).ticks_per_bar();
+                let length = (*bars).max(1) * bar;
+                if length == old.length {
+                    return;
+                }
+                match old.extended_as_loop(length) {
+                    Some(longer) => self.do_command(Command::ReplaceClip { clip: Box::new(longer) }),
+                    None => self.do_command(Command::TrimClip { clip: *clip, start: old.start, length }),
                 }
             }
             TimelineEvent::SetPatternBars { clip, bars } => {
