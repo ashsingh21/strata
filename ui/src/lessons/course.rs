@@ -12,7 +12,7 @@ use shared::lessons::{
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
     THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
-    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS,
+    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, MELODY_STEPS, MELODY_CALL, MELODY_MOTIF,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -57,6 +57,7 @@ pub const SOUND_MATCH: &str = "Sound match";
 pub const THEORY: &str = "Theory";
 pub const MIXING: &str = "Mixing";
 pub const ROLL: &str = "Piano roll";
+pub const MELODY: &str = "Melody";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -791,6 +792,174 @@ pub const LESSONS: &[Lesson] = &[
                 "A raag is more than its notes: it has phrases it returns to (its pakad), notes it dwells on, a way up \
                  (aroha) and down (avaroha), and a time of day - Bhairav belongs to dawn. Hear it at work in the Bhairav \
                  rave demo and the Reed recipe.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_STEPS,
+        group: MELODY,
+        title: "Steps and leaps",
+        steps: &[
+            act(
+                "Press Space: C, G, A minor and F, one chord a bar. Keep it looping while you write.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Bar 1, only steps: four notes, one on each beat, each the next note of the scale up or down. Try E, D, C, D.",
+                "Smooth and easy to sing - but it doesn't stick. A melody made only of steps drifts by.",
+                "A step is the next row up or down. E4, D4, C4, D4 on beats 1 to 4.",
+                |s| {
+                    let bar = melody_bar(s, 0);
+                    bar.len() >= 4 && bar.windows(2).all(|w| (1..=2).contains(&w[0].pitch.abs_diff(w[1].pitch)))
+                },
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Bar 2: open with a leap - up a 4th or more, to a note of the G chord (G, B or D) - then step back down.",
+                "The leap is the moment you remember. Stepping back the other way fills the gap it opened, so the line still feels natural.",
+                "From D4, G4 is a leap of a 4th. Then F4 on the next beat is a step down.",
+                |s| {
+                    let (a, b) = (melody_bar(s, 0), melody_bar(s, 1));
+                    let (Some(last), [first, next, ..]) = (a.last(), b.as_slice()) else { return false };
+                    first.pitch >= last.pitch + 5
+                        && [7, 11, 2].contains(&(first.pitch % 12))
+                        && next.pitch < first.pitch
+                        && first.pitch - next.pitch <= 2
+                },
+                |s| melody_row(s, 67),
+            ),
+            info(
+                "Most good melodies are mostly steps - roughly half to two thirds - with a few leaps saved for the moments \
+                 that matter. After a leap, step back the other way. Hum any chorus you like and listen for it.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_CALL,
+        group: MELODY,
+        title: "Call and response",
+        steps: &[
+            act(
+                "Press Space: the chords again. A melody can talk to itself - a question, then an answer.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            quiz(
+                "Play it: does this phrase sound finished?",
+                "Unfinished. It stops on G, the 5th: it hangs there, waiting for something to answer it.",
+                &[(0, 60, 3), (4, 62, 3), (8, 64, 3), (12, 67, 8)],
+                &["Unfinished, like a question", "Finished"],
+                0,
+            ),
+            quiz(
+                "And this one?",
+                "Finished. It comes to rest on C, home: nothing more needs to happen.",
+                &[(0, 64, 3), (4, 62, 3), (8, 62, 3), (12, 60, 8)],
+                &["Unfinished, like a question", "Finished"],
+                1,
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "The call: in bar 1, a short phrase on beats 1 to 3 that ends on D or G. Leave beat 4 empty.",
+                "Ending on the 2nd or 5th leaves it hanging - a question. The empty beat is the pause where the answer can come in.",
+                "Try C4, E4, G4 on beats 1, 2 and 3. Nothing on 1.4.",
+                |s| {
+                    let bar = melody_bar(s, 0);
+                    bar.len() >= 2
+                        && bar.last().is_some_and(|n| [2, 7].contains(&(n.pitch % 12)))
+                        && !bar.iter().any(|n| n.start >= 3 * PPQ)
+                },
+                |s| melody_row(s, 67),
+            ),
+            recipe(
+                "The answer: in bar 2, the same rhythm as the call, ending on C or E.",
+                "Same rhythm tells the ear it's a reply; landing on home closes it. Question, pause, answer.",
+                "Put notes on the same beats as bar 1 (1, 2 and 3), and make the last one C or E.",
+                |s| {
+                    let (a, b) = (melody_bar(s, 0), melody_bar(s, 1));
+                    !b.is_empty()
+                        && rhythm(&a, 0) == rhythm(&b, 1)
+                        && b.last().is_some_and(|n| [0, 4].contains(&(n.pitch % 12)))
+                },
+                |s| melody_row(s, 60),
+            ),
+            info(
+                "Leave space, keep the call and the answer about the same length, and end the call away from home and \
+                 the answer on it. Guitarists build whole solos this way - so do vocal hooks. Try answering an octave \
+                 higher, or on a different sound.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_MOTIF,
+        group: MELODY,
+        title: "Motifs: repeat and vary",
+        steps: &[
+            act(
+                "Press Space: the chords again. This time you'll build a whole melody out of one small idea.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "The motif: in bar 1, three or four notes - a small idea. Try C, D, E on beats 1, 2 and 3.",
+                "A motif is a musical word: short enough to remember, with a shape you'll recognise when it comes back.",
+                "Three or four notes, all in bar 1.",
+                |s| (3..=4).contains(&melody_bar(s, 0).len()),
+                |s| melody_row(s, 60),
+            ),
+            recipe(
+                "Bar 2: the same rhythm and shape, starting one scale step higher (D, E, F for C, D, E).",
+                "A sequence: the same idea moved up the scale. The ear recognises it and hears the line going somewhere.",
+                "Same beats as bar 1, every note one row up.",
+                |s| sequenced(s, 0, 1),
+                |s| melody_row(s, 62),
+            ),
+            recipe(
+                "Bar 3: once more, a step higher again.",
+                "Three times up builds tension - the listener expects it to keep going.",
+                "Same beats again, one more row up (E, F, G).",
+                |s| sequenced(s, 1, 2),
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Bar 4: start it like bar 1, but change the ending so it lands on C.",
+                "Three times the same, then a twist that comes home. Most hooks are built exactly like this.",
+                "Begin with bar 1's first two notes, then end on a C - try C, D, C.",
+                |s| {
+                    let (a, d) = (melody_bar(s, 0), melody_bar(s, 3));
+                    a.len() >= 2
+                        && d.len() >= 2
+                        && d[0].pitch == a[0].pitch
+                        && d[1].pitch == a[1].pitch
+                        && d.last().is_some_and(|n| n.pitch % 12 == 0)
+                        && d.iter().map(|n| n.pitch).collect::<Vec<_>>() != a.iter().map(|n| n.pitch).collect::<Vec<_>>()
+                },
+                |s| melody_row(s, 60),
+            ),
+            info(
+                "One idea, repeated, moved and changed: that's a melody that hangs together. When you're stuck, don't \
+                 look for new notes - take the idea you have and move it, flip it or change its ending.",
             ),
         ],
     },
@@ -2895,7 +3064,8 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
     FIRST_BEAT, BASSLINE, CHORDS, ROLL_DYNAMICS, ROLL_LENGTH, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
-    THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
+    THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, MELODY_STEPS, MELODY_CALL,
+    MELODY_MOTIF, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
     ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
     LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE,
@@ -2937,6 +3107,9 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("diminished", "a tense chord built from two minor thirds"),
     ("progression", "a series of chords, usually looping"),
     ("velocity", "how hard a note is played: the height of its stem under the grid"),
+    ("motif", "a short musical idea that a melody repeats and changes"),
+    ("sequence", "the same idea played again, starting on a different note"),
+    ("phrase", "a short musical sentence, with a start and an end"),
     ("groove", "the feel of a rhythm: which hits lean in and which sit back"),
     ("snap", "the grid clicks land on - it also sets how long a new note is"),
     ("mix", "balancing the parts of a song so each one can be heard"),
@@ -3435,6 +3608,42 @@ fn melody_target(s: &Snapshot) -> Option<Target> {
     if track_open(s, "Melody") { None } else { track_named(s, "Melody").map(|t| Target::Lane(t.id)) }
 }
 
+/// The Melody clip's notes in bar `bar` (0-based), in order.
+fn melody_bar(s: &Snapshot, bar: i64) -> Vec<shared::arrangement::MidiNote> {
+    let Some(ClipContent::Midi { notes, .. }) = named_clip(s, "Melody").map(|c| &c.content) else { return Vec::new() };
+    let mut notes: Vec<_> = notes.iter().filter(|n| n.start / BAR == bar).copied().collect();
+    notes.sort_by_key(|n| (n.start, n.pitch));
+    notes
+}
+
+/// Where in its bar each note starts - a bar's rhythm.
+fn rhythm(notes: &[shared::arrangement::MidiNote], bar: i64) -> Vec<Ticks> {
+    notes.iter().map(|n| n.start - bar * BAR).collect()
+}
+
+/// A note's step in C major (C4 = 28), or `None` off the scale.
+fn c_major_step(pitch: u8) -> Option<i32> {
+    let index = [0, 2, 4, 5, 7, 9, 11].iter().position(|&d| d == pitch % 12)?;
+    Some((pitch / 12) as i32 * 7 + index as i32)
+}
+
+/// Bar `to` is bar `from`, same rhythm, every note one scale step higher.
+fn sequenced(s: &Snapshot, from: i64, to: i64) -> bool {
+    let (a, b) = (melody_bar(s, from), melody_bar(s, to));
+    !a.is_empty()
+        && a.len() == b.len()
+        && rhythm(&a, from) == rhythm(&b, to)
+        && a.iter().zip(&b).all(|(x, y)| match (c_major_step(x.pitch), c_major_step(y.pitch)) {
+            (Some(x), Some(y)) => y == x + 1,
+            _ => false,
+        })
+}
+
+/// `pitch`'s row once the Melody clip is open, else its lane.
+fn melody_row(s: &Snapshot, pitch: u8) -> Option<Target> {
+    if track_open(s, "Melody") { Some(Target::PianoRollRow(pitch)) } else { track_named(s, "Melody").map(|t| Target::Lane(t.id)) }
+}
+
 fn drums_open(s: &Snapshot) -> bool {
     track_open(s, "Drums")
 }
@@ -3691,6 +3900,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The melody checks turn down the near-misses a learner would make.
+    #[test]
+    fn melody_checks_reject_near_misses() {
+        use crate::lessons::show::add_notes_on_track as add;
+        let check = |id: &str, action: usize, s: &Snapshot| {
+            let Kind::Action { check, .. } = lesson(id).steps.iter().filter(|st| matches!(st.kind, Kind::Action { .. })).nth(action).unwrap().kind
+            else {
+                unreachable!()
+            };
+            check(s)
+        };
+        // Steps: a bar with a skip (C to E is a 3rd) isn't all steps.
+        let mut s = start(MELODY_STEPS);
+        for (beat, p) in [60, 64, 62, 60].into_iter().enumerate() {
+            add(&mut s, "Melody", p, beat as i64 * PPQ);
+        }
+        assert!(!check(MELODY_STEPS, 2, &s));
+        // A leap to a note outside the G chord (A) doesn't count.
+        let mut s = start(MELODY_STEPS);
+        for (beat, p) in [64, 62, 60, 62].into_iter().enumerate() {
+            add(&mut s, "Melody", p, beat as i64 * PPQ);
+        }
+        add(&mut s, "Melody", 69, BAR);
+        add(&mut s, "Melody", 67, BAR + PPQ);
+        assert!(!check(MELODY_STEPS, 3, &s));
+        // Call: ending on C is an answer, not a question; filling beat 4 leaves no gap.
+        let mut s = start(MELODY_CALL);
+        add(&mut s, "Melody", 64, 0);
+        add(&mut s, "Melody", 60, PPQ);
+        assert!(!check(MELODY_CALL, 2, &s));
+        let mut s = start(MELODY_CALL);
+        for (beat, p) in [60, 64, 65, 67].into_iter().enumerate() {
+            add(&mut s, "Melody", p, beat as i64 * PPQ);
+        }
+        assert!(!check(MELODY_CALL, 2, &s));
+        // Answer: home note but a different rhythm isn't a reply.
+        let mut s = start(MELODY_CALL);
+        for (beat, p) in [60, 64, 67].into_iter().enumerate() {
+            add(&mut s, "Melody", p, beat as i64 * PPQ);
+        }
+        add(&mut s, "Melody", 62, BAR);
+        add(&mut s, "Melody", 60, BAR + 2 * PPQ);
+        assert!(!check(MELODY_CALL, 3, &s));
+        // Motif: moved up a 3rd (two steps) isn't the one-step sequence.
+        let mut s = start(MELODY_MOTIF);
+        for (beat, p) in [60, 62, 64].into_iter().enumerate() {
+            add(&mut s, "Melody", p, beat as i64 * PPQ);
+            add(&mut s, "Melody", p + 4, BAR + beat as i64 * PPQ);
+        }
+        assert!(!check(MELODY_MOTIF, 3, &s));
     }
 
     #[test]

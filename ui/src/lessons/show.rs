@@ -732,6 +732,51 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 move_note(s, 5 * PPQ, 69, 68);
             }),
         ],
+        MELODY_STEPS => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+            b(|s| {
+                for (beat, p) in [64, 62, 60, 62].into_iter().enumerate() {
+                    add_notes_on(s, "Melody", p, &[beat as i64 * PPQ]);
+                }
+            }),
+            b(|s| {
+                add_notes_on(s, "Melody", 67, &[BAR]);
+                add_notes_on(s, "Melody", 65, &[BAR + PPQ]);
+                add_notes_on(s, "Melody", 64, &[BAR + 2 * PPQ]);
+            }),
+        ],
+        MELODY_CALL => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+            b(|s| {
+                for (beat, p) in [60, 64, 67].into_iter().enumerate() {
+                    add_notes_on(s, "Melody", p, &[beat as i64 * PPQ]);
+                }
+            }),
+            b(|s| {
+                for (beat, p) in [64, 62, 60].into_iter().enumerate() {
+                    add_notes_on(s, "Melody", p, &[BAR + beat as i64 * PPQ]);
+                }
+            }),
+        ],
+        MELODY_MOTIF => {
+            let bar = |pitches: [u8; 3], at: i64| {
+                move |s: &mut Snapshot| {
+                    for (beat, p) in pitches.into_iter().enumerate() {
+                        add_notes_on(s, "Melody", p, &[at * BAR + beat as i64 * PPQ]);
+                    }
+                }
+            };
+            vec![
+                b(play),
+                b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+                b(bar([60, 62, 64], 0)),
+                b(bar([62, 64, 65], 1)),
+                b(bar([64, 65, 67], 2)),
+                b(bar([60, 62, 60], 3)),
+            ]
+        }
         ROLL_DYNAMICS => {
             let soften = |at: &'static [i64], velocity: u8| {
                 move |s: &mut Snapshot| {
@@ -848,6 +893,12 @@ fn set_velocity(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks, velocity:
 fn add_note_on(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks, length: Ticks) {
     let clip = clip_on_track(s, name);
     Command::AddMidiNote { clip, note: MidiNote { start, length, pitch, velocity: 100 } }.apply(&mut s.arrangement);
+}
+
+/// One 16th-long click on `name`'s clip at `start` (for tests).
+#[cfg(test)]
+pub(super) fn add_notes_on_track(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks) {
+    add_notes_on(s, name, pitch, &[start]);
 }
 
 /// Clicks on `name`'s clip, one note per start.

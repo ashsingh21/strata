@@ -67,6 +67,11 @@ pub const MATCH_MYSTERY: &str = "match-mystery";
 pub const MATCH_NOTE: u8 = 57;
 /// How long it's held, in 16ths.
 pub const MATCH_NOTE_16THS: i64 = 12;
+/// "Melody": shaping a line - steps and leaps, call and response, motifs.
+/// All three write on a Melody track over the I-V-vi-IV chords, in C major.
+pub const MELODY_STEPS: &str = "melody-steps";
+pub const MELODY_CALL: &str = "melody-call";
+pub const MELODY_MOTIF: &str = "melody-motif";
 /// "Piano roll": the notes you write, played with feeling.
 pub const ROLL_DYNAMICS: &str = "roll-dynamics";
 pub const ROLL_LENGTH: &str = "roll-length";
@@ -413,6 +418,10 @@ pub fn starting_project(lesson: &str) -> Project {
     if lesson.starts_with("roll-") {
         return roll_lesson(lesson);
     }
+    // The melody lessons start where "Melody over chords" does.
+    if lesson.starts_with("melody-") {
+        return theory_lesson(THEORY_MELODY);
+    }
     let mut arr = empty_arrangement();
     let mut instruments = Vec::new();
     if lesson == BASSLINE || lesson == CHORDS {
@@ -459,7 +468,7 @@ pub fn lesson_key(lesson: &str) -> Option<(u8, &'static str)> {
         RECIPE_TANPURA => return None,
         // Every semitone a row: this lesson counts them.
         THEORY_SCALES => (0, "Chromatic"),
-        _ if lesson.starts_with("theory-") => (0, "Major"),
+        _ if lesson.starts_with("theory-") || lesson.starts_with("melody-") => (0, "Major"),
         _ => (9, "Minor pentatonic"),
     })
 }

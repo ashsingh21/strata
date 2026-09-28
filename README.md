@@ -1,7 +1,7 @@
 # Shor
 
 A small DAW written in Rust, built to teach people how to make music. It has a
-subtractive synth, a drum kit, audio recording, and 53 hands-on lessons that
+subtractive synth, a drum kit, audio recording, and 56 hands-on lessons that
 run inside the app.
 
 ![Shor, Studio theme: the House demo with Carve open](docs/screenshots/house-studio.png)
@@ -26,6 +26,7 @@ run inside the app.
   - Theory: octaves, scales, keys, major and minor, intervals by ear, triads,
     progressions, melody over chords, 7th chords, raag basics (with sargam
     note names).
+  - Melody: steps and leaps, call and response, motifs.
   - Carve from waves to sound recipes (flute, tanpura, lo-fi keys...).
   - Mixing: levels, EQ, compression, and finishing a mix.
   - How house and raag-based tracks are arranged.
