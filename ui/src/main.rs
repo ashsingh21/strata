@@ -78,7 +78,7 @@ fn main() -> Result<(), ApplicationError> {
     let engine_handle = match engine_handle {
         Ok(handle) => handle,
         Err(e) => {
-            let message = format!("Strata couldn't start audio: {}.\n\nCheck that an output device is connected and not held exclusively by another program.", e.to_string().trim_end_matches('.'));
+            let message = format!("Shor couldn't start audio: {}.\n\nCheck that an output device is connected and not held exclusively by another program.", e.to_string().trim_end_matches('.'));
             eprintln!("{message}");
             dialogs::error(&message);
             std::process::exit(1);
@@ -236,7 +236,7 @@ fn main() -> Result<(), ApplicationError> {
             let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
             if edited { "Edited".to_string() } else { "Saved".to_string() }
         });
-        // "Project - Strata", with a leading "*" while there are unsaved
+        // "Project - Shor", with a leading "*" while there are unsaved
         // changes - the same edited-state the header shows, surfaced in the
         // taskbar/alt-tab too. The builder's static `.title()` is set
         // outside this closure, so the render timer pushes it as a window
@@ -244,7 +244,7 @@ fn main() -> Result<(), ApplicationError> {
         // the window exists, leaving the startup title stale).
         let window_title = Memo::new(move |_| {
             let dirty = if save_status.get() == "Edited" { "*" } else { "" };
-            format!("{dirty}{} \u{2014} Strata", project_name.get())
+            format!("{dirty}{} \u{2014} Shor", project_name.get())
         });
 
         let status_model = status::StatusModel::new();
@@ -646,7 +646,7 @@ fn main() -> Result<(), ApplicationError> {
         .height(Stretch(1.0))
         .width(Stretch(1.0));
     })
-    .title("Strata")
+    .title("Shor")
     .inner_size((1440, 900))
     // The header row is one fixed-content strip (no wrapping); below ~1400px
     // its right end (CPU/Out meters, input device) was cut off, and below

@@ -124,7 +124,7 @@ mod linux {
     pub fn error(message: &str) {
         let _ = std::process::Command::new("zenity")
             .arg("--error")
-            .arg("--title=Strata")
+            .arg("--title=Shor")
             .arg(format!("--text={message}"))
             .status();
     }
@@ -139,7 +139,7 @@ mod native {
     use crate::project::DiscardChoice;
 
     pub fn pick_project(dir: &Path) -> Option<PathBuf> {
-        FileDialog::new().set_title("Open Project").set_directory(dir).add_filter("Strata project", &["json"]).pick_file()
+        FileDialog::new().set_title("Open Project").set_directory(dir).add_filter("Shor project", &["json"]).pick_file()
     }
 
     /// "Save changes to X?" - Save / Don't Save / Cancel; closing the
@@ -165,7 +165,7 @@ mod native {
             .set_title("Save Project As")
             .set_directory(dir)
             .set_file_name(format!("{suggested_name}.json"))
-            .add_filter("Strata project", &["json"])
+            .add_filter("Shor project", &["json"])
             .save_file()?;
         Some(if path.extension().is_some_and(|e| e == "json") { path } else { path.with_extension("json") })
     }
@@ -182,6 +182,6 @@ mod native {
 
     /// A fatal error, before the window exists.
     pub fn error(message: &str) {
-        MessageDialog::new().set_level(MessageLevel::Error).set_title("Strata").set_description(message).set_buttons(MessageButtons::Ok).show();
+        MessageDialog::new().set_level(MessageLevel::Error).set_title("Shor").set_description(message).set_buttons(MessageButtons::Ok).show();
     }
 }

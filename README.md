@@ -1,11 +1,11 @@
-# Strata
+# Shor
 
 A small DAW written in Rust, built to teach people how to make music. It has a
 subtractive synth, a drum kit, audio recording, and 46 hands-on lessons that
 run inside the app.
 
-![Strata, Studio theme: the House demo with Carve open](docs/screenshots/house-studio.png)
-![Strata, Daylight theme](docs/screenshots/house-daylight.png)
+![Shor, Studio theme: the House demo with Carve open](docs/screenshots/house-studio.png)
+![Shor, Daylight theme](docs/screenshots/house-daylight.png)
 
 ## What's in it
 
