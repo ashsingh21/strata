@@ -164,6 +164,8 @@ pub enum ContextMenuTarget {
     Param { track: TrackId, target: AutomationTarget, current: Option<f32> },
     /// An automation lane's header: offers "Remove automation lane".
     AutomationLane { lane: AutomationLaneId },
+    /// A track's Automate button: every knob it can automate.
+    Automate { track: TrackId },
 }
 
 /// A right-click context menu: what it's for, and where to draw it

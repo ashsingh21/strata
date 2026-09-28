@@ -123,6 +123,7 @@ fn knob(
             let on_change = move |cx: &mut EventContext, p: f32| {
                 cx.emit(update(move |s| apply(s, p)));
                 cx.emit(StatusEvent::Touched { name: format!("Carve \u{b7} {label}"), value: text });
+                cx.emit(SynthEvent::Touched(param));
             };
             match route {
                 Some(target) => {
@@ -145,6 +146,10 @@ fn knob(
         Label::new(cx, text).class("value");
     })
     .class("knob-col")
+    .tooltip(|cx| Tooltip::new(cx, |cx| {
+        Label::new(cx, "Right-click to automate");
+    })
+    .arrow(false))
     .lesson_target(crate::lessons::Target::Knob(param))
     .toggle_class("is-automated", automated)
     // Right-click: "Automate Carve · <param>" on the selected track.

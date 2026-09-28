@@ -624,7 +624,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
             sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status);
 
-            context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu);
+            context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, synth_state);
             // A dragged browser result's name, following the pointer.
             browser::view::DragGhost::new(cx, browser_props);
             // The key menu's one dropdown, over everything (see key_menu).

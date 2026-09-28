@@ -2498,10 +2498,10 @@ pub const LESSONS: &[Lesson] = &[
         title: "House track 5: movement and mix",
         steps: &[
             act(
-                "The Chords track is selected, so its Carve is below. Automate its filter: right-click the Cutoff knob and choose Automate.",
-                "A lane appears under the Chords track. (If Carve isn't showing, click the Chords track's name first.)",
+                "Automate the chords' filter: click the A on the Chords track's header and pick Carve \u{b7} Cutoff.",
+                "A lane appears under the Chords track. (Right-clicking Carve's Cutoff knob does the same.)",
                 |s| chords_cutoff_lane(s).is_some(),
-                |_| Some(Target::Knob(SynthParam::Cutoff)),
+                |s| track_named(s, "Chords").map(|t| Target::AutomateButton(t.id)),
             ),
             act(
                 "Build the breakdown: in the new lane, click a point low at bar 17 and another high at bar 25 - the filter opens as the drop approaches.",
@@ -2911,14 +2911,10 @@ pub const LESSONS: &[Lesson] = &[
                 |s| track_named(s, "Bass").map(|t| Target::Lane(t.id)),
             ),
             act(
-                "Let the keys open up as the beat arrives. Click the Keys track's name, then right-click Carve's Cutoff knob and choose Automate.",
-                "A lane appears under the Keys track.",
+                "Let the keys open up as the beat arrives: click the A on the Keys track's header and pick Carve \u{b7} Cutoff.",
+                "A lane appears under the Keys track. (Right-clicking Carve's Cutoff knob does the same.)",
                 |s| cutoff_lane(s, "Keys").is_some(),
-                |s| match track_named(s, "Keys") {
-                    Some(t) if s.selected_track == Some(t.id) => Some(Target::Knob(SynthParam::Cutoff)),
-                    Some(t) => Some(Target::Lane(t.id)),
-                    None => None,
-                },
+                |s| track_named(s, "Keys").map(|t| Target::AutomateButton(t.id)),
             ),
             act(
                 "In the new lane, a point low at bar 1 and another high at bar 5 - like the music coming in from another room.",

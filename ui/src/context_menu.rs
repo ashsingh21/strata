@@ -10,11 +10,13 @@
 //! selects it (unless it's already part of a bigger selection), so those
 //! events already do the right thing.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 
 use vizia::prelude::*;
 
-use shared::arrangement::{Arrangement, AutomationTarget, ClipContent, Instrument, TrackKind};
+use shared::arrangement::{Arrangement, AutomationTarget, ClipContent, EffectParam, Instrument, TrackId, TrackKind};
+use shared::synth::{SynthParam, SynthState};
 
 use crate::piano_roll::state::PianoRollEvent;
 use crate::synth::state::SynthEvent;
@@ -64,7 +66,31 @@ fn separator(cx: &mut Context) {
 thread_local! {
     /// The menu's dropdown, for `open` and `close`.
     static HOST: Cell<Option<Entity>> = const { Cell::new(None) };
+    /// The knob each track last had turned: its Automate menu offers it
+    /// first, so "turn the knob, press A" works.
+    static LAST_TOUCHED: RefCell<HashMap<TrackId, AutomationTarget>> = RefCell::new(HashMap::new());
 }
+
+/// Remembers `target` as the last knob turned on `track`.
+pub fn touched(track: TrackId, target: AutomationTarget) {
+    LAST_TOUCHED.with(|m| m.borrow_mut().insert(track, target));
+}
+
+/// The Carve knobs the Automate menu lists - the ones worth moving over a
+/// song. Any other knob: turn it, and it's offered first; or right-click it.
+const CARVE_AUTOMATABLE: [SynthParam; 8] = [
+    SynthParam::Cutoff,
+    SynthParam::Resonance,
+    SynthParam::Drive,
+    SynthParam::EnvAmount,
+    SynthParam::ReverbMix,
+    SynthParam::ChorusMix,
+    SynthParam::Lfo1Depth,
+    SynthParam::Volume,
+];
+
+/// One column of the Automate menu (the menu's usual width, less padding).
+const COLUMN_W: f32 = 204.0;
 
 /// Opens the menu at the click `TimelineState` just recorded.
 pub fn open(cx: &mut EventContext) {
@@ -80,7 +106,7 @@ pub fn close(cx: &mut EventContext) {
 }
 
 /// Mounted once, at the window root, after everything it opens over.
-pub fn context_menu_view(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option<ContextMenu>>) {
+pub fn context_menu_view(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option<ContextMenu>>, synth: Signal<SynthState>) {
     let at = menu.map(|m| m.map(|m| (m.x, m.y)).unwrap_or((0.0, 0.0)));
     let host = crate::menu::menu(
         cx,
@@ -88,7 +114,7 @@ pub fn context_menu_view(cx: &mut Context, arrangement: Signal<Arrangement>, men
         |cx| {
             Element::new(cx).width(Stretch(1.0)).height(Stretch(1.0));
         },
-        move |cx| items(cx, arrangement, menu),
+        move |cx| items(cx, arrangement, menu, synth),
     )
     .position_type(PositionType::Absolute)
     .left(at.map(|a| Pixels(a.0)))
@@ -100,10 +126,14 @@ pub fn context_menu_view(cx: &mut Context, arrangement: Signal<Arrangement>, men
 }
 
 /// The rows for whatever was clicked, built as the menu opens.
-fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option<ContextMenu>>) {
+fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option<ContextMenu>>, synth: Signal<SynthState>) {
     {
         let Some(m) = menu.get() else { return };
         let arr = arrangement.get();
+        let two_columns = match m.target {
+            ContextMenuTarget::Automate { track } => arr.track(track).is_some_and(|t| !t.fx.ordered().is_empty()),
+            _ => false,
+        };
 
         VStack::new(cx, move |cx| match m.target {
             ContextMenuTarget::Clip(clip_id) => {
@@ -194,6 +224,7 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
             ContextMenuTarget::AutomationLane { lane } => {
                 item(cx, "Remove automation lane", move |cx| cx.emit(TimelineEvent::RemoveAutomationLane(lane)));
             }
+            ContextMenuTarget::Automate { track } => automate_items(cx, &arr, track, &synth.get()),
         })
         .class("panel")
         .class("context-menu")
@@ -204,7 +235,71 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
         // the panel's own border rather than running flush into it.
         .padding_left(Pixels(tokens::SPACE_1))
         .padding_right(Pixels(tokens::SPACE_1))
-        .width(Pixels(212.0))
+        // The Automate menu is two columns wide when the track has effects.
+        .width(Pixels(if two_columns { 2.0 * COLUMN_W + 10.0 } else { 212.0 }))
         .height(Auto);
     }
+}
+
+/// A track's Automate menu: the knob turned last, then gain, Carve's main
+/// knobs and every effect's. Picking one adds its lane (already automated
+/// ones are ticked and do nothing).
+fn automate_items(cx: &mut Context, arr: &Arrangement, track: TrackId, patch: &SynthState) {
+    let Some(t) = arr.track(track) else { return };
+    let carve = t.instrument == Some(Instrument::Carve);
+    // The patch on screen is the selected track's - pressing A selects it.
+    let current = move |target: AutomationTarget| match target {
+        AutomationTarget::Synth(param) => Some(param.norm(patch)),
+        _ => None,
+    };
+    // Gain and Carve on the left, the effects' knobs beside them - one
+    // tall list ran off the window, and rows inside a ScrollView never got
+    // their clicks.
+    let mut own = vec![AutomationTarget::TrackGain];
+    if carve {
+        own.extend(CARVE_AUTOMATABLE.map(AutomationTarget::Synth));
+    }
+    let mut effects = Vec::new();
+    for node in t.fx.ordered() {
+        effects.extend(EffectParam::for_effect(node.effect).iter().map(|&param| AutomationTarget::Effect { node: node.id, param }));
+    }
+    let last = LAST_TOUCHED.with(|m| m.borrow().get(&track).copied()).filter(|&l| arr.target_label(track, l).is_some());
+
+    // (label, target, value) per row.
+    let row = |target: AutomationTarget, prefix: &str| {
+        let name = arr.target_label(track, target)?;
+        let automated = arr.automation.iter().any(|l| l.track == track && l.target == Some(target));
+        let label = if automated { format!("\u{2713} {name}") } else { format!("{prefix}{name}") };
+        Some((label, target, current(target)))
+    };
+    let add = move |cx: &mut Context, (label, target, value): (String, AutomationTarget, Option<f32>)| {
+        item(cx, label, move |cx| cx.emit(TimelineEvent::AutomateParam { track, target, current: value }));
+    };
+
+    Label::new(cx, "Automate").class("label").padding_left(Pixels(tokens::SPACE_2));
+    if let Some(last) = last.and_then(|l| row(l, "Last turned: ")) {
+        add(cx, last);
+        separator(cx);
+    }
+    let own: Vec<_> = own.into_iter().filter_map(|t| row(t, "")).collect();
+    let effects: Vec<_> = effects.into_iter().filter_map(|t| row(t, "")).collect();
+    HStack::new(cx, move |cx| {
+        for column in [own.clone(), effects.clone()] {
+            if column.is_empty() {
+                continue;
+            }
+            VStack::new(cx, move |cx| {
+                for r in column.clone() {
+                    add(cx, r);
+                }
+            })
+            .gap(Pixels(2.0))
+            .width(Pixels(COLUMN_W))
+            .height(Auto);
+        }
+    })
+    .gap(Pixels(2.0))
+    .width(Auto)
+    .height(Auto);
+    Label::new(cx, "Or right-click any knob.").class("meta").padding_left(Pixels(tokens::SPACE_2));
 }

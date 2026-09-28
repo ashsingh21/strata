@@ -209,6 +209,9 @@ fn param_knob(
                 eq.bands[band].on = true;
             }
             cx.emit(TimelineEvent::SetEffectState(track, node, updated));
+            if let Some(track) = track {
+                crate::context_menu::touched(track, target);
+            }
         })
         .accent(accent)
         .pointer_events(automated.map(|a| if *a { PointerEvents::None } else { PointerEvents::Auto }))
@@ -218,6 +221,10 @@ fn param_knob(
     })
     .class("knob-col")
     .toggle_class("is-automated", automated)
+    .tooltip(|cx| Tooltip::new(cx, |cx| {
+        Label::new(cx, "Right-click to automate");
+    })
+    .arrow(false))
     .lesson_target(crate::lessons::Target::EffectKnob(param))
     // Right-click: "Automate <param>". Track effects only - master-bus
     // automation isn't supported (lanes belong to tracks).

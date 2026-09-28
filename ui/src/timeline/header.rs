@@ -286,6 +286,26 @@ pub fn track_header<'a>(
                 // reads as part of "what's on this track" alongside its
                 // name.
                 fx_pip_button(cx, arrangement, theme, Some(track_id), board_open_track);
+                // Automate: a lane for any of the track's knobs, the one
+                // turned last first. (Right-clicking a knob does it too,
+                // but nothing on screen says so.)
+                Button::new(cx, |cx| Label::new(cx, "A").class("meta"))
+                    .class("btn")
+                    .class("sm")
+                    .class("quiet")
+                    .tooltip(|cx| Tooltip::new(cx, |cx| {
+                        Label::new(cx, "Automate: make a knob move by itself as the song plays");
+                    })
+                    .arrow(false))
+                    .lesson_target(crate::lessons::Target::AutomateButton(track_id))
+                    // Opens on the press, like the right-click menus: opened
+                    // on the release (`on_press`), it often didn't open.
+                    .on_press_down(move |cx| {
+                        // Its patch is the one the menu reads values from.
+                        cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
+                        let (x, y) = (cx.lmouse().0, cx.lmouse().1);
+                        cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target: ContextMenuTarget::Automate { track: track_id }, x, y }));
+                    });
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
                 Label::new(cx, kind_label).class("meta");
@@ -356,6 +376,7 @@ pub fn track_header<'a>(
         .lesson_target(crate::lessons::Target::Fader(track_id))
         .on_release(move |cx, position| {
             gain_preview.set(None);
+            crate::context_menu::touched(track_id, shared::arrangement::AutomationTarget::TrackGain);
             cx.emit(TimelineEvent::SetTrackGain {
                 track: track_id,
                 gain_db: fader_pos_to_gain_db(position),

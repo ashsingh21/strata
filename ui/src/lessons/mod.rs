@@ -116,6 +116,8 @@ pub enum Target {
     FileMenu,
     /// A track's automation lanes (a canvas wash).
     Automation(TrackId),
+    /// A track header's Automate (A) button.
+    AutomateButton(TrackId),
 }
 
 thread_local! {

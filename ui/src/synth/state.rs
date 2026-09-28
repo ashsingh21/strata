@@ -32,6 +32,9 @@ pub enum SynthEvent {
     /// Right-click on a Carve knob: offer "Automate Carve · <param>" for the
     /// selected track (which is whose patch the panel shows).
     OpenAutomateMenu { param: shared::synth::SynthParam, x: f32, y: f32 },
+    /// A Carve knob was turned: remembered for the selected track's
+    /// Automate button.
+    Touched(shared::synth::SynthParam),
     SetFilterType(FilterType),
     SetLfo1Target(LfoTarget),
     SetLfo2Target(LfoTarget),
@@ -329,6 +332,11 @@ impl Model for SynthModel {
             SynthEvent::SetOsc1Waveform(w) => self.state.update(|s| s.osc1.waveform = *w),
             SynthEvent::SetOsc2Waveform(w) => self.state.update(|s| s.osc2.waveform = *w),
             SynthEvent::ToggleOsc2Sync => self.state.update(|s| s.osc2.sync = !s.osc2.sync),
+            SynthEvent::Touched(param) => {
+                if let Some(track) = self.selected_track.get() {
+                    crate::context_menu::touched(track, shared::arrangement::AutomationTarget::Synth(*param));
+                }
+            }
             SynthEvent::OpenAutomateMenu { param, x, y } => {
                 let track = self.selected_track.get().filter(|id| {
                     self.arrangement.get().track(*id).is_some_and(|t| t.instrument.is_some())
