@@ -348,7 +348,9 @@ const ROW_SLOT: f32 = tokens::SIZE_KNOB;
 
 fn osc1_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>) {
     section(cx, "Oscillator 1", move |cx| waveform_seg(cx, state, theme, true), move |cx| {
-        WaveDisplay::new(cx, state, theme, |s| s.osc1).width(Stretch(1.0)).height(Pixels(44.0)).class("synth-disp");
+        // Fills the space above the knobs, so every section's knob row
+        // ends on the same line (see ROW1_HEIGHT).
+        WaveDisplay::new(cx, state, theme, |s| s.osc1).width(Stretch(1.0)).height(Stretch(1.0)).min_height(Pixels(44.0)).class("synth-disp");
         knob_row(cx, move |cx| {
             knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Octave, octave_pos(-1), None);
             knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc1Tune, lin_inv(0.0, -100.0, 100.0), Some(LfoTarget::Pitch));
@@ -374,7 +376,7 @@ fn osc2_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId
             waveform_seg(cx, state, theme, false);
         },
         move |cx| {
-            WaveDisplay::new(cx, state, theme, |s| s.osc2).width(Stretch(1.0)).height(Pixels(44.0)).class("synth-disp");
+            WaveDisplay::new(cx, state, theme, |s| s.osc2).width(Stretch(1.0)).height(Stretch(1.0)).min_height(Pixels(44.0)).class("synth-disp");
             knob_row(cx, move |cx| {
                 knob(cx, state, theme, KnobSize::Sm, ROW_SLOT, SynthParam::Osc2Octave, octave_pos(0), None);
                 knob(cx, state, theme, KnobSize::Md, ROW_SLOT, SynthParam::Osc2Detune, lin_inv(0.0, -50.0, 50.0), None);
@@ -397,6 +399,9 @@ fn mix_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<ThemeId>
         })
         .gap(Pixels(tokens::SPACE_3))
         .size(Auto);
+        // The second pair sits at the bottom, on the same line as the
+        // oscillators' and filter's knobs.
+        Element::new(cx).width(Pixels(1.0)).height(Stretch(1.0));
         HStack::new(cx, move |cx| {
             db_knob(cx, SynthParam::SubLevel, -10.0);
             db_knob(cx, SynthParam::NoiseLevel, -28.0);
@@ -424,7 +429,7 @@ fn filter_section(cx: &mut Context, state: Memo<SynthState>, theme: Signal<Theme
             .lesson_target(crate::lessons::Target::FilterType);
         },
         move |cx| {
-            FilterDisplay::new(cx, state, theme).width(Stretch(1.0)).height(Pixels(88.0)).class("synth-disp");
+            FilterDisplay::new(cx, state, theme).width(Stretch(1.0)).height(Stretch(1.0)).min_height(Pixels(60.0)).class("synth-disp");
             let slot = tokens::SIZE_KNOB_LG;
             knob_row(cx, move |cx| {
                 knob(cx, state, theme, KnobSize::Lg, slot, SynthParam::Cutoff, log_inv(1200.0, 20.0, 20_000.0), Some(LfoTarget::Cutoff));
