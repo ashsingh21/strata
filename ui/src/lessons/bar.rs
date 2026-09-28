@@ -24,6 +24,7 @@ pub struct LessonBarProps {
     pub quiz_wrong: Signal<Option<usize>>,
     pub reviewing: Signal<Option<usize>>,
     pub completed: Signal<bool>,
+    pub explaining: Signal<Option<usize>>,
     pub theme: Signal<crate::tokens::ThemeId>,
 }
 
@@ -42,6 +43,7 @@ impl LessonBarProps {
             quiz_wrong: model.quiz_wrong,
             reviewing: model.reviewing,
             completed: model.completed,
+            explaining: model.explaining,
             theme,
         }
     }
@@ -63,6 +65,56 @@ fn title_and_dots(cx: &mut Context, lesson: usize, marked: usize, current: usize
     .height(Auto);
 }
 
+/// "More: Harmonics" for each idea a step mentions: the deeper story,
+/// opened under the bar.
+fn more_buttons(cx: &mut Context, p: LessonBarProps, text: String) {
+    let found = super::course::explainers_for(&text);
+    if found.is_empty() {
+        return;
+    }
+    HStack::new(cx, move |cx| {
+        for i in found {
+            let title = super::course::EXPLAINERS[i].1;
+            Button::new(cx, move |cx| Label::new(cx, format!("More: {title}")))
+                .class("btn")
+                .class("sm")
+                .class("quiet")
+                .toggle_class("is-on", p.explaining.map(move |e| *e == Some(i)))
+                .on_press(move |cx| cx.emit(LessonEvent::Explain(Some(i))));
+        }
+    })
+    .gap(Pixels(tokens::SPACE_1))
+    .alignment(Alignment::Left)
+    .size(Auto);
+}
+
+/// The open explainer, under the bar: what the idea is, in a paragraph.
+fn explainer_panel(cx: &mut Context, i: usize) {
+    let (_, title, text) = super::course::EXPLAINERS[i];
+    HStack::new(cx, move |cx| {
+        VStack::new(cx, move |cx| {
+            Label::new(cx, title).class("title");
+            Label::new(cx, text).class("body").width(Stretch(1.0)).text_wrap(true);
+        })
+        .gap(Pixels(4.0))
+        .width(Stretch(1.0))
+        .height(Auto);
+        Button::new(cx, |cx| Label::new(cx, "Close"))
+            .class("btn")
+            .class("quiet")
+            .on_press(|cx| cx.emit(LessonEvent::Explain(None)));
+    })
+    .class("lesson-bar")
+    .gap(Pixels(tokens::SPACE_3))
+    .padding_left(Pixels(tokens::SPACE_3))
+    .padding_right(Pixels(tokens::SPACE_3))
+    .padding_top(Pixels(8.0))
+    .padding_bottom(Pixels(8.0))
+    .alignment(Alignment::Left)
+    .width(Stretch(1.0))
+    .height(Auto);
+}
+
 fn nav_button<'a>(cx: &'a mut Context, glyph: &'static str, tip: &'static str) -> Handle<'a, Button> {
     Button::new(cx, move |cx| Label::new(cx, glyph))
         .class("btn")
@@ -79,7 +131,7 @@ fn nav_button<'a>(cx: &'a mut Context, glyph: &'static str, tip: &'static str) -
 /// An earlier step, to read again: what it asked, the words it brought in
 /// and why it sounds as it does - with ‹ › through the steps before the
 /// current one, and back to it.
-fn review_bar(cx: &mut Context, lesson: usize, viewing: usize, current: usize) {
+fn review_bar(cx: &mut Context, p: LessonBarProps, lesson: usize, viewing: usize, current: usize) {
     let l = &LESSONS[lesson];
     let s = &l.steps[viewing];
     HStack::new(cx, move |cx| {
@@ -96,6 +148,7 @@ fn review_bar(cx: &mut Context, lesson: usize, viewing: usize, current: usize) {
             if !s.why.is_empty() {
                 Label::new(cx, format!("Why: {}", s.why)).class("value").class("lesson-why").width(Stretch(1.0)).text_wrap(true);
             }
+            more_buttons(cx, p, format!("{} {}", s.text, s.why));
         })
         .gap(Pixels(2.0))
         .width(Stretch(1.0))
@@ -140,6 +193,7 @@ fn done_bar(cx: &mut Context, p: LessonBarProps, lesson: usize, done: usize) {
         VStack::new(cx, move |cx| {
             Label::new(cx, format!("\u{2713} Done: {}", s.text)).class("value").width(Stretch(1.0)).text_wrap(true);
             Label::new(cx, s.why).class("body").class("lesson-text").width(Stretch(1.0)).text_wrap(true);
+            more_buttons(cx, p, format!("{} {}", s.text, s.why));
         })
         .gap(Pixels(2.0))
         .width(Stretch(1.0))
@@ -180,153 +234,164 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
     let shown = Memo::new(move |_| (p.active.get(), p.reviewing.get(), p.completed.get()));
     Binding::new(cx, shown, move |cx| {
         let Some((lesson, step)) = p.active.get() else { return };
-        if let Some(viewing) = p.reviewing.get().filter(|v| *v < step) {
-            review_bar(cx, lesson, viewing, step);
-            return;
-        }
-        if p.completed.get() && step > 0 {
-            done_bar(cx, p, lesson, step - 1);
-            return;
-        }
-        let l = &LESSONS[lesson];
-        let s = &l.steps[step];
-        HStack::new(cx, move |cx| {
-            title_and_dots(cx, lesson, step, step);
-
-            Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(28.0));
-
-            // Reread the steps already done.
-            if step > 0 {
-                nav_button(cx, "\u{2039} Back", "Read the step before again").on_press(move |cx| cx.emit(LessonEvent::Review(Some(step - 1))));
+        // Whichever bar fits the moment (rereading, just done, the step).
+        let bar = move |cx: &mut Context| {
+            if let Some(viewing) = p.reviewing.get().filter(|v| *v < step) {
+                review_bar(cx, p, lesson, viewing, step);
+                return;
             }
+            if p.completed.get() && step > 0 {
+                done_bar(cx, p, lesson, step - 1);
+                return;
+            }
+            let l = &LESSONS[lesson];
+            let s = &l.steps[step];
+            HStack::new(cx, move |cx| {
+                title_and_dots(cx, lesson, step, step);
 
-            VStack::new(cx, move |cx| {
-                // Wrapped to the space between the title and the buttons.
-                Label::new(cx, s.text).class("body").class("lesson-text").width(Stretch(1.0)).text_wrap(true);
-                // New music words in this step, in plain language.
-                let words = super::course::new_words(l, step);
-                if !words.is_empty() {
-                    let line = words.iter().map(|(term, meaning)| format!("{term}: {meaning}")).collect::<Vec<_>>().join("   \u{b7}   ");
-                    Label::new(cx, line).class("value").class("lesson-words").width(Stretch(1.0)).text_wrap(true);
+                Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(28.0));
+
+                // Reread the steps already done.
+                if step > 0 {
+                    nav_button(cx, "\u{2039} Back", "Read the step before again").on_press(move |cx| cx.emit(LessonEvent::Review(Some(step - 1))));
                 }
-                // A quiz answered wrong: try again, by ear.
-                if let Kind::Quiz { options, .. } = s.kind {
-                    Label::new(
-                        cx,
-                        p.quiz_wrong.map(move |w| match w {
-                            Some(i) => format!("Not {} - play it again and listen.", options[*i].to_lowercase()),
-                            None => String::new(),
-                        }),
-                    )
-                    .class("value")
-                    .class("lesson-why")
-                    .toggle_class("hidden", p.quiz_wrong.map(|w| w.is_none()));
-                }
-                if !s.hint.is_empty() {
-                    Label::new(cx, s.hint)
+
+                VStack::new(cx, move |cx| {
+                    // Wrapped to the space between the title and the buttons.
+                    Label::new(cx, s.text).class("body").class("lesson-text").width(Stretch(1.0)).text_wrap(true);
+                    // New music words in this step, in plain language.
+                    let words = super::course::new_words(l, step);
+                    if !words.is_empty() {
+                        let line = words.iter().map(|(term, meaning)| format!("{term}: {meaning}")).collect::<Vec<_>>().join("   \u{b7}   ");
+                        Label::new(cx, line).class("value").class("lesson-words").width(Stretch(1.0)).text_wrap(true);
+                    }
+                    // A quiz answered wrong: try again, by ear.
+                    if let Kind::Quiz { options, .. } = s.kind {
+                        Label::new(
+                            cx,
+                            p.quiz_wrong.map(move |w| match w {
+                                Some(i) => format!("Not {} - play it again and listen.", options[*i].to_lowercase()),
+                                None => String::new(),
+                            }),
+                        )
                         .class("value")
-                        .width(Stretch(1.0))
-                        .text_wrap(true)
-                        .toggle_class("hidden", p.hint_visible.map(|v| !*v));
+                        .class("lesson-why")
+                        .toggle_class("hidden", p.quiz_wrong.map(|w| w.is_none()));
+                    }
+                    if !s.hint.is_empty() {
+                        Label::new(cx, s.hint)
+                            .class("value")
+                            .width(Stretch(1.0))
+                            .text_wrap(true)
+                            .toggle_class("hidden", p.hint_visible.map(|v| !*v));
+                    }
+                    more_buttons(cx, p, s.text.to_string());
+                })
+                .gap(Pixels(2.0))
+                .width(Stretch(1.0))
+                .height(Auto);
+
+                // Just watched "Show me" do the last step: undo it and have a go.
+                if step > 0 {
+                    Button::new(cx, |cx| Label::new(cx, "\u{21b6} Try it yourself"))
+                        .class("btn")
+                        .class("is-on")
+                        .toggle_class("hidden", p.shown_step.map(move |s| *s != Some(step - 1)))
+                        .on_press(|cx| cx.emit(LessonEvent::TryYourself));
                 }
-            })
-            .gap(Pixels(2.0))
-            .width(Stretch(1.0))
-            .height(Auto);
 
-            // Just watched "Show me" do the last step: undo it and have a go.
-            if step > 0 {
-                Button::new(cx, |cx| Label::new(cx, "\u{21b6} Try it yourself"))
-                    .class("btn")
-                    .class("is-on")
-                    .toggle_class("hidden", p.shown_step.map(move |s| *s != Some(step - 1)))
-                    .on_press(|cx| cx.emit(LessonEvent::TryYourself));
-            }
+                // Where this lesson is going, to have in your ears first (a
+                // Sound match has its own Target / Yours buttons instead).
+                // A quiz has its own Play.
+                let is_match = super::sound_match::target(l.id).is_some();
+                if !is_match && !matches!(s.kind, Kind::Quiz { .. }) {
+                    preview_button(cx, p, Which::Goal, "Hear the goal").toggle_class("hidden", p.has_goal.map(|g| !*g));
+                }
 
-            // Where this lesson is going, to have in your ears first (a
-            // Sound match has its own Target / Yours buttons instead).
-            // A quiz has its own Play.
-            let is_match = super::sound_match::target(l.id).is_some();
-            if !is_match && !matches!(s.kind, Kind::Quiz { .. }) {
-                preview_button(cx, p, Which::Goal, "Hear the goal").toggle_class("hidden", p.has_goal.map(|g| !*g));
-            }
-
-            let last = step + 1 == l.steps.len();
-            match s.kind {
-                Kind::Info if last && lesson + 1 < LESSONS.len() => {
-                    // Back a lesson, within the same group (Carve, Theory...).
-                    if lesson > 0 && LESSONS[lesson - 1].group == l.group {
-                        Button::new(cx, |cx| Label::new(cx, "Previous lesson"))
+                let last = step + 1 == l.steps.len();
+                match s.kind {
+                    Kind::Info if last && lesson + 1 < LESSONS.len() => {
+                        // Back a lesson, within the same group (Carve, Theory...).
+                        if lesson > 0 && LESSONS[lesson - 1].group == l.group {
+                            Button::new(cx, |cx| Label::new(cx, "Previous lesson"))
+                                .class("btn")
+                                .class("quiet")
+                                .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson - 1)));
+                        }
+                        Button::new(cx, |cx| Label::new(cx, "Next lesson"))
+                            .class("btn")
+                            .class("is-on")
+                            .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson + 1)));
+                        Button::new(cx, |cx| Label::new(cx, "Done")).class("btn").on_press(|cx| cx.emit(LessonEvent::Continue));
+                    }
+                    Kind::Info => {
+                        let label = if last { "Done" } else { "Continue" };
+                        Button::new(cx, move |cx| Label::new(cx, label))
+                            .class("btn")
+                            .class("is-on")
+                            .on_press(|cx| cx.emit(LessonEvent::Continue));
+                    }
+                    Kind::Quiz { options, .. } => {
+                        preview_button(cx, p, Which::Quiz, "Play").class("is-on");
+                        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(22.0));
+                        for (i, option) in options.iter().enumerate() {
+                            Button::new(cx, move |cx| Label::new(cx, *option))
+                                .class("btn")
+                                .toggle_class("quiet", p.quiz_wrong.map(move |w| *w == Some(i)))
+                                .on_press(move |cx| cx.emit(LessonEvent::Answer(i)));
+                        }
+                        Button::new(cx, |cx| Label::new(cx, "Skip"))
                             .class("btn")
                             .class("quiet")
-                            .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson - 1)));
+                            .on_press(|cx| cx.emit(LessonEvent::Skip));
                     }
-                    Button::new(cx, |cx| Label::new(cx, "Next lesson"))
-                        .class("btn")
-                        .class("is-on")
-                        .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson + 1)));
-                    Button::new(cx, |cx| Label::new(cx, "Done")).class("btn").on_press(|cx| cx.emit(LessonEvent::Continue));
-                }
-                Kind::Info => {
-                    let label = if last { "Done" } else { "Continue" };
-                    Button::new(cx, move |cx| Label::new(cx, label))
-                        .class("btn")
-                        .class("is-on")
-                        .on_press(|cx| cx.emit(LessonEvent::Continue));
-                }
-                Kind::Quiz { options, .. } => {
-                    preview_button(cx, p, Which::Quiz, "Play").class("is-on");
-                    Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(22.0));
-                    for (i, option) in options.iter().enumerate() {
-                        Button::new(cx, move |cx| Label::new(cx, *option))
+                    Kind::Action { .. } => {
+                        // Stuck? Watch it done - then Undo to try it yourself.
+                        Button::new(cx, |cx| Label::new(cx, "Show me"))
                             .class("btn")
-                            .toggle_class("quiet", p.quiz_wrong.map(move |w| *w == Some(i)))
-                            .on_press(move |cx| cx.emit(LessonEvent::Answer(i)));
-                    }
-                    Button::new(cx, |cx| Label::new(cx, "Skip"))
-                        .class("btn")
-                        .class("quiet")
-                        .on_press(|cx| cx.emit(LessonEvent::Skip));
-                }
-                Kind::Action { .. } => {
-                    // Stuck? Watch it done - then Undo to try it yourself.
-                    Button::new(cx, |cx| Label::new(cx, "Show me"))
-                        .class("btn")
-                        .class("quiet")
-                        .tooltip(|cx| {
-                            Tooltip::new(cx, |cx| {
-                                Label::new(cx, "Does this step for you - then \u{201c}Try it yourself\u{201d} takes it back.");
+                            .class("quiet")
+                            .tooltip(|cx| {
+                                Tooltip::new(cx, |cx| {
+                                    Label::new(cx, "Does this step for you - then \u{201c}Try it yourself\u{201d} takes it back.");
+                                })
+                                .placement(Placement::Bottom)
+                                .arrow(false)
                             })
-                            .placement(Placement::Bottom)
-                            .arrow(false)
-                        })
-                        .on_press(|cx| cx.emit(LessonEvent::ShowMe));
-                    Button::new(cx, |cx| Label::new(cx, "Skip"))
-                        .class("btn")
-                        .class("quiet")
-                        .on_press(|cx| cx.emit(LessonEvent::Skip));
+                            .on_press(|cx| cx.emit(LessonEvent::ShowMe));
+                        Button::new(cx, |cx| Label::new(cx, "Skip"))
+                            .class("btn")
+                            .class("quiet")
+                            .on_press(|cx| cx.emit(LessonEvent::Skip));
+                    }
                 }
-            }
-            Button::new(cx, |cx| Label::new(cx, "Exit"))
-                .class("btn")
-                .class("quiet")
-                .on_press(|cx| cx.emit(LessonEvent::Exit));
-        })
-        .class("lesson-bar")
-        .gap(Pixels(tokens::SPACE_3))
-        .padding_left(Pixels(tokens::SPACE_3))
-        .padding_right(Pixels(tokens::SPACE_3))
-        .alignment(Alignment::Left)
-        .width(Stretch(1.0))
-        // Grows for a two-line explanation.
-        .height(Auto)
-        .min_height(Pixels(48.0))
-        .padding_top(Pixels(6.0))
-        .padding_bottom(Pixels(6.0));
+                Button::new(cx, |cx| Label::new(cx, "Exit"))
+                    .class("btn")
+                    .class("quiet")
+                    .on_press(|cx| cx.emit(LessonEvent::Exit));
+            })
+            .class("lesson-bar")
+            .gap(Pixels(tokens::SPACE_3))
+            .padding_left(Pixels(tokens::SPACE_3))
+            .padding_right(Pixels(tokens::SPACE_3))
+            .alignment(Alignment::Left)
+            .width(Stretch(1.0))
+            // Grows for a two-line explanation.
+            .height(Auto)
+            .min_height(Pixels(48.0))
+            .padding_top(Pixels(6.0))
+            .padding_bottom(Pixels(6.0));
 
-        if super::sound_match::target(l.id).is_some() {
-            match_panel(cx, p);
-        }
+            if super::sound_match::target(l.id).is_some() {
+                match_panel(cx, p);
+            }
+        };
+        bar(cx);
+        // Under it: the explainer that's open, if any.
+        Binding::new(cx, p.explaining, move |cx| {
+            if let Some(i) = p.explaining.get() {
+                explainer_panel(cx, i);
+            }
+        });
     });
 }
 

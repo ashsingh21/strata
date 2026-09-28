@@ -185,6 +185,8 @@ pub enum LessonEvent {
     /// Done reading why the step just finished sounds as it does: on to
     /// the next one.
     NextStep,
+    /// Open one of `course::EXPLAINERS` under the bar (again: close it).
+    Explain(Option<usize>),
     /// A preview finished rendering; `generation` drops a stale one.
     PreviewReady { generation: u64, which: preview::Which, audio: Arc<[f32]> },
     /// A Sound match measurement finished: the target's, or (with the
@@ -245,6 +247,9 @@ pub struct LessonModel {
     /// the bar stays on it (what you did, why it sounds so, Before/After)
     /// until Next step - jumping straight to the next instruction lost it.
     pub completed: Signal<bool>,
+    /// The explainer open under the bar, if any (an index into
+    /// `course::EXPLAINERS`).
+    pub explaining: Signal<Option<usize>>,
     /// When the lesson's project was last auto-saved to My tracks.
     last_save: Instant,
     /// A lesson just reached its end (reported to the project on the
@@ -325,6 +330,7 @@ impl LessonModel {
             shown_step: Signal::new(None),
             reviewing: Signal::new(None),
             completed: Signal::new(false),
+            explaining: Signal::new(None),
             last_save: Instant::now(),
             finished: None,
             last_check: Instant::now(),
@@ -364,6 +370,7 @@ impl LessonModel {
         self.active.set(Some((lesson, step)));
         self.reviewing.set(None);
         self.completed.set(false);
+        self.explaining.set(None);
         self.step_started = Instant::now();
         self.step_before = Some(preview::take_of(&self.snapshot(), &self.patches.get()));
         if self.last_change.as_ref().is_some_and(|(i, ..)| i + 1 != step) {
@@ -418,6 +425,7 @@ impl LessonModel {
         self.active.set(None);
         self.reviewing.set(None);
         self.completed.set(false);
+        self.explaining.set(None);
         self.reset_match();
         self.stop_preview();
         self.step_before = None;
@@ -678,13 +686,19 @@ impl Model for LessonModel {
                 }
             }
             LessonEvent::TryYourself => self.try_yourself(cx),
+            LessonEvent::Explain(which) => {
+                let open = self.explaining.get();
+                self.explaining.set(if *which == open { None } else { *which });
+            }
             LessonEvent::NextStep => {
                 self.completed.set(false);
+                self.explaining.set(None);
                 self.step_started = Instant::now();
             }
             LessonEvent::Review(step) => {
                 let current = self.active.get().map(|(_, s)| s);
                 self.reviewing.set(step.filter(|s| current.is_some_and(|c| *s < c)));
+                self.explaining.set(None);
             }
             LessonEvent::Answer(choice) => {
                 let Some((lesson, step)) = self.active.get() else { return };

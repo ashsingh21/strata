@@ -249,7 +249,7 @@ pub const LESSONS: &[Lesson] = &[
         steps: &[
             info(
                 "Every sound is a vibration. How far it swings is its amplitude - bigger, louder. \
-                 Volume is measured in decibels (dB), and every fader, meter and knob in Shor that says dB uses the same scale.",
+                 Volume is measured in decibels (dB), and every fader, meter and knob in Shor that says dB counts the same way.",
             ),
             act("Press Space: the Keys at full volume, 0 dB.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
             recipe(
@@ -275,7 +275,7 @@ pub const LESSONS: &[Lesson] = &[
             ),
             info(
                 "0 dB is full, -6 dB half the amplitude, -20 dB a tenth, -60 dB silent - and about -10 dB sounds half as loud. \
-                 The meters beside each fader and in the top bar read on the same scale, so a mix can be balanced by numbers as well as by ear.",
+                 The meters beside each fader and in the top bar count in dB too, so a mix can be balanced by numbers as well as by ear.",
             ),
         ],
     },
@@ -3706,18 +3706,120 @@ pub const GLOSSARY: &[(&str, &str)] = &[
 
 /// The glossary words step `step` of `lesson` uses that no earlier step
 /// of that lesson did.
+/// A text's words, lower-cased: hyphens kept inside a word, dropped at
+/// its ends.
+fn words(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !(c.is_alphanumeric() || c == '-'))
+        .map(|w| w.trim_matches('-').to_string())
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// `text` uses `term` as a whole word (or its plural).
+fn uses(text: &str, term: &str) -> bool {
+    let plural = format!("{term}s");
+    words(text).iter().any(|w| w == term || *w == plural || (term == "automate" && w == "automation"))
+}
+
+/// The deeper story behind the ideas the course leans on - opened with
+/// "More" from any step that mentions one, for whoever wants to know what
+/// a thing *is*, not just which knob to turn. (term matched like the
+/// glossary's, title, text)
+pub const EXPLAINERS: &[(&str, &str, &str)] = &[
+    (
+        "db",
+        "Decibels (dB)",
+        "How loud, on a scale that counts ratios. 0 dB is full; every \u{2212}6 dB halves a wave's amplitude (how far it swings), \
+         \u{2212}20 dB is a tenth, \u{2212}60 dB practically silence. Ratios, because that's how hearing works: 0.1 to 0.2 sounds like \
+         the same step as 0.4 to 0.8. About \u{2212}10 dB sounds \u{201c}half as loud\u{201d}. Every fader, meter and mixer knob in Shor uses this scale.",
+    ),
+    (
+        "amplitude",
+        "Amplitude",
+        "How far a sound wave swings - a bigger swing is louder. A volume control multiplies it: \u{2212}6 dB halves it, \u{2212}20 dB \
+         makes it a tenth. Loudness as you hear it grows much more slowly than amplitude, which is why volume is measured in dB.",
+    ),
+    (
+        "frequency",
+        "Frequency (Hz)",
+        "How many times a second a vibration repeats, in hertz (Hz) - what you hear as pitch. A4 is 440 Hz, the A below it 220. \
+         Doubling a frequency is an octave up, halving it an octave down, one and a half times a fifth up. People hear from \
+         about 20 Hz (a rumble) to about 16,000 Hz (a hiss).",
+    ),
+    (
+        "octave",
+        "Octave",
+        "The same note at double (or half) the frequency: A3 is 220 Hz, A4 440 Hz. The ratio is so simple that octaves blend almost \
+         into one sound - which is why both are called A, and why an Octave knob or the Sub adds body or brightness without adding a new note.",
+    ),
+    (
+        "harmonic",
+        "Harmonics",
+        "Almost every note is many frequencies at once: the note itself (the fundamental) plus quieter ones at 2, 3, 4... times its \
+         frequency. Which harmonics there are, and how loud, is a sound's tone: a sine has none, a triangle faint odd ones, a square \
+         strong odd ones, a saw all of them. A filter works by taking harmonics away; the Spectrum shows them as peaks.",
+    ),
+    (
+        "sub",
+        "Sub (sub-oscillator)",
+        "A plain sine one octave below Oscillator 1. \u{201c}Sub\u{201d} is Latin for below - classic synths like Roland's Juno and \
+         SH-101 had one as a cheap extra circuit that followed the main oscillator. A sine has no harmonics, so it adds weight without \
+         buzz: felt more than heard on big speakers, nearly gone on a phone. It stays centred, so the low end is solid.",
+    ),
+    (
+        "oscillator",
+        "Oscillator",
+        "The part of a synth that makes the raw tone: one wave, repeating at the note's frequency. Carve has two, each with a wave \
+         (sine, triangle, saw, square), an octave and a Shape knob, plus a sub and noise. The Mixer sets how loud each is; the \
+         filter and envelopes then shape the blend.",
+    ),
+    (
+        "detune",
+        "Detune",
+        "Tuning one copy of a sound a few cents (hundredths of a semitone) off another. The two drift in and out of step, so the \
+         sound swells and thins a few times a second - \u{201c}beating\u{201d}. A little sounds thick and alive; past about 30 cents it just sounds out of tune.",
+    ),
+    (
+        "filter",
+        "Filter",
+        "Removes part of a sound's frequencies. A low-pass (LP) keeps what's below its cutoff and cuts what's above - taking \
+         harmonics away, so the sound goes darker and rounder. High-pass (HP) does the opposite, band-pass (BP) keeps a band. \
+         Starting bright and filtering down is subtractive synthesis, what Carve is built on.",
+    ),
+    (
+        "cutoff",
+        "Cutoff",
+        "Where the filter starts cutting, in Hz. Lower it and more harmonics go: duller, softer. Moving it while a note plays - with \
+         the filter envelope, an LFO or automation - is the classic synth \u{201c}wow\u{201d} and \u{201c}wah\u{201d}.",
+    ),
+    (
+        "resonance",
+        "Resonance",
+        "A boost right at the cutoff, so the filter rings at that pitch. A little adds bite; a lot makes it whistle, and sweeping \
+         the cutoff then gives the squelchy \u{201c}acid\u{201d} sound.",
+    ),
+    (
+        "envelope",
+        "Envelope (ADSR)",
+        "How something changes over one note, in four stages: Attack (how fast it rises), Decay (how fast it falls to...), Sustain \
+         (the level while the key is held) and Release (how long it fades after). A piano: instant attack, no sustain. A pad: slow \
+         attack, long release. Carve has one for volume and one for the filter.",
+    ),
+    (
+        "lfo",
+        "LFO",
+        "A low-frequency oscillator: a wave too slow to hear (under about 20 Hz) that moves a knob up and down by itself. On pitch \
+         it's vibrato; on the filter, a \u{201c}wah\u{201d} or a wobble; on a square's Narrow knob, a shimmer (PWM).",
+    ),
+];
+
+/// The explainers (indexes into `EXPLAINERS`) for ideas `text` mentions.
+pub fn explainers_for(text: &str) -> Vec<usize> {
+    EXPLAINERS.iter().enumerate().filter(|(_, (term, ..))| uses(text, term)).map(|(i, _)| i).take(3).collect()
+}
+
 pub fn new_words(lesson: &Lesson, step: usize) -> Vec<(&'static str, &'static str)> {
-    let words = |text: &str| -> Vec<String> {
-        text.to_lowercase()
-            .split(|c: char| !(c.is_alphanumeric() || c == '-'))
-            .map(|w| w.trim_matches('-').to_string())
-            .filter(|w| !w.is_empty())
-            .collect()
-    };
-    let uses = |text: &str, term: &str| {
-        let plural = format!("{term}s");
-        words(text).iter().any(|w| w == term || *w == plural || (term == "automate" && w == "automation"))
-    };
     let text_of = |s: &Step| format!("{} {}", s.text, s.why);
     GLOSSARY
         .iter()
@@ -4376,6 +4478,17 @@ mod tests {
         LESSONS.iter().find(|l| l.id == id).unwrap()
     }
 
+
+    /// Every explainer is offered by some step (so none is dead text), and
+    /// "sub" isn't found inside other words.
+    #[test]
+    fn every_explainer_is_reachable() {
+        for (i, (term, ..)) in EXPLAINERS.iter().enumerate() {
+            let offered = LESSONS.iter().flat_map(|l| l.steps).any(|st| explainers_for(&format!("{} {}", st.text, st.why)).contains(&i));
+            assert!(offered, "no step mentions \"{term}\"");
+        }
+        assert!(explainers_for("a subtle change").is_empty());
+    }
 
     #[test]
     fn every_recipe_step_explains_itself() {
