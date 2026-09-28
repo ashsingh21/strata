@@ -179,6 +179,9 @@ pub enum LessonEvent {
     TryYourself,
     /// A quiz step's answer (an index into its options).
     Answer(usize),
+    /// Reread an earlier step (read-only; the current one keeps checking
+    /// meanwhile), or `None` to go back to the current step.
+    Review(Option<usize>),
     /// A preview finished rendering; `generation` drops a stale one.
     PreviewReady { generation: u64, which: preview::Which, audio: Arc<[f32]> },
     /// A Sound match measurement finished: the target's, or (with the
@@ -233,6 +236,8 @@ pub struct LessonModel {
     shown: Option<(usize, Option<SynthState>, bool)>,
     /// That step, for the bar's "Try it yourself".
     pub shown_step: Signal<Option<usize>>,
+    /// An earlier step being reread, if any (see `LessonEvent::Review`).
+    pub reviewing: Signal<Option<usize>>,
     /// When the lesson's project was last auto-saved to My tracks.
     last_save: Instant,
     /// A lesson just reached its end (reported to the project on the
@@ -311,6 +316,7 @@ impl LessonModel {
             release_keys: None,
             shown: None,
             shown_step: Signal::new(None),
+            reviewing: Signal::new(None),
             last_save: Instant::now(),
             finished: None,
             last_check: Instant::now(),
@@ -348,6 +354,7 @@ impl LessonModel {
             return;
         }
         self.active.set(Some((lesson, step)));
+        self.reviewing.set(None);
         self.step_started = Instant::now();
         self.step_before = Some(preview::take_of(&self.snapshot(), &self.patches.get()));
         if self.last_change.as_ref().is_some_and(|(i, ..)| i + 1 != step) {
@@ -400,6 +407,7 @@ impl LessonModel {
 
     fn exit(&mut self) {
         self.active.set(None);
+        self.reviewing.set(None);
         self.reset_match();
         self.stop_preview();
         self.step_before = None;
@@ -653,6 +661,10 @@ impl Model for LessonModel {
                 }
             }
             LessonEvent::TryYourself => self.try_yourself(cx),
+            LessonEvent::Review(step) => {
+                let current = self.active.get().map(|(_, s)| s);
+                self.reviewing.set(step.filter(|s| current.is_some_and(|c| *s < c)));
+            }
             LessonEvent::Answer(choice) => {
                 let Some((lesson, step)) = self.active.get() else { return };
                 let course::Kind::Quiz { answer, .. } = course::LESSONS[lesson].steps[step].kind else { return };

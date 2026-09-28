@@ -22,6 +22,7 @@ pub struct LessonBarProps {
     pub match_yours: Signal<Option<std::sync::Arc<shared::analysis::Analysis>>>,
     pub match_score: Signal<Option<f32>>,
     pub quiz_wrong: Signal<Option<usize>>,
+    pub reviewing: Signal<Option<usize>>,
     pub theme: Signal<crate::tokens::ThemeId>,
 }
 
@@ -38,31 +39,112 @@ impl LessonBarProps {
             match_yours: model.match_yours,
             match_score: model.match_score,
             quiz_wrong: model.quiz_wrong,
+            reviewing: model.reviewing,
             theme,
         }
     }
 }
 
+/// The lesson's title and progress: a filled square per step done, the
+/// current one outlined (or, rereading, the one being read).
+fn title_and_dots(cx: &mut Context, lesson: usize, marked: usize, current: usize) {
+    let l = &LESSONS[lesson];
+    VStack::new(cx, move |cx| {
+        Label::new(cx, format!("{} \u{b7} {}", l.group, l.title)).class("label");
+        let dots: String = (0..l.steps.len())
+            .map(|i| if i == marked { '\u{25a3}' } else if i < current { '\u{25a0}' } else { '\u{25a1}' })
+            .collect();
+        Label::new(cx, dots).class("value").class("lesson-dots");
+    })
+    .gap(Pixels(2.0))
+    .width(Auto)
+    .height(Auto);
+}
+
+fn nav_button<'a>(cx: &'a mut Context, glyph: &'static str, tip: &'static str) -> Handle<'a, Button> {
+    Button::new(cx, move |cx| Label::new(cx, glyph))
+        .class("btn")
+        .class("quiet")
+        .tooltip(move |cx| {
+            Tooltip::new(cx, move |cx| {
+                Label::new(cx, tip);
+            })
+            .placement(Placement::Bottom)
+            .arrow(false)
+        })
+}
+
+/// An earlier step, to read again: what it asked, the words it brought in
+/// and why it sounds as it does - with ‹ › through the steps before the
+/// current one, and back to it.
+fn review_bar(cx: &mut Context, lesson: usize, viewing: usize, current: usize) {
+    let l = &LESSONS[lesson];
+    let s = &l.steps[viewing];
+    HStack::new(cx, move |cx| {
+        title_and_dots(cx, lesson, viewing, current);
+        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(28.0));
+        VStack::new(cx, move |cx| {
+            Label::new(cx, format!("Step {} of {}, done", viewing + 1, l.steps.len())).class("label");
+            Label::new(cx, s.text).class("body").class("lesson-text").width(Stretch(1.0)).text_wrap(true);
+            let words = super::course::new_words(l, viewing);
+            if !words.is_empty() {
+                let line = words.iter().map(|(term, meaning)| format!("{term}: {meaning}")).collect::<Vec<_>>().join("   \u{b7}   ");
+                Label::new(cx, line).class("value").class("lesson-words").width(Stretch(1.0)).text_wrap(true);
+            }
+            if !s.why.is_empty() {
+                Label::new(cx, format!("Why: {}", s.why)).class("value").class("lesson-why").width(Stretch(1.0)).text_wrap(true);
+            }
+        })
+        .gap(Pixels(2.0))
+        .width(Stretch(1.0))
+        .height(Auto);
+
+        if viewing > 0 {
+            nav_button(cx, "\u{2039} Back", "The step before").on_press(move |cx| cx.emit(LessonEvent::Review(Some(viewing - 1))));
+        }
+        nav_button(cx, "Next \u{203a}", "The step after").on_press(move |cx| {
+            cx.emit(LessonEvent::Review(if viewing + 1 < current { Some(viewing + 1) } else { None }))
+        });
+        Button::new(cx, move |cx| Label::new(cx, format!("Back to step {}", current + 1)))
+            .class("btn")
+            .class("is-on")
+            .on_press(|cx| cx.emit(LessonEvent::Review(None)));
+        Button::new(cx, |cx| Label::new(cx, "Exit"))
+            .class("btn")
+            .class("quiet")
+            .on_press(|cx| cx.emit(LessonEvent::Exit));
+    })
+    .class("lesson-bar")
+    .gap(Pixels(tokens::SPACE_3))
+    .padding_left(Pixels(tokens::SPACE_3))
+    .padding_right(Pixels(tokens::SPACE_3))
+    .alignment(Alignment::Left)
+    .width(Stretch(1.0))
+    .height(Auto)
+    .min_height(Pixels(48.0))
+    .padding_top(Pixels(6.0))
+    .padding_bottom(Pixels(6.0));
+}
+
 pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
-    Binding::new(cx, p.active, move |cx| {
+    let shown = Memo::new(move |_| (p.active.get(), p.reviewing.get()));
+    Binding::new(cx, shown, move |cx| {
         let Some((lesson, step)) = p.active.get() else { return };
+        if let Some(viewing) = p.reviewing.get().filter(|v| *v < step) {
+            review_bar(cx, lesson, viewing, step);
+            return;
+        }
         let l = &LESSONS[lesson];
         let s = &l.steps[step];
         HStack::new(cx, move |cx| {
-            VStack::new(cx, move |cx| {
-                Label::new(cx, format!("{} \u{b7} {}", l.group, l.title)).class("label");
-                // Progress: a filled square per step done, the current one
-                // outlined.
-                let dots: String = (0..l.steps.len())
-                    .map(|i| if i < step { '\u{25a0}' } else if i == step { '\u{25a3}' } else { '\u{25a1}' })
-                    .collect();
-                Label::new(cx, dots).class("value").class("lesson-dots");
-            })
-            .gap(Pixels(2.0))
-            .width(Auto)
-            .height(Auto);
+            title_and_dots(cx, lesson, step, step);
 
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(28.0));
+
+            // Reread the steps already done.
+            if step > 0 {
+                nav_button(cx, "\u{2039} Back", "Read the step before again").on_press(move |cx| cx.emit(LessonEvent::Review(Some(step - 1))));
+            }
 
             VStack::new(cx, move |cx| {
                 // Wrapped to the space between the title and the buttons.
@@ -141,6 +223,13 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
             let last = step + 1 == l.steps.len();
             match s.kind {
                 Kind::Info if last && lesson + 1 < LESSONS.len() => {
+                    // Back a lesson, within the same group (Carve, Theory...).
+                    if lesson > 0 && LESSONS[lesson - 1].group == l.group {
+                        Button::new(cx, |cx| Label::new(cx, "Previous lesson"))
+                            .class("btn")
+                            .class("quiet")
+                            .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson - 1)));
+                    }
                     Button::new(cx, |cx| Label::new(cx, "Next lesson"))
                         .class("btn")
                         .class("is-on")
