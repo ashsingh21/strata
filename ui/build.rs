@@ -486,6 +486,11 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 .app tooltip label {{
   max-width: 420px;
 }}
+/* Vizia's own popups (Dropdown): above everything drawn after them. Their
+   look comes from the .context-menu inside. */
+.app popup {{
+  z-index: 180;
+}}
 .context-menu {{
   border-radius: {radius_md}px;
   border-width: 1px;

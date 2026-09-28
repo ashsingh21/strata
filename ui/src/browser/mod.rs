@@ -219,7 +219,6 @@ pub enum BrowserEvent {
     /// A drag of the panel's edge ended: remember the width.
     CommitWidth,
     FocusSearch,
-    ToggleSettings,
     /// Sample keys, analysed in the background (and, to cache, every
     /// file's size and key or none).
     KeysFound(HashMap<Arc<str>, keys::SampleKey>, HashMap<Arc<str>, (u64, Option<keys::SampleKey>)>),
@@ -235,7 +234,6 @@ pub struct BrowserModel {
     pub fits_key: Signal<bool>,
     pub sort: Signal<Sort>,
     pub sort_open: Signal<bool>,
-    pub settings_open: Signal<bool>,
     pub favourites: Signal<Vec<String>>,
     pub collections: Signal<Vec<Collection>>,
     pub collection: Signal<Option<Coll>>,
@@ -278,7 +276,6 @@ impl BrowserModel {
             fits_key: Signal::new(false),
             sort: Signal::new(Sort::Recent),
             sort_open: Signal::new(false),
-            settings_open: Signal::new(false),
             favourites: Signal::new(crate::settings::load_browser_list("browser_favourites")),
             collections: Signal::new(crate::settings::load_browser_collections()),
             collection: Signal::new(None),
@@ -531,7 +528,6 @@ impl Model for BrowserModel {
                     cx.emit_to(search, TextEvent::StartEdit);
                 }
             }
-            BrowserEvent::ToggleSettings => self.settings_open.set(!self.settings_open.get()),
             BrowserEvent::KeysFound(keys, cache) => {
                 self.keys.set(keys.clone());
                 crate::settings::save_sample_keys(cache);

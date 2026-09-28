@@ -142,10 +142,12 @@ impl Model for AppData {
             AppEvent::SetTheme(theme) => {
                 self.theme.set(*theme);
                 crate::settings::save_theme(theme.id());
+                repaint_all(cx);
             }
             AppEvent::ToggleTheme => {
                 self.theme.update(|t| *t = t.next());
                 crate::settings::save_theme(self.theme.get().id());
+                repaint_all(cx);
             }
             AppEvent::ToggleSidebar => {
                 self.sidebar_open.update(|o| *o = !*o);
@@ -262,4 +264,11 @@ impl AppData {
         self.meter_db_r = if target_r > self.meter_db_r { target_r } else { (self.meter_db_r - decay).max(target_r) };
         self.output_db.set(self.meter_db_l.max(self.meter_db_r));
     }
+}
+
+/// Every view, repainted: a theme change restyles the whole window, but
+/// Vizia repaints only regions it knows changed, so views whose own
+/// state didn't move (the status bar) kept the old theme's colours.
+fn repaint_all(cx: &mut EventContext) {
+    cx.with_current(Entity::root(), |cx| cx.needs_redraw());
 }

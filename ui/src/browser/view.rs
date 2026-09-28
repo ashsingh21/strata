@@ -62,7 +62,6 @@ pub struct BrowserProps {
     fits_key: Signal<bool>,
     sort: Signal<Sort>,
     sort_open: Signal<bool>,
-    settings_open: Signal<bool>,
     favourites: Signal<Vec<String>>,
     collections: Signal<Vec<Collection>>,
     collection: Signal<Option<Coll>>,
@@ -112,7 +111,6 @@ impl BrowserProps {
             fits_key: m.fits_key,
             sort: m.sort,
             sort_open: m.sort_open,
-            settings_open: m.settings_open,
             favourites: m.favourites,
             collections: m.collections,
             collection: m.collection,
@@ -204,8 +202,6 @@ fn rail(cx: &mut Context, p: BrowserProps) {
         Element::new(cx).height(Stretch(1.0)).width(Pixels(1.0));
         let open = Memo::new(move |_| p.open.get());
         rail_button(cx, p, IconKind::Panel, "Show or hide the panel", open).on_press(|cx| cx.emit(crate::app::AppEvent::ToggleSidebar));
-        let settings = Memo::new(move |_| p.settings_open.get());
-        rail_button(cx, p, IconKind::Settings, "Settings", settings).on_press(|cx| cx.emit(BrowserEvent::ToggleSettings));
         settings_menu(cx, p);
     })
     .class("brw-rail")
@@ -217,35 +213,45 @@ fn rail(cx: &mut Context, p: BrowserProps) {
     .height(Stretch(1.0));
 }
 
-/// Settings: the theme (otherwise only a keyboard shortcut).
+/// Settings: the theme (otherwise only a keyboard shortcut). A Vizia
+/// dropdown: it opens beside its button, keeps itself inside the window,
+/// and closes on a click elsewhere or Escape.
 fn settings_menu(cx: &mut Context, p: BrowserProps) {
-    VStack::new(cx, move |cx| {
-        Label::new(cx, "Theme").class("label");
-        VStack::new(cx, move |cx| {
-            for theme in ThemeId::ALL {
-                Button::new(cx, move |cx| Label::new(cx, theme.name()).class("body"))
-                    .class("menu-item")
-                    .toggle_class("is-on", p.theme.map(move |t| *t == theme))
-                    .width(Stretch(1.0))
-                    .on_press(move |cx| {
-                        cx.emit(crate::app::AppEvent::SetTheme(theme));
-                        cx.emit(BrowserEvent::ToggleSettings);
-                    });
-            }
-        })
-        .gap(Pixels(2.0))
-        .width(Pixels(140.0))
-        .height(Auto);
-    })
-    .class("panel")
-    .class("context-menu")
-    .toggle_class("hidden", p.settings_open.map(|o| !*o))
-    .gap(Pixels(6.0))
-    .padding(Pixels(tokens::SPACE_2))
-    .position_type(PositionType::Absolute)
-    .left(Pixels(44.0))
-    .bottom(Pixels(8.0))
-    .z_index(10)
+    Dropdown::new(
+        cx,
+        move |cx| {
+            let never = Memo::new(|_| false);
+            rail_button(cx, p, IconKind::Settings, "Settings", never).on_press(|cx| cx.emit(PopupEvent::Switch));
+        },
+        move |cx| {
+            VStack::new(cx, move |cx| {
+                Label::new(cx, "Theme").class("label");
+                VStack::new(cx, move |cx| {
+                    for theme in ThemeId::ALL {
+                        Button::new(cx, move |cx| Label::new(cx, theme.name()).class("body"))
+                            .class("menu-item")
+                            .toggle_class("is-on", p.theme.map(move |t| *t == theme))
+                            .width(Stretch(1.0))
+                            .on_press(move |cx| {
+                                cx.emit(crate::app::AppEvent::SetTheme(theme));
+                                cx.emit(PopupEvent::Close);
+                            });
+                    }
+                })
+                .gap(Pixels(2.0))
+                .width(Pixels(140.0))
+                .height(Auto);
+            })
+            .class("panel")
+            .class("context-menu")
+            .gap(Pixels(6.0))
+            .padding(Pixels(tokens::SPACE_2))
+            .size(Auto);
+        },
+    )
+    .placement(Placement::RightEnd)
+    .show_arrow(false)
+    .arrow_size(Pixels(6.0))
     .size(Auto);
 }
 
