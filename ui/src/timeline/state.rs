@@ -519,8 +519,9 @@ pub enum TimelineEvent {
     /// Commits the rename textbox's current text.
     CommitRenameMarker(MarkerId, String),
     CancelRenameMarker,
-    /// A velocity-lane drag ended: one undoable edit, not one per pixel.
-    SetNoteVelocity { clip: ClipId, start: Ticks, pitch: u8, velocity: u8 },
+    /// A velocity-lane drag ended: its notes (a chord's, usually) to one
+    /// velocity, as one undo step.
+    SetNoteVelocities { clip: ClipId, notes: Vec<(Ticks, u8)>, velocity: u8 },
 
     /// A finished guitar/mic take: insert it as a real clip on `track`,
     /// one undo step, same as any other clip insertion.
@@ -1230,8 +1231,12 @@ impl Model for TimelineState {
             TimelineEvent::CancelRenameMarker => {
                 self.renaming_marker.set(None);
             }
-            TimelineEvent::SetNoteVelocity { clip, start, pitch, velocity } => {
-                self.do_command(Command::SetNoteVelocity { clip: *clip, start: *start, pitch: *pitch, velocity: *velocity });
+            TimelineEvent::SetNoteVelocities { clip, notes, velocity } => {
+                let commands = notes
+                    .iter()
+                    .map(|&(start, pitch)| Command::SetNoteVelocity { clip: *clip, start, pitch, velocity: *velocity })
+                    .collect();
+                self.do_command(Command::Batch(commands));
             }
             TimelineEvent::RemoveMidiNoteAt { clip, start, pitch } => {
                 self.do_command(Command::RemoveMidiNote { clip: *clip, start: *start, pitch: *pitch });

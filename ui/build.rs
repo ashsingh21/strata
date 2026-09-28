@@ -782,6 +782,11 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     );
     rule(".synth-seg-btn:hover", vec![("color", c("ink"))]);
     rule(".synth-seg-btn.is-on", vec![("background-color", c("active-soft")), ("color", c("active"))]);
+    // The timeline's Add group: actions, not a choice, so a hover fill
+    // shows which one you're about to press.
+    rule(".add-track-btn:hover", vec![("background-color", c("bg-300")), ("color", c("ink"))]);
+    // Dividers in the group's own border colour.
+    rule(".add-track-divider", vec![("background-color", c("line-control"))]);
     rule(".synth-keys", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
     // An LFO pill being dragged: every knob it can land on lights up in mod.
     rule(".knob-col.drop-target", vec![("background-color", c("mod-soft")), ("border-color", c("mod"))]);

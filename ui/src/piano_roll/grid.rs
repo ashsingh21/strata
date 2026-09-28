@@ -179,6 +179,21 @@ impl Grid {
     }
 
     /// Velocity (1..=127) for a y position inside the velocity lane.
+    /// The notes a velocity drag on `key`'s stem changes: every note that
+    /// starts with it - a chord's stems stand on top of each other, and
+    /// changing just one of them barely changed the sound - or, if some of
+    /// those are selected, only the selected ones (to balance a chord).
+    fn velocity_group(&self, notes: &[MidiNote], key: NoteKey) -> Vec<NoteKey> {
+        let column: Vec<NoteKey> = notes.iter().filter(|n| n.start == key.0).map(|n| (n.start, n.pitch)).collect();
+        let selected = self.selected.get();
+        let chosen: Vec<NoteKey> = column.iter().copied().filter(|k| selected.contains(k)).collect();
+        if chosen.is_empty() {
+            column
+        } else {
+            chosen
+        }
+    }
+
     fn velocity_at(lane_top: f32, y: f32) -> u8 {
         let t = 1.0 - ((y - lane_top - 6.0) / (VEL_H - 10.0)).clamp(0.0, 1.0);
         (1.0 + t * 126.0).round() as u8
@@ -288,10 +303,11 @@ impl View for Grid {
                 }
             }
             WindowEvent::MouseUp(MouseButton::Left) => {
-                if let Some(((start, pitch), velocity)) = self.vel_drag.take() {
+                if let Some((key, velocity)) = self.vel_drag.take() {
                     cx.release();
-                    if let Some(clip) = self.open_clip.get() {
-                        cx.emit(TimelineEvent::SetNoteVelocity { clip, start, pitch, velocity });
+                    if let (Some(clip), Some((_, _, _, notes))) = (self.open_clip.get(), self.clip_info()) {
+                        let group = self.velocity_group(&notes, key);
+                        cx.emit(TimelineEvent::SetNoteVelocities { clip, notes: group, velocity });
                     }
                 }
             }
@@ -433,6 +449,8 @@ impl View for Grid {
 
         // Notes: clip colour with a faint edge; `signal` while sounding;
         // a 2px ink outline when selected.
+        // The notes a velocity drag in progress moves together.
+        let drag_group = self.vel_drag.map(|(k, _)| self.velocity_group(&notes, k)).unwrap_or_default();
         for note in &notes {
             let Some(row) = rows.iter().position(|&r| r == note.pitch) else { continue };
             let y0 = top + row as f32 * ROW_H + 1.0;
@@ -475,9 +493,9 @@ impl View for Grid {
 
             // Velocity stem: ink-muted at rest, signal sounding, ink when
             // selected or being dragged.
-            let dragging = matches!(self.vel_drag, Some((k, _)) if k == key_of_note);
+            let dragging = self.vel_drag.is_some_and(|(k, _)| drag_group.contains(&key_of_note) && k.0 == note.start);
             let velocity = match self.vel_drag {
-                Some((k, v)) if k == key_of_note => v,
+                Some((_, v)) if dragging => v,
                 _ => note.velocity,
             };
             let stem_color = if is_sounding {

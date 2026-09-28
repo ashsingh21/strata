@@ -120,17 +120,20 @@ pub fn timeline_view(
                         add_track_button(cx, theme, IconKind::Sample, "Audio")
                             .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "An audio track: record into it, or drop samples on it"); }).arrow(false))
                             .on_press(|cx| cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Audio)));
+                        Element::new(cx).class("add-track-divider").width(Pixels(1.0)).height(Pixels(tokens::SIZE_CONTROL));
                         add_track_button(cx, theme, IconKind::Instrument, "MIDI")
                             .lesson_target(crate::lessons::Target::AddMidiTrack)
                             .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "A MIDI track, playing the Carve synth"); }).arrow(false))
                             .on_press(|cx| cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Midi)));
+                        Element::new(cx).class("add-track-divider").width(Pixels(1.0)).height(Pixels(tokens::SIZE_CONTROL));
                         add_track_button(cx, theme, IconKind::Pattern, "Drums")
                             .lesson_target(crate::lessons::Target::AddDrumTrack)
                             .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "A MIDI track playing the Drum Kit"); }).arrow(false))
                             .on_press(|cx| cx.emit(TimelineEvent::AddDrumTrack));
                     })
                     .class("synth-seg")
-                    .size(Auto);
+                    .width(Auto)
+                    .height(Pixels(tokens::SIZE_CONTROL + 2.0));
                 })
                 .alignment(Alignment::Left)
                 .gap(Pixels(tokens::SPACE_2))
@@ -369,4 +372,6 @@ fn add_track_button<'a>(cx: &'a mut Context, theme: Signal<ThemeId>, icon: crate
         .hoverable(false)
     })
     .class("synth-seg-btn")
+    .class("add-track-btn")
+    .height(Stretch(1.0))
 }
