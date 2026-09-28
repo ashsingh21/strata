@@ -55,6 +55,8 @@ pub struct Snapshot {
     pub exported: bool,
     /// The spectrum analyzer is showing.
     pub analyzer_open: bool,
+    /// The Snap grid (the timeline's and the clip editor's).
+    pub snap: shared::arrangement::SnapGrid,
 }
 
 /// A control a step can make glow.
@@ -84,6 +86,10 @@ pub enum Target {
     Velocity(shared::arrangement::Ticks),
     /// The piano roll's Snap button.
     Snap,
+    /// The drum editor's Swing knob.
+    Swing,
+    /// The drum editor's Humanize button.
+    Humanize,
     /// Carve's filter type switch (LP 24 / LP 12 / BP / HP).
     FilterType,
     /// LFO 1 or 2's pill (drag it onto a knob).
@@ -198,6 +204,7 @@ pub struct LessonModel {
     scale_mask: Signal<u16>,
     export_status: Signal<String>,
     analyzer_open: Signal<bool>,
+    snap: Signal<shared::arrangement::SnapGrid>,
     /// A quiz step's answer that was wrong (cleared on the next step).
     pub quiz_wrong: Signal<Option<usize>>,
     /// The preview playing (for the buttons' labels), and when it ends.
@@ -264,6 +271,7 @@ impl LessonModel {
         scale_mask: Signal<u16>,
         export_status: Signal<String>,
         analyzer_open: Signal<bool>,
+        snap: Signal<shared::arrangement::SnapGrid>,
         player: crate::preview_player::SharedPlayer,
         sample_rate: u32,
     ) -> Self {
@@ -287,6 +295,7 @@ impl LessonModel {
             scale_mask,
             export_status,
             analyzer_open,
+            snap,
             quiz_wrong: Signal::new(None),
             previewing: Signal::new(None),
             preview_generation: 0,
@@ -326,6 +335,7 @@ impl LessonModel {
             scale_mask: self.scale_mask.get(),
             exported: self.export_status.get().starts_with("Exported"),
             analyzer_open: self.analyzer_open.get(),
+            snap: self.snap.get(),
         }
     }
 
@@ -487,6 +497,9 @@ impl LessonModel {
         if after.scale_mask != before.scale_mask {
             cx.emit(crate::interval_input::state::IntervalInputEvent::SetScaleMask(after.scale_mask));
         }
+        if after.snap != before.snap {
+            cx.emit(TimelineEvent::SetSnap(after.snap));
+        }
         if after.playhead != before.playhead {
             cx.emit(TimelineEvent::ScrubPlayhead(after.playhead));
         }
@@ -545,6 +558,8 @@ impl Model for LessonModel {
                 cx.emit(AppEvent::Stop);
                 cx.emit(PianoRollEvent::Close);
                 cx.emit(TimelineEvent::SetTool(TimelineTool::Select));
+                // Snap as the steps expect it: 16ths.
+                cx.emit(TimelineEvent::SetSnap(shared::arrangement::SnapGrid::Sixteenth));
                 if !self.sidebar_open.get() {
                     cx.emit(AppEvent::ToggleSidebar);
                 }

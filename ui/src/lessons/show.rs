@@ -787,6 +787,46 @@ pub fn steps(lesson: &str) -> Vec<Show> {
             };
             vec![b(play), b(|s| s.open_clip = Some(clip_on_track(s, "Drums"))), b(soften(&ROLL_GHOSTS, 40)), b(soften(&[2, 6, 10, 14], 75))]
         }
+        ROLL_PAINT => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Drums"))),
+            b(|s| add_notes_on(s, "Drums", CLOSED_HAT, &(0..16).map(|i| i * SIXTEENTH).collect::<Vec<_>>())),
+            b(|s| {
+                let clip = clip_on_track(s, "Drums");
+                let erase = (12..16).map(|i| Command::RemoveMidiNote { clip, start: i * SIXTEENTH, pitch: CLOSED_HAT }).collect();
+                Command::Batch(erase).apply(&mut s.arrangement);
+            }),
+            b(|s| {
+                for at in [0, PPQ, 2 * PPQ] {
+                    set_velocity(s, "Drums", CLOSED_HAT, at, 127);
+                }
+            }),
+            b(|s| {
+                add_note_on(s, "Drums", SNARE, 15 * SIXTEENTH, SIXTEENTH);
+                set_velocity(s, "Drums", SNARE, 15 * SIXTEENTH, 45);
+            }),
+            b(humanize_drums),
+        ],
+        ROLL_SWING => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Drums"))),
+            b(|s| set_swing(s, 1.0)),
+            b(|s| set_swing(s, 0.5)),
+        ],
+        ROLL_ROLLS => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Drums"))),
+            b(|s| s.snap = shared::arrangement::SnapGrid::ThirtySecond),
+            b(|s| paint_hats(s, 3 * PPQ, BAR, PPQ / 8)),
+            b(|s| s.snap = shared::arrangement::SnapGrid::SixteenthTriplet),
+            b(|s| paint_hats(s, PPQ, 2 * PPQ, PPQ / 6)),
+            b(|s| {
+                s.snap = shared::arrangement::SnapGrid::ThirtySecond;
+                for at in [3 * PPQ, 3 * PPQ + PPQ / 8] {
+                    set_velocity(s, "Drums", CLOSED_HAT, at, 45);
+                }
+            }),
+        ],
         ROLL_LENGTH => vec![
             b(play),
             b(|s| s.open_clip = Some(clip_on_track(s, "Keys"))),
@@ -887,6 +927,38 @@ fn clip_on_track(s: &Snapshot, name: &str) -> shared::arrangement::ClipId {
 fn set_velocity(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks, velocity: u8) {
     let clip = clip_on_track(s, name);
     Command::SetNoteVelocity { clip, start, pitch, velocity }.apply(&mut s.arrangement);
+}
+
+/// A paint stroke along the Closed Hat row of the Drums clip: a `step`-long
+/// hit on every empty `step` of `from..to`.
+fn paint_hats(s: &mut Snapshot, from: Ticks, to: Ticks, step: Ticks) {
+    let clip = clip_on_track(s, "Drums");
+    let ClipContent::Midi { notes, .. } = &s.arrangement.clip(clip).unwrap().content else { panic!() };
+    let empty: Vec<Ticks> = (from..to)
+        .step_by(step as usize)
+        .filter(|&at| !notes.iter().any(|n| n.pitch == CLOSED_HAT && n.start >= at && n.start < at + step))
+        .collect();
+    for at in empty {
+        add_note_on(s, "Drums", CLOSED_HAT, at, step);
+    }
+}
+
+/// The Swing knob on the Drums clip.
+fn set_swing(s: &mut Snapshot, swing: f32) {
+    let clip = clip_on_track(s, "Drums");
+    s.arrangement.clips.iter_mut().find(|c| c.id == clip).unwrap().swing = swing;
+}
+
+/// The Humanize button on the Drums clip.
+fn humanize_drums(s: &mut Snapshot) {
+    let clip = clip_on_track(s, "Drums");
+    let c = s.arrangement.clips.iter_mut().find(|c| c.id == clip).unwrap();
+    let len = c.content_len();
+    if let ClipContent::Midi { notes, .. } = &mut c.content {
+        for n in notes.iter_mut() {
+            *n = crate::timeline::state::humanized(n, len);
+        }
+    }
 }
 
 /// One click on `name`'s clip at `start`, with Snap making it `length` long.

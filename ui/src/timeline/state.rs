@@ -1660,7 +1660,7 @@ fn random_gain_variation_db() -> f32 {
 /// ticks (about a hundredth of a beat) either way, kept inside the
 /// pattern; a note on the downbeat stays put. Seeded by the note itself,
 /// so the result is repeatable rather than different on every press.
-fn humanized(note: &MidiNote, pattern_len: Ticks) -> MidiNote {
+pub(crate) fn humanized(note: &MidiNote, pattern_len: Ticks) -> MidiNote {
     let mut h = (note.start as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (note.pitch as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     h ^= h >> 31;
     let velocity = (note.velocity as i32 + (h % 25) as i32 - 12).clamp(1, 127) as u8;

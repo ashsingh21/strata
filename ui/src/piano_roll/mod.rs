@@ -170,7 +170,8 @@ pub fn piano_roll_view(
                     })
                     .arrow(false)
                 })
-                .size(Pixels(20.0));
+                .size(Pixels(20.0))
+                .lesson_target(crate::lessons::Target::Swing);
                 Label::new(cx, swing.map(|s| format!("{:.0}%", s * 100.0))).class("value").width(Pixels(30.0));
                 Button::new(cx, |cx| Label::new(cx, "Humanize"))
                     .class("btn")
@@ -186,7 +187,8 @@ pub fn piano_roll_view(
                         if let Some(clip) = open_clip.get() {
                             cx.emit(TimelineEvent::HumanizeClip(clip));
                         }
-                    });
+                    })
+                    .lesson_target(crate::lessons::Target::Humanize);
             })
             .toggle_class("hidden", is_drums.map(|d| !*d))
             .gap(Pixels(tokens::SPACE_2))

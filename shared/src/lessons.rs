@@ -75,6 +75,34 @@ pub const MELODY_MOTIF: &str = "melody-motif";
 /// "Piano roll": the notes you write, played with feeling.
 pub const ROLL_DYNAMICS: &str = "roll-dynamics";
 pub const ROLL_LENGTH: &str = "roll-length";
+pub const ROLL_PAINT: &str = "roll-paint";
+pub const ROLL_SWING: &str = "roll-swing";
+pub const ROLL_ROLLS: &str = "roll-rolls";
+/// The step lessons' tempos: a house-ish paint job, a laid-back shuffle,
+/// and trap's double-time hats.
+pub const PAINT_BPM: f64 = 120.0;
+pub const SWING_BPM: f64 = 90.0;
+pub const TRAP_BPM: f64 = 140.0;
+
+pub const TRAP_DRUMS: &str = "trap-drums";
+pub const TRAP_808: &str = "trap-808";
+pub const TRAP_MELODY: &str = "trap-melody";
+pub const TRAP_ARRANGE: &str = "trap-arrange";
+const TRAP_PARTS: [&str; 4] = [TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE];
+/// Half-time kicks: beat 1 and the "and" of 2 (16ths).
+pub const TRAP_KICKS: [i64; 2] = [0, 6];
+/// One snare a bar, on beat 3: half time.
+pub const TRAP_SNARE: i64 = 8;
+/// The 808 (16th, pitch, 16ths): with the kicks, then a long A with a C
+/// starting inside it - so Mono glides up into the C.
+pub const TRAP_808_NOTES: [(i64, u8, i64); 4] = [(0, 57, 6), (6, 57, 2), (8, 57, 4), (10, 60, 6)];
+/// The flute's two bars in A minor: down from E to B, then an answer that
+/// dips to G and comes home to A.
+pub const TRAP_PHRASE: [(i64, u8, i64); 8] =
+    [(0, 76, 4), (4, 74, 2), (6, 72, 2), (8, 71, 8), (16, 72, 4), (20, 71, 2), (22, 67, 2), (24, 69, 8)];
+/// The arrangement's one-bar drop-out before the hook comes round again
+/// (0-based bar).
+pub const TRAP_GAP_BAR: i64 = 11;
 /// The dynamics lesson's hats, all at full strength to start: every 8th
 /// (16ths 0, 2 ... 14), plus two extra 16ths (7 and 15) to become ghost
 /// notes.
@@ -333,10 +361,43 @@ fn theory_lesson(lesson: &str) -> Project {
     Project { arrangement: arr, instruments, synth: None }
 }
 
+/// The step lessons: a beat to finish in the drum editor. Painting starts
+/// from a kick and clap with no hats; swing from stiff, even 16th hats;
+/// rolls from a half-time trap beat with plain eighth hats.
+fn step_lesson(lesson: &str) -> Project {
+    let mut arr = empty_arrangement();
+    let hit = |at: i64, pitch: u8, velocity: u8| MidiNote { start: at * SIXTEENTH, length: SIXTEENTH, pitch, velocity };
+    let (bpm, beat) = match lesson {
+        ROLL_PAINT => {
+            let mut beat: Vec<MidiNote> = (0..4).map(|b| hit(b * 4, KICK, 115)).collect();
+            beat.extend([hit(4, CLAP, 105), hit(12, CLAP, 105)]);
+            (PAINT_BPM, beat)
+        }
+        ROLL_SWING => {
+            let mut beat = vec![hit(0, KICK, 120), hit(10, KICK, 105), hit(4, SNARE, 110), hit(12, SNARE, 110)];
+            beat.extend((0..16).map(|at| hit(at, CLOSED_HAT, if at % 2 == 0 { 90 } else { 65 })));
+            (SWING_BPM, beat)
+        }
+        _ => {
+            let mut beat: Vec<MidiNote> = TRAP_KICKS.iter().map(|&at| hit(at, KICK, 120)).collect();
+            beat.push(hit(TRAP_SNARE, SNARE, 115));
+            beat.extend((0..8).map(|i| hit(i * 2, CLOSED_HAT, 85)));
+            (TRAP_BPM, beat)
+        }
+    };
+    arr.tempo_map = TempoMap::constant(bpm, TimeSignature::FOUR_FOUR);
+    let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, -6.0);
+    add_loop(&mut arr, drums, "Beat", beat, 1, 8);
+    Project { arrangement: arr, instruments: Vec::new(), synth: None }
+}
+
 /// The piano roll lessons, at an easy 100 BPM: a beat whose hats all hit
 /// equally hard (dynamics), or that beat under an empty Keys clip
 /// (length and timing).
 fn roll_lesson(lesson: &str) -> Project {
+    if [ROLL_PAINT, ROLL_SWING, ROLL_ROLLS].contains(&lesson) {
+        return step_lesson(lesson);
+    }
     let mut arr = empty_arrangement();
     arr.tempo_map = TempoMap::constant(THEORY_BPM, TimeSignature::FOUR_FOUR);
     let hit = |at: i64, pitch: u8, velocity: u8| MidiNote { start: at * SIXTEENTH, length: SIXTEENTH, pitch, velocity };
@@ -404,6 +465,10 @@ pub fn starting_project(lesson: &str) -> Project {
         LOFI_FINISH => return lofi_after(3),
         BOLLY_MELODY => return lofi_after(4),
         BOLLY_DRONE => return lofi_after(5),
+        TRAP_DRUMS => return trap_after(0),
+        TRAP_808 => return trap_after(1),
+        TRAP_MELODY => return trap_after(2),
+        TRAP_ARRANGE => return trap_after(3),
         _ => {}
     }
     if lesson.starts_with("carve-") || lesson.starts_with("recipe-") || lesson.starts_with("match-") {
@@ -438,7 +503,7 @@ pub fn starting_project(lesson: &str) -> Project {
 
 /// The project part before `lesson`, whose result it builds on.
 pub fn previous_part(lesson: &str) -> Option<&'static str> {
-    [&HOUSE_PARTS[..], &LOFI_PARTS[..]].into_iter().find_map(|parts| {
+    [&HOUSE_PARTS[..], &LOFI_PARTS[..], &TRAP_PARTS[..]].into_iter().find_map(|parts| {
         let i = parts.iter().position(|p| *p == lesson)?;
         i.checked_sub(1).map(|j| parts[j])
     })
@@ -449,6 +514,8 @@ pub fn previous_part(lesson: &str) -> Option<&'static str> {
 pub fn part_track_names(lesson: &str) -> &'static [&'static str] {
     if LOFI_PARTS.contains(&lesson) {
         &["Keys", "Bass", "Melody", "Tanpura"]
+    } else if TRAP_PARTS.contains(&lesson) {
+        &["808", "Melody"]
     } else if HOUSE_PARTS.contains(&lesson) {
         &["Bass", "Chords"]
     } else {
@@ -460,6 +527,7 @@ pub fn part_track_names(lesson: &str) -> &'static [&'static str] {
 /// should show for `lesson`, so its rows are the notes the steps name.
 pub fn lesson_key(lesson: &str) -> Option<(u8, &'static str)> {
     Some(match lesson {
+        TRAP_DRUMS | TRAP_808 | TRAP_MELODY | TRAP_ARRANGE => (9, "Natural minor"),
         RECIPE_KEYS | LOFI_BEAT | LOFI_KEYS | LOFI_BASS | LOFI_FINISH | BOLLY_MELODY | BOLLY_DRONE => (9, "Natural minor"),
         ARRANGE_HOUSE => crate::demo::DemoSong::House.key(),
         ARRANGE_BHAIRAV => crate::demo::DemoSong::Bhairav.key(),
@@ -518,6 +586,48 @@ pub fn lofi_after(parts: usize) -> Project {
         instruments.push((drone, crate::synth::recipes::tanpura()));
     }
     Project { arrangement: arr, instruments, synth: None }
+}
+
+/// The trap chain as it stands after `parts` parts (0 = a blank 140 BPM
+/// project, 4 = the arranged track).
+pub fn trap_after(parts: usize) -> Project {
+    let mut arr = empty_arrangement();
+    arr.tempo_map = TempoMap::constant(TRAP_BPM, TimeSignature::FOUR_FOUR);
+    let mut instruments = Vec::new();
+    // Part 4 cuts an intro (the flute alone for four bars) and drops the
+    // drums out for a bar before the hook comes round.
+    let enter = if parts >= 4 { 4 } else { 0 };
+    if parts >= 1 {
+        let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, -4.0);
+        if parts >= 4 {
+            add_clip(&mut arr, drums, "Beat", enter, TRAP_GAP_BAR, 1, trap_beat());
+            add_clip(&mut arr, drums, "Beat", TRAP_GAP_BAR + 1, 16, 1, trap_beat());
+        } else {
+            add_clip(&mut arr, drums, "Beat", 0, 16, 1, trap_beat());
+        }
+    }
+    if parts >= 2 {
+        let bass = add_track(&mut arr, "808", ClipColor::Blue, Instrument::Carve, -4.0);
+        add_clip(&mut arr, bass, "808", enter, 16, 1, steps(&TRAP_808_NOTES));
+        instruments.push((bass, crate::synth::recipes::eight_oh_eight()));
+    }
+    if parts >= 3 {
+        let melody = add_track(&mut arr, "Melody", ClipColor::Amber, Instrument::Carve, -6.0);
+        add_clip(&mut arr, melody, "Flute", 0, 16, 2, steps(&TRAP_PHRASE));
+        instruments.push((melody, crate::synth::recipes::flute()));
+    }
+    Project { arrangement: arr, instruments, synth: None }
+}
+
+/// Trap drums: half-time kick and snare, eighth-note hats, and a 32nd
+/// roll through beat 4 that starts soft and climbs.
+pub fn trap_beat() -> Vec<MidiNote> {
+    let hit = |start, pitch, velocity| MidiNote { start, length: SIXTEENTH / 2, pitch, velocity };
+    let mut notes: Vec<MidiNote> = TRAP_KICKS.iter().map(|&at| hit(at * SIXTEENTH, KICK, 120)).collect();
+    notes.push(hit(TRAP_SNARE * SIXTEENTH, SNARE, 115));
+    notes.extend((0..6).map(|i| hit(i * PPQ / 2, CLOSED_HAT, 85)));
+    notes.extend((0..8).map(|i| hit(3 * PPQ + i * PPQ / 8, CLOSED_HAT, 50 + i as u8 * 8)));
+    notes
 }
 
 /// Where the lo-fi intro's filter ends up: the Lo-fi Keys patch's own

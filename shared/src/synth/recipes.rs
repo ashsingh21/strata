@@ -147,3 +147,25 @@ mod tests {
         }
     }
 }
+
+/// A trap 808: a sine two octaves down (so it's written on the piano
+/// roll's usual rows and sounds an octave under the bass), a little drive
+/// so it still shows on phone speakers, a long boom that fades on its own,
+/// and Mono with glide so an overlapping note slides into the next.
+pub fn eight_oh_eight() -> SynthState {
+    let mut s = init("808");
+    s.osc1.waveform = Waveform::Sine;
+    s.osc1.octave = -2;
+    s.mix.osc1_db = -3.0;
+    s.filter.cutoff_hz = 1200.0;
+    s.filter.resonance = 0.0;
+    s.filter.drive_db = 8.0;
+    s.amp_env.attack_ms = 1.0;
+    s.amp_env.decay_ms = 1600.0;
+    s.amp_env.sustain = 0.3;
+    s.amp_env.release_ms = 300.0;
+    s.voice_mode = VoiceMode::Mono;
+    s.output.glide_ms = 90.0;
+    s.output.volume_db = -4.0;
+    s
+}

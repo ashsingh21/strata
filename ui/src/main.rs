@@ -277,6 +277,7 @@ fn main() -> Result<(), ApplicationError> {
             interval_scale_mask,
             export_status,
             analyzer_open,
+            tl_snap,
             preview_player.clone(),
             engine_sample_rate,
         );

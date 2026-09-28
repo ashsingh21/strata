@@ -217,6 +217,14 @@ impl Grid {
         notes.iter().rev().find(|n| n.pitch == pitch && tick >= n.start && tick < n.start + n.length).copied()
     }
 
+    /// The drum hits on `pitch`'s row that start in the step `at..at+step`.
+    /// A hit is a one-shot, so where it starts is all that counts: a 16th
+    /// hat doesn't fill the next 32nd, and painting a roll over the
+    /// hats doesn't skip every other step.
+    fn hits_in(notes: &[MidiNote], at: Ticks, step: Ticks, pitch: u8) -> Vec<Ticks> {
+        notes.iter().filter(|n| n.pitch == pitch && n.start >= at && n.start < at + step).map(|n| n.start).collect()
+    }
+
     /// Velocity (1..=127) for a y position inside the velocity lane.
     /// The notes a velocity drag on `key`'s stem changes: every note that
     /// starts with it - a chord's stems stand on top of each other, and
@@ -363,16 +371,17 @@ impl View for Grid {
                             let step = self.snap.get().ticks().unwrap_or(PPQ / 4);
                             let snapped = raw_tick.div_euclid(step).max(0) * step;
                             let snapped = snapped.clamp(0, clip_length - 1);
-                            let hit = Self::note_at(&notes, snapped, pitch);
+                            let hits = Self::hits_in(&notes, snapped, step, pitch);
                             // Shift/Alt on a hit re-voices it instead of erasing.
-                            if let (Some(hit), true) = (hit, shift || alt) {
-                                cx.emit(TimelineEvent::SetNoteVelocities { clip: clip_id, notes: vec![(hit.start, hit.pitch)], velocity });
+                            if !hits.is_empty() && (shift || alt) {
+                                let notes = hits.iter().map(|&start| (start, pitch)).collect();
+                                cx.emit(TimelineEvent::SetNoteVelocities { clip: clip_id, notes, velocity });
                                 return;
                             }
                             self.paint = Some(Paint {
                                 pitch,
-                                erase: hit.is_some(),
-                                starts: vec![hit.map(|h| h.start).unwrap_or(snapped)],
+                                erase: !hits.is_empty(),
+                                starts: if hits.is_empty() { vec![snapped] } else { hits },
                                 length: step.min(clip_length - snapped).max(1),
                                 velocity,
                             });
@@ -427,14 +436,12 @@ impl View for Grid {
                     }
                     let tick = ((lx as f64 / px_per_tick) as Ticks).min(clip_length - 1);
                     let step = self.snap.get().ticks().unwrap_or(PPQ / 4);
-                    let at = if paint.erase {
-                        Self::note_at(&notes, tick, paint.pitch).map(|n| n.start)
-                    } else {
-                        let snapped = tick.div_euclid(step) * step;
-                        Self::note_at(&notes, snapped, paint.pitch).is_none().then_some(snapped)
-                    };
-                    if let Some(at) = at.filter(|at| !paint.starts.contains(at)) {
-                        paint.starts.push(at);
+                    let snapped = tick.div_euclid(step) * step;
+                    let hits = Self::hits_in(&notes, snapped, step, paint.pitch);
+                    let at = if paint.erase { hits } else if hits.is_empty() { vec![snapped] } else { vec![] };
+                    let new: Vec<Ticks> = at.into_iter().filter(|at| !paint.starts.contains(at)).collect();
+                    if !new.is_empty() {
+                        paint.starts.extend(new);
                         self.paint = Some(paint);
                         cx.needs_redraw();
                     }

@@ -2,7 +2,7 @@
 //! which control glows. Text lives only here, so translating the course
 //! is a change to this table.
 
-use shared::arrangement::{Clip, ClipContent, EffectParam, Instrument, Ticks, EQ_LOW_CUT, PPQ};
+use shared::arrangement::{Clip, ClipContent, EffectParam, Instrument, SnapGrid, Ticks, EQ_LOW_CUT, PPQ};
 use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT, SNARE};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_SYNC_FM, CARVE_WAVES, CHORDS, FIRST_BEAT,
@@ -12,7 +12,7 @@ use shared::lessons::{
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
     THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
-    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, MELODY_STEPS, MELODY_CALL, MELODY_MOTIF,
+    MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS, MELODY_CALL, MELODY_MOTIF,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -318,6 +318,162 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "Length and timing are the other half of expression: long or short, on the grid or just off it. \
                  Most of a part's feel comes from these and velocity, not from which notes it plays.",
+            ),
+        ],
+    },
+    Lesson {
+        id: ROLL_PAINT,
+        group: ROLL,
+        title: "Beats at speed",
+        steps: &[
+            act(
+                "Press Space: a kick and a clap, and nothing in between.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Beat clip: double-click it.",
+                "Two quick clicks on the clip in the Drums lane.",
+                drums_open,
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Paint the hats: press on the Closed Hat row at beat 1 and drag right to the end of the bar before you let go.",
+                "One gesture, a whole row: every square you pass gets a hit. That's how a step sequencer is meant to be played.",
+                "Keep the button held while you drag along the glowing row.",
+                |s| hats_between(s, 0, BAR).count() >= 12,
+                |s| drum_row(s, CLOSED_HAT),
+            ),
+            recipe(
+                "Too busy. Clear beat 4: press on the hat at beat 4 and drag right. A drag that starts on a hit erases.",
+                "A gap before the bar ends makes the next downbeat land harder.",
+                "Start the drag on a hat that's already there - the ones you pass disappear.",
+                |s| hats_between(s, 3 * PPQ, BAR).count() == 0 && hats_between(s, 0, 3 * PPQ).count() >= 8,
+                |s| drum_row(s, CLOSED_HAT),
+            ),
+            recipe(
+                "Accents: hold Shift and click the hats on beats 1, 2 and 3.",
+                "Loud on the beat, softer between: the hats pulse instead of buzzing.",
+                "Shift-click writes (or turns a hit into) a full-strength one. The stems in the Velocity lane show it.",
+                |s| [0, PPQ, 2 * PPQ].iter().all(|&at| hats_between(s, at, at + 1).any(|n| n.velocity >= 120)),
+                |s| drum_row(s, CLOSED_HAT),
+            ),
+            recipe(
+                "A ghost snare: hold Alt (Option on a Mac) and click the Snare row on the last square of the bar.",
+                "Alt writes a quiet hit - felt more than heard. It leans into the next bar.",
+                "The Snare row, far right. Alt-click an existing hit to soften it instead.",
+                |s| beat_notes(s).iter().any(|n| n.pitch == SNARE && n.velocity <= 60),
+                |s| drum_row(s, SNARE),
+            ),
+            recipe(
+                "Click Humanize, above the grid.",
+                "Every hit moves a hair in strength and timing, like a drummer's hands. Undo (Ctrl+Z) takes it back if you want it tight.",
+                "Next to the Swing knob.",
+                |s| {
+                    let mut v: Vec<u8> = hats_between(s, 0, BAR).map(|n| n.velocity).collect();
+                    v.sort();
+                    v.dedup();
+                    v.len() >= 4
+                },
+                |_| Some(Target::Humanize),
+            ),
+            info(
+                "Drag to paint, drag from a hit to erase, Shift for accents, Alt for ghosts, Humanize to loosen it. \
+                 A whole beat in a few gestures - try a new hat pattern and hear it change as it loops.",
+            ),
+        ],
+    },
+    Lesson {
+        id: ROLL_SWING,
+        group: ROLL,
+        title: "Swing",
+        steps: &[
+            act(
+                "Press Space: sixteen hats a bar, dead straight. Tight, but stiff.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Beat clip: double-click it.",
+                "Two quick clicks on the clip in the Drums lane.",
+                drums_open,
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Turn Swing, above the grid, all the way up.",
+                "Every second hat now lands late, three quarters of the way to the next one. That much limps.",
+                "Drag up on the little knob next to the word Swing.",
+                |s| beat_swing(s) >= 0.9,
+                |_| Some(Target::Swing),
+            ),
+            recipe(
+                "Now back to about half: between 40% and 60%.",
+                "Halfway is the hip-hop and garage pocket: loose, and still driving.",
+                "The percentage is next to the knob.",
+                |s| (0.35..=0.65).contains(&beat_swing(s)),
+                |_| Some(Target::Swing),
+            ),
+            info(
+                "Swing only moves the in-between 16ths; beats and eighths stay put, so kick and snare still line up. \
+                 Double-click the knob to go straight again. A little swing on the hats is often all a stiff beat needs.",
+            ),
+        ],
+    },
+    Lesson {
+        id: ROLL_ROLLS,
+        group: ROLL,
+        title: "Hi-hat rolls",
+        steps: &[
+            act(
+                "Press Space: a half-time trap beat - one snare a bar, on beat 3 - with plain eighth hats.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Beat clip: double-click it.",
+                "Two quick clicks on the clip in the Drums lane.",
+                drums_open,
+                |s| track_named(s, "Drums").map(|t| Target::Lane(t.id)),
+            ),
+            act(
+                "Pick 1/32 in the Snap menu, top right of the editor.",
+                "The grid gets twice as fine as 16ths.",
+                |s| s.snap == SnapGrid::ThirtySecond,
+                |_| Some(Target::Snap),
+            ),
+            recipe(
+                "A roll: press on the Closed Hat row just right of the beat 4 hat and drag to the end of the bar.",
+                "Eight hats in one beat is too fast to count, so it reads as one rattle - the trap sound.",
+                "Start on an empty square, or the drag erases.",
+                |s| hats_between(s, 3 * PPQ, BAR).count() >= 6 && hats_between(s, 3 * PPQ, BAR).any(|n| n.start % SIXTEENTH != 0),
+                |s| drum_row(s, CLOSED_HAT),
+            ),
+            act(
+                "Now pick 1/16T in the Snap menu: triplets, six to a beat.",
+                "Under 1/16 in the menu.",
+                |s| s.snap == SnapGrid::SixteenthTriplet,
+                |_| Some(Target::Snap),
+            ),
+            recipe(
+                "A triplet roll: drag along the Closed Hat row through beat 2, starting just right of its hat.",
+                "Six to a beat instead of eight: it gallops instead of buzzing. Switching between the two keeps the hats talking.",
+                "Beat 2 is the second quarter of the bar.",
+                |s| hats_between(s, PPQ, 2 * PPQ).filter(|n| n.start % (PPQ / 6) == 0 && n.start % SIXTEENTH != 0).count() >= 2,
+                |s| drum_row(s, CLOSED_HAT),
+            ),
+            recipe(
+                "Make the 32nd roll build: back to 1/32, then hold Alt (Option on a Mac) and click the first two hats of beat 4.",
+                "Soft into loud, the roll swells toward the next bar instead of just rattling.",
+                "Alt on a hit softens it to a ghost. Any two of beat 4's hats count.",
+                |s| hats_between(s, 3 * PPQ, BAR).filter(|n| n.velocity <= 60).count() >= 2,
+                |s| if s.snap == SnapGrid::ThirtySecond { drum_row(s, CLOSED_HAT) } else { Some(Target::Snap) },
+            ),
+            info(
+                "32nds for a rattle, 16th triplets for a gallop, ghosts to make a roll swell. Put one roll every bar or two, \
+                 not everywhere - the plain hats are what make the rolls stand out.",
             ),
         ],
     },
@@ -3063,7 +3219,7 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// The suggested order for someone new: a beat first, then the notes on
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
-    FIRST_BEAT, BASSLINE, CHORDS, ROLL_DYNAMICS, ROLL_LENGTH, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
+    FIRST_BEAT, BASSLINE, CHORDS, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
     THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, MELODY_STEPS, MELODY_CALL,
     MELODY_MOTIF, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
@@ -3646,6 +3802,32 @@ fn melody_row(s: &Snapshot, pitch: u8) -> Option<Target> {
 
 fn drums_open(s: &Snapshot) -> bool {
     track_open(s, "Drums")
+}
+
+/// The Drums track's first clip's pattern.
+fn beat_notes(s: &Snapshot) -> Vec<shared::arrangement::MidiNote> {
+    match named_clip(s, "Drums").map(|c| &c.content) {
+        Some(ClipContent::Midi { notes, .. }) => notes.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// The closed hats starting in `from..to` of the Drums pattern.
+fn hats_between(s: &Snapshot, from: Ticks, to: Ticks) -> impl Iterator<Item = shared::arrangement::MidiNote> {
+    beat_notes(s).into_iter().filter(move |n| n.pitch == CLOSED_HAT && (from..to).contains(&n.start))
+}
+
+fn beat_swing(s: &Snapshot) -> f32 {
+    named_clip(s, "Drums").map_or(0.0, |c| c.swing)
+}
+
+/// A pad's row while the Drums clip is open, else its lane.
+fn drum_row(s: &Snapshot, pitch: u8) -> Option<Target> {
+    if drums_open(s) {
+        Some(Target::PianoRollRow(pitch))
+    } else {
+        track_named(s, "Drums").map(|t| Target::Lane(t.id))
+    }
 }
 
 /// The dynamics lesson's closed hat at 16th `at`, and its velocity.
