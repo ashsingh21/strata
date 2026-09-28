@@ -8,6 +8,7 @@
 use std::cell::Cell;
 
 use vizia::prelude::*;
+use crate::lessons::LessonTargetExt;
 use crate::hidpi::Logical;
 
 use shared::arrangement::{Arrangement, AutomationTarget, ClipColor, Effect, EffectNodeId, EffectParam, Ticks, TrackId};
@@ -151,6 +152,7 @@ fn eq_controls(
                 .class("btn")
                 .class("sm")
                 .toggle_class("is-on", on)
+                .lesson_target(crate::lessons::Target::EqBand(band))
                 .on_press(move |cx| {
                     let mut eq = as_eq(&stored.get());
                     eq.bands[band].on = !eq.bands[band].on;
@@ -216,6 +218,7 @@ fn param_knob(
     })
     .class("knob-col")
     .toggle_class("is-automated", automated)
+    .lesson_target(crate::lessons::Target::EffectKnob(param))
     // Right-click: "Automate <param>". Track effects only - master-bus
     // automation isn't supported (lanes belong to tracks).
     .on_mouse_down(move |cx, button| {

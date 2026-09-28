@@ -184,6 +184,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                     })
                     .class("btn")
                     .class("quiet")
+                    .lesson_target(crate::lessons::Target::FileMenu)
                     // Its text lines up with the status line under it.
                     .padding_left(Pixels(0.0))
                     .padding_right(Pixels(SPACE_1))
@@ -461,7 +462,11 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
 
         // The live spectrum analyzer, beside the other output readouts.
         with_tip(
-            Button::new(cx, |cx| Label::new(cx, "Spectrum")).class("btn").class("quiet").toggle_class("is-on", props.analyzer_open),
+            Button::new(cx, |cx| Label::new(cx, "Spectrum"))
+                .class("btn")
+                .class("quiet")
+                .toggle_class("is-on", props.analyzer_open)
+                .lesson_target(crate::lessons::Target::Spectrum),
             "Show what's playing, from low to high pitch",
         )
         .on_press(|cx| cx.emit(crate::analyzer::AnalyzerEvent::Toggle));

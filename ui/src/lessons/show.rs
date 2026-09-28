@@ -3,7 +3,10 @@
 //! and try it themselves. Every entry is checked against its step by
 //! `course::tests::show_me_does_every_step`.
 
-use shared::arrangement::{Clip, ClipContent, Command, Instrument, MidiNote, Ticks, Track, TrackKind, DEFAULT_TRACK_HEIGHT, PPQ};
+use shared::arrangement::{
+    Clip, ClipContent, Command, CompressorState, Effect, EqState, Instrument, MidiNote, Ticks, Track, TrackKind, DEFAULT_TRACK_HEIGHT,
+    EQ_LOW_CUT, PPQ,
+};
 use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT, SNARE};
 use shared::lessons::*;
 use shared::synth::{FilterType, LfoTarget, SynthParam, VoiceMode, Waveform};
@@ -729,8 +732,63 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 move_note(s, 5 * PPQ, 69, 68);
             }),
         ],
+        MIX_LEVELS => vec![b(play), b(|s| select_gain(s, "Drums", -6.0)), b(|s| select_gain(s, "Chords", -12.0))],
+        MIX_EQ => vec![
+            b(play),
+            b(|s| s.analyzer_open = true),
+            b(|s| set_track(s, "Chords", |t| t.solo = true)),
+            b(|s| add_effect(s, "Chords", Effect::Eq(EqState::default()))),
+            b(|s| {
+                edit_effect(s, "Chords", |e| {
+                    if let Effect::Eq(eq) = e {
+                        eq.bands[EQ_LOW_CUT].on = true;
+                        eq.bands[EQ_LOW_CUT].freq_hz = 250.0;
+                    }
+                })
+            }),
+            b(|s| set_track(s, "Chords", |t| t.solo = false)),
+        ],
+        MIX_COMPRESS => {
+            let comp = |f: fn(&mut CompressorState)| {
+                move |s: &mut Snapshot| {
+                    edit_effect(s, "Drums", |e| {
+                        if let Effect::Compressor(c) = e {
+                            f(c)
+                        }
+                    })
+                }
+            };
+            vec![
+                b(play),
+                b(|s| add_effect(s, "Drums", Effect::Compressor(CompressorState::default()))),
+                b(comp(|c| c.threshold_db = -25.0)),
+                b(comp(|c| c.ratio = 6.0)),
+                b(comp(|c| c.attack_ms = 20.0)),
+                b(comp(|c| c.makeup_db = 4.0)),
+                b(comp(|c| {
+                    c.ratio = 20.0;
+                    c.threshold_db = -40.0;
+                })),
+            ]
+        }
+        MIX_FINISH => vec![b(play), b(|s| s.exported = true)],
         _ => vec![],
     }
+}
+
+/// Selecting `name` and pressing its "+ Compressor" / "+ EQ".
+fn add_effect(s: &mut Snapshot, name: &str, effect: Effect) {
+    let track = s.arrangement.tracks.iter().find(|t| t.name == name).unwrap().id;
+    s.selected_track = Some(track);
+    Command::AddEffectNode { track: Some(track), effect, position: None }.apply(&mut s.arrangement);
+}
+
+/// Turning a knob on `name`'s first effect of its kind (what the panel edits).
+fn edit_effect(s: &mut Snapshot, name: &str, f: impl Fn(&mut Effect)) {
+    let track = s.arrangement.tracks.iter().find(|t| t.name == name).unwrap().id;
+    let fx = s.arrangement.fx_mut(Some(track)).unwrap();
+    let node = fx.nodes.last_mut().unwrap();
+    f(&mut node.effect);
 }
 
 /// Double-clicking the theory lessons' clip on the Keys track.

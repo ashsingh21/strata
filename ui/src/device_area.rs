@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 
 use vizia::prelude::*;
+use crate::lessons::LessonTargetExt;
 
 use shared::arrangement::{Arrangement, ClipId, Effect, EffectNodeId, Instrument, SnapGrid, Ticks, TrackId, TrackKind};
 use shared::synth::SynthState;
@@ -78,6 +79,27 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
     });
 
     device_chain(cx, p, panel);
+
+    // An effect added to the selected track opens its panel, however it
+    // got there (+ EQ, the Effects Board, a lesson's Show me, redo) -
+    // otherwise its controls stayed hidden behind the instrument until its
+    // chip was clicked.
+    let effect_ids = Memo::new(move |_| {
+        let arr = p.arrangement.get();
+        p.selected_track.get().and_then(|t| arr.track(t).map(|tr| (t, tr.fx.nodes.iter().map(|n| n.id).collect::<Vec<_>>())))
+    });
+    let seen: Signal<Option<(TrackId, Vec<EffectNodeId>)>> = Signal::new(None);
+    Binding::new(cx, effect_ids, move |_| {
+        let now = effect_ids.get();
+        if let (Some((track, ids)), Some((seen_track, seen_ids))) = (&now, &seen.get()) {
+            if track == seen_track {
+                if let Some(new) = ids.iter().find(|id| !seen_ids.contains(id)) {
+                    p.viewing_effect.set(Some(*new));
+                }
+            }
+        }
+        seen.set(now);
+    });
 
     // The editor replaces the device while a clip is open - and only while
     // that clip still exists (after an undo removed it, a blank editor
@@ -281,6 +303,7 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             p.selected_track.get().is_some_and(|id| !has_compressor.get() && p.arrangement.get().track(id).is_some())
         });
         Button::new(cx, |cx| Label::new(cx, "+ Compressor"))
+            .lesson_target(crate::lessons::Target::AddCompressor)
             .class("btn")
             .class("quiet")
             .toggle_class("hidden", can_add_compressor.map(|n| !*n))
@@ -325,6 +348,7 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             p.selected_track.get().is_some_and(|id| !has_eq.get() && p.arrangement.get().track(id).is_some())
         });
         Button::new(cx, |cx| Label::new(cx, "+ EQ"))
+            .lesson_target(crate::lessons::Target::AddEq)
             .class("btn")
             .class("quiet")
             .toggle_class("hidden", can_add_eq.map(|n| !*n))

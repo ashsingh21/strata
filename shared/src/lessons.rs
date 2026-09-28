@@ -66,6 +66,14 @@ pub const MATCH_MYSTERY: &str = "match-mystery";
 pub const MATCH_NOTE: u8 = 57;
 /// How long it's held, in 16ths.
 pub const MATCH_NOTE_16THS: i64 = 12;
+/// "Mixing": the finished house track, made to sound finished.
+pub const MIX_LEVELS: &str = "mix-levels";
+pub const MIX_EQ: &str = "mix-eq";
+pub const MIX_COMPRESS: &str = "mix-compress";
+pub const MIX_FINISH: &str = "mix-finish";
+/// Where the levels lesson starts the drums (buried) and chords (too loud).
+pub const MIX_BURIED_DRUMS_DB: f32 = -22.0;
+pub const MIX_LOUD_CHORDS_DB: f32 = 0.0;
 /// "Theory": the ideas behind the notes, heard first, then written.
 pub const THEORY_OCTAVES: &str = "theory-octaves";
 pub const THEORY_SCALES: &str = "theory-scales";
@@ -308,6 +316,32 @@ fn theory_lesson(lesson: &str) -> Project {
     Project { arrangement: arr, instruments, synth: None }
 }
 
+/// The mixing lessons: the finished house track (the Projects chain's
+/// end), with the problem each lesson fixes put in.
+fn mix_lesson(lesson: &str) -> Project {
+    let mut project = project_after(5);
+    let id = |p: &Project, name: &str| p.arrangement.tracks.iter().find(|t| t.name == name).map(|t| t.id);
+    match lesson {
+        MIX_LEVELS => {
+            for (name, db) in [("Drums", MIX_BURIED_DRUMS_DB), ("Chords", MIX_LOUD_CHORDS_DB)] {
+                if let Some(t) = id(&project, name).and_then(|t| project.arrangement.track_mut(t)) {
+                    t.gain_db = db;
+                }
+            }
+        }
+        // The chords' sound has a sub under it: low end that crowds the bass.
+        MIX_EQ => {
+            if let Some(chords) = id(&project, "Chords") {
+                if let Some((_, patch)) = project.instruments.iter_mut().find(|(t, _)| *t == chords) {
+                    patch.mix.sub_db = -3.0;
+                }
+            }
+        }
+        _ => {}
+    }
+    project
+}
+
 /// The project `lesson` starts from (a blank one for an unknown id).
 pub fn starting_project(lesson: &str) -> Project {
     match lesson {
@@ -331,6 +365,9 @@ pub fn starting_project(lesson: &str) -> Project {
     }
     if lesson.starts_with("theory-") {
         return theory_lesson(lesson);
+    }
+    if lesson.starts_with("mix-") {
+        return mix_lesson(lesson);
     }
     let mut arr = empty_arrangement();
     let mut instruments = Vec::new();

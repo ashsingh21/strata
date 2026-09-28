@@ -110,6 +110,8 @@ pub fn starting_snapshot(lesson: &str) -> (Snapshot, BTreeMap<TrackId, SynthStat
         match_score: 0.0,
         key,
         scale_mask,
+        exported: false,
+        analyzer_open: false,
     };
     (snap, patches)
 }

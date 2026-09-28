@@ -260,6 +260,10 @@ fn main() -> Result<(), ApplicationError> {
 
         // Before any view is built: it also publishes the highlight signal
         // that `lesson_target` glows read.
+        let analyzer_model = analyzer::AnalyzerModel::new(analyzer_rx.take().expect("the app is built once"), engine_sample_rate);
+        let analyzer_open = analyzer_model.open;
+        let analyzer_props = analyzer::AnalyzerProps::of(&analyzer_model);
+        analyzer_model.build(cx);
         let lesson_model = lessons::LessonModel::new(
             tl_arrangement,
             selected_track,
@@ -271,6 +275,8 @@ fn main() -> Result<(), ApplicationError> {
             synth_patches,
             interval_key,
             interval_scale_mask,
+            export_status,
+            analyzer_open,
             preview_player.clone(),
             engine_sample_rate,
         );
@@ -296,10 +302,6 @@ fn main() -> Result<(), ApplicationError> {
         browser::view::DragTracker.build(cx);
         browser::start_key_analysis(cx);
 
-        let analyzer_model = analyzer::AnalyzerModel::new(analyzer_rx.take().expect("the app is built once"), engine_sample_rate);
-        let analyzer_open = analyzer_model.open;
-        let analyzer_props = analyzer::AnalyzerProps::of(&analyzer_model);
-        analyzer_model.build(cx);
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
         // the synth's animated modulation rings/scope, syncs

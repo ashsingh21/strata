@@ -51,6 +51,10 @@ pub struct Snapshot {
     /// semitones above it).
     pub key: u8,
     pub scale_mask: u16,
+    /// An export has finished (since the app started).
+    pub exported: bool,
+    /// The spectrum analyzer is showing.
+    pub analyzer_open: bool,
 }
 
 /// A control a step can make glow.
@@ -85,6 +89,19 @@ pub enum Target {
     RulerBar(i64),
     /// The Key button (header and clip editor): opens the key menu.
     KeyMenu,
+    /// A track's volume: its fader and dB readout.
+    Fader(TrackId),
+    /// "+ Compressor" / "+ EQ" in the device chain.
+    AddCompressor,
+    AddEq,
+    /// A knob in an effect's panel.
+    EffectKnob(shared::arrangement::EffectParam),
+    /// An EQ band's on/off button (index into `EqState::bands`).
+    EqBand(usize),
+    /// The Spectrum button in the header.
+    Spectrum,
+    /// The project name's menu (File).
+    FileMenu,
     /// A track's automation lanes (a canvas wash).
     Automation(TrackId),
 }
@@ -173,6 +190,8 @@ pub struct LessonModel {
     patches: Signal<BTreeMap<TrackId, SynthState>>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
+    export_status: Signal<String>,
+    analyzer_open: Signal<bool>,
     /// A quiz step's answer that was wrong (cleared on the next step).
     pub quiz_wrong: Signal<Option<usize>>,
     /// The preview playing (for the buttons' labels), and when it ends.
@@ -237,6 +256,8 @@ impl LessonModel {
         patches: Signal<BTreeMap<TrackId, SynthState>>,
         key: Signal<u8>,
         scale_mask: Signal<u16>,
+        export_status: Signal<String>,
+        analyzer_open: Signal<bool>,
         player: crate::preview_player::SharedPlayer,
         sample_rate: u32,
     ) -> Self {
@@ -258,6 +279,8 @@ impl LessonModel {
             patches,
             key,
             scale_mask,
+            export_status,
+            analyzer_open,
             quiz_wrong: Signal::new(None),
             previewing: Signal::new(None),
             preview_generation: 0,
@@ -295,6 +318,8 @@ impl LessonModel {
             match_score: self.match_score.get().unwrap_or(0.0),
             key: self.key.get(),
             scale_mask: self.scale_mask.get(),
+            exported: self.export_status.get().starts_with("Exported"),
+            analyzer_open: self.analyzer_open.get(),
         }
     }
 
@@ -441,6 +466,13 @@ impl LessonModel {
         }
         if let Some(clip) = after.open_clip.filter(|c| Some(*c) != before.open_clip) {
             cx.emit(PianoRollEvent::Open(clip));
+        }
+        if after.analyzer_open && !before.analyzer_open {
+            cx.emit(crate::analyzer::AnalyzerEvent::Toggle);
+        }
+        // An export step: the dialog, for the learner to pick where.
+        if after.exported && !before.exported {
+            cx.emit(crate::project::ProjectEvent::ExportDialog);
         }
         // A key step: what picking it in the Key menu does.
         if after.key != before.key {

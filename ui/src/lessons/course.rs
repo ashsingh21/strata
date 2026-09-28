@@ -2,7 +2,7 @@
 //! which control glows. Text lives only here, so translating the course
 //! is a change to this table.
 
-use shared::arrangement::{Clip, ClipContent, Instrument, Ticks, PPQ};
+use shared::arrangement::{Clip, ClipContent, EffectParam, Instrument, Ticks, EQ_LOW_CUT, PPQ};
 use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT, SNARE};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_WAVES, CHORDS, FIRST_BEAT,
@@ -11,7 +11,8 @@ use shared::lessons::{
     RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
-    THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION,
+    THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
+    MIX_FINISH,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -54,6 +55,7 @@ pub const ARRANGEMENT: &str = "Arrangement";
 pub const PROJECTS: &str = "Projects";
 pub const SOUND_MATCH: &str = "Sound match";
 pub const THEORY: &str = "Theory";
+pub const MIXING: &str = "Mixing";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -2039,6 +2041,180 @@ pub const LESSONS: &[Lesson] = &[
         ],
     },
     Lesson {
+        id: MIX_LEVELS,
+        group: MIXING,
+        title: "Levels",
+        steps: &[
+            act(
+                "Press Space and listen: your house track, badly mixed. The chords drown everything and the drums are nearly gone.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            recipe(
+                "Bring the drums up: drag the Drums fader until its readout says about \u{2212}6 dB.",
+                "The kick and clap are the song's pulse, and everything else sits around them. Mixes usually start from the drums.",
+                "The fader is the slider at the right of the Drums track. Anywhere from \u{2212}9 to \u{2212}3 dB is fine.",
+                |s| gain_between(s, "Drums", -9.0, -3.0),
+                |s| track_named(s, "Drums").map(|t| Target::Fader(t.id)),
+            ),
+            recipe(
+                "Now pull the Chords down to about \u{2212}12 dB.",
+                "Pads fill space, and a little goes a long way. Turning things down rather than up keeps the mix from getting too loud.",
+                "The Chords fader. Anywhere from \u{2212}18 to \u{2212}9 dB is fine.",
+                |s| gain_between(s, "Chords", -18.0, -9.0),
+                |s| track_named(s, "Chords").map(|t| Target::Fader(t.id)),
+            ),
+            info(
+                "Getting the levels right is most of a mix. Keep an eye on Out at the top right: the loudest moments should stay \
+                 below 0 dB. Set levels at a quiet volume, then turn your speakers up, not the faders.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MIX_EQ,
+        group: MIXING,
+        title: "EQ: making room",
+        steps: &[
+            act(
+                "Press Space: the bass and the chords blur together down low. That's what people call muddy.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            recipe(
+                "Open the Spectrum (top right) to see the sound, from low pitches on the left to high on the right.",
+                "Everything playing, as a picture. The tall shapes on the left are the kick and the bass.",
+                "The Spectrum button is left of CPU.",
+                |s| s.analyzer_open,
+                |_| Some(Target::Spectrum),
+            ),
+            recipe(
+                "Solo the Chords: click S on the Chords track.",
+                "Now you hear, and see, only the chords. The hump at the far left is low end that the chords don't need.",
+                "S is under the track's name.",
+                |s| track_named(s, "Chords").is_some_and(|t| t.solo),
+                |s| track_named(s, "Chords").map(|t| Target::Solo(t.id)),
+            ),
+            act(
+                "Add an EQ to the Chords: click the Chords track's name, then + EQ below.",
+                "+ EQ is in the row above the instrument, once the Chords track is selected.",
+                |s| eq_on(s, "Chords").is_some(),
+                |s| if is_selected(s, track_named(s, "Chords")) { Some(Target::AddEq) } else { track_named(s, "Chords").map(|t| Target::Lane(t.id)) },
+            ),
+            recipe(
+                "Switch on Low cut and turn its knob to about 250 Hz.",
+                "Below about 250 Hz is the bass's space. The chords lose nothing you'd miss, and the hump in the spectrum is gone.",
+                "If the EQ isn't showing, click EQ in the row above. Anywhere from 180 to 400 Hz is fine.",
+                |s| eq_on(s, "Chords").is_some_and(|e| e.bands[EQ_LOW_CUT].on && (180.0..=400.0).contains(&e.bands[EQ_LOW_CUT].freq_hz)),
+                |s| match eq_on(s, "Chords") {
+                    Some(e) if !e.bands[EQ_LOW_CUT].on => Some(Target::EqBand(EQ_LOW_CUT)),
+                    _ => Some(Target::EffectKnob(EffectParam::EqLowCut)),
+                },
+            ),
+            recipe(
+                "Unsolo the Chords, and listen to the bass come through.",
+                "That's what EQ does in a mix: take out what one part doesn't need, so another can be heard.",
+                "Click S on the Chords track again.",
+                |s| track_named(s, "Chords").is_some_and(|t| !t.solo),
+                |s| track_named(s, "Chords").map(|t| Target::Solo(t.id)),
+            ),
+            info(
+                "Cut before you boost: taking away what's in the way sounds cleaner than turning up what you want. \
+                 A low cut on everything that isn't bass or kick is one of the most common moves in mixing.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MIX_COMPRESS,
+        group: MIXING,
+        title: "Compression",
+        steps: &[
+            act(
+                "Press Space and listen to the drums: a bit thin, each hit a different size.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Add a compressor to the drums: click the Drums track's name, then + Compressor below.",
+                "+ Compressor is in the row above the drum pads, once the Drums track is selected.",
+                |s| compressor_on(s, "Drums").is_some(),
+                |s| if is_selected(s, track_named(s, "Drums")) { Some(Target::AddCompressor) } else { track_named(s, "Drums").map(|t| Target::Lane(t.id)) },
+            ),
+            recipe(
+                "Turn Threshold down to about \u{2212}25 dB.",
+                "Anything louder than the threshold gets turned down. The lower it is, the more of the drums it catches.",
+                "Anywhere below \u{2212}23 dB is fine.",
+                |s| compressor_on(s, "Drums").is_some_and(|c| c.threshold_db <= -23.0),
+                |_| Some(Target::EffectKnob(EffectParam::CompressorThreshold)),
+            ),
+            recipe(
+                "Ratio to about 6:1.",
+                "How hard it turns down: at 6:1, 6 dB over the threshold comes out as 1. Drums take a firm hand.",
+                "Anywhere from 5:1 to 10:1 is fine.",
+                |s| compressor_on(s, "Drums").is_some_and(|c| (5.0..=10.0).contains(&c.ratio)),
+                |_| Some(Target::EffectKnob(EffectParam::CompressorRatio)),
+            ),
+            recipe(
+                "Attack to about 20 ms.",
+                "A slower attack lets the first click of each hit through before the compressor reacts. That's what gives drums punch.",
+                "Anywhere from 15 to 40 ms is fine.",
+                |s| compressor_on(s, "Drums").is_some_and(|c| (15.0..=40.0).contains(&c.attack_ms)),
+                |_| Some(Target::EffectKnob(EffectParam::CompressorAttack)),
+            ),
+            recipe(
+                "Makeup to about +4 dB.",
+                "Compressing made the drums quieter. Makeup brings them back up, and now they're fuller and more even.",
+                "Anywhere from +3 dB up is fine.",
+                |s| compressor_on(s, "Drums").is_some_and(|c| c.makeup_db >= 3.0),
+                |_| Some(Target::EffectKnob(EffectParam::CompressorMakeup)),
+            ),
+            recipe(
+                "Now overdo it: Ratio right up (15:1 or more) and Threshold down to \u{2212}40 dB. Listen.",
+                "Flat and lifeless, with no punch left: that's too much. When you compress, back off until you can only just hear it working.",
+                "Both knobs, turned all the way.",
+                |s| compressor_on(s, "Drums").is_some_and(|c| c.ratio >= 15.0 && c.threshold_db <= -38.0),
+                |s| match compressor_on(s, "Drums") {
+                    Some(c) if c.ratio < 15.0 => Some(Target::EffectKnob(EffectParam::CompressorRatio)),
+                    _ => Some(Target::EffectKnob(EffectParam::CompressorThreshold)),
+                },
+            ),
+            info(
+                "Compression evens out loud and quiet moments. Gentle settings (2:1 to 4:1, a few dB turned down) glue a part \
+                 together. Put Ratio and Threshold back to where they sounded good before you move on.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MIX_FINISH,
+        group: MIXING,
+        title: "Finishing a mix",
+        steps: &[
+            act(
+                "Press Space and play the whole song. Watch Out at the top right as it goes.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            info(
+                "Out should peak somewhere around \u{2212}6 to \u{2212}1 dB. If it hits the top, turn down the loudest tracks, \
+                 not the whole song. Shor's master bus has a limiter that catches the odd peak, but it can't fix a mix that's too loud.",
+            ),
+            recipe(
+                "Export it: open the menu under the project name (top left) and choose Export Audio...",
+                "Your mix, as a WAV file you can play anywhere.",
+                "Pick where to save it; the status bar says Exported when it's done.",
+                |s| s.exported,
+                |_| Some(Target::FileMenu),
+            ),
+            info(
+                "Now listen to it on your phone, in earbuds, on a laptop. A mix that works on small speakers works anywhere, \
+                 and each place shows you something different to fix.",
+            ),
+        ],
+    },
+    Lesson {
         id: LOFI_BEAT,
         group: PROJECTS,
         title: "Lo-fi 1: the beat",
@@ -2558,7 +2734,8 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 pub const PATH: &[&str] = &[
     FIRST_BEAT, BASSLINE, CHORDS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
     THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
-    PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
+    PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
+    ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
     LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE,
 ];
 
@@ -2597,6 +2774,14 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("fifth", "7 semitones up: open and strong"),
     ("diminished", "a tense chord built from two minor thirds"),
     ("progression", "a series of chords, usually looping"),
+    ("mix", "balancing the parts of a song so each one can be heard"),
+    ("eq", "turns parts of a sound's range - its lows, middle or highs - up or down"),
+    ("spectrum", "a picture of a sound, from low pitches to high"),
+    ("compressor", "turns the loud moments of a part down, so it sounds more even"),
+    ("threshold", "the level above which a compressor starts turning down"),
+    ("ratio", "how hard a compressor turns down: at 4:1, 4 dB too loud comes out as 1"),
+    ("makeup", "volume added after compressing, to bring the part back up"),
+    ("export", "save the song as an audio file you can play anywhere"),
     ("resolve", "move from a tense chord or note to a restful one"),
     ("sargam", "the Indian note names: Sa Re Ga ma Pa Dha Ni"),
     ("komal", "lowered, in Indian music: re, ga, dha and ni are the komal notes"),
@@ -3081,6 +3266,31 @@ fn melody_has_beat(s: &Snapshot, bar: i64, beat: i64) -> bool {
 /// The melody lane until its clip is open; then nothing (any row will do).
 fn melody_target(s: &Snapshot) -> Option<Target> {
     if track_open(s, "Melody") { None } else { track_named(s, "Melody").map(|t| Target::Lane(t.id)) }
+}
+
+/// `name`'s volume is within `lo..=hi` dB.
+fn gain_between(s: &Snapshot, name: &str, lo: f32, hi: f32) -> bool {
+    track_named(s, name).is_some_and(|t| (lo..=hi).contains(&t.gain_db))
+}
+
+/// The first effect on `name`'s chain that `pick` matches.
+fn effect_on<T>(s: &Snapshot, name: &str, pick: impl Fn(&shared::arrangement::Effect) -> Option<T>) -> Option<T> {
+    let track = track_named(s, name)?;
+    s.arrangement.fx(Some(track.id))?.nodes.iter().find_map(|n| pick(&n.effect))
+}
+
+fn eq_on(s: &Snapshot, name: &str) -> Option<shared::arrangement::EqState> {
+    effect_on(s, name, |e| match e {
+        shared::arrangement::Effect::Eq(eq) => Some(*eq),
+        _ => None,
+    })
+}
+
+fn compressor_on(s: &Snapshot, name: &str) -> Option<shared::arrangement::CompressorState> {
+    effect_on(s, name, |e| match e {
+        shared::arrangement::Effect::Compressor(c) => Some(*c),
+        _ => None,
+    })
 }
 
 /// A scale preset's mask, by name.

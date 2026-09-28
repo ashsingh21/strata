@@ -317,7 +317,10 @@ pub fn track_header<'a>(
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
-                Label::new(cx, gain_text).class("meta").toggle_class("is-automated", automated);
+                Label::new(cx, gain_text)
+                    .class("meta")
+                    .toggle_class("is-automated", automated)
+                    .lesson_target(crate::lessons::Target::Fader(track_id));
 
                 // Trailing edge, away from the gain readout and fader -
                 // a destructive action sitting right next to those two
@@ -350,6 +353,7 @@ pub fn track_header<'a>(
         })
         .pointer_events(automated.map(|a| if *a { PointerEvents::None } else { PointerEvents::Auto }))
         .toggle_class("is-automated", automated)
+        .lesson_target(crate::lessons::Target::Fader(track_id))
         .on_release(move |cx, position| {
             gain_preview.set(None);
             cx.emit(TimelineEvent::SetTrackGain {
