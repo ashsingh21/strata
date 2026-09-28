@@ -328,7 +328,7 @@ fn beat(bpm: f64, sample_rate: u32) -> (Vec<f32>, String) {
     let mut arr = preview_arrangement(bpm);
     let track = midi_track(&mut arr, Instrument::Drums);
     clip(&mut arr, track, 8 * PPQ, ClipContent::Midi { notes: shared::lessons::lesson_one_beat(), loop_len: Some(4 * PPQ), link: None });
-    let sources = crate::project::decode_sources(&arr);
+    let sources = crate::project::decode_sources(&arr, sample_rate);
     let job = engine::render::RenderJob { arrangement: arr, patches: Default::default(), sources, sample_rate };
     (engine::render::render_between(&job, 0, 8 * PPQ, 0.5), format!("{bpm:.0} BPM \u{b7} 2 bars"))
 }
@@ -372,7 +372,7 @@ fn pattern(index: usize, bpm: f64, sample_rate: u32) -> Option<(Vec<f32>, String
         }
     }
     let end = template.bars * 4 * PPQ;
-    let sources = crate::project::decode_sources(&arr);
+    let sources = crate::project::decode_sources(&arr, sample_rate);
     let job = engine::render::RenderJob { arrangement: arr, patches: Default::default(), sources, sample_rate };
     Some((engine::render::render_between(&job, 0, end, 0.5), format!("{bpm:.0} BPM \u{b7} {} bars", template.bars)))
 }

@@ -183,6 +183,7 @@ fn main() -> Result<(), ApplicationError> {
             &timeline::assets_dir(),
             &tl_arrangement.get(),
             playback_decode_tx,
+            engine_sample_rate,
         );
         // The Drum Kit's samples, loaded up front: a kit can be added to
         // any track at any time and must play on its first note.

@@ -132,11 +132,14 @@ pub fn decode_wav(path: &Path) -> Option<(Vec<f32>, hound::WavSpec)> {
 /// can ever hold `decode_tx`. Returns the sending half; call it once at
 /// startup with the initial arrangement's sources, then keep the sender
 /// around to request a freshly recorded clip's source later (see
-/// `crate::recorder::RecordingCoordinator`).
+/// `crate::recorder::RecordingCoordinator`). Every source is converted to
+/// `sample_rate` (the engine's) before it's sent: the engine plays sources
+/// frame for frame.
 pub fn spawn_audio_decoder_worker(
     assets_dir: &Path,
     arrangement: &Arrangement,
     mut decode_tx: rtrb::Producer<DecodedSource>,
+    sample_rate: u32,
 ) -> std::sync::mpsc::Sender<Arc<str>> {
     let (request_tx, request_rx) = std::sync::mpsc::channel::<Arc<str>>();
     for source in audio_sources(arrangement) {
@@ -154,7 +157,8 @@ pub fn spawn_audio_decoder_worker(
                         sample_rate: spec.sample_rate,
                         channels: spec.channels,
                         samples: Arc::from(samples),
-                    };
+                    }
+                    .at_rate(sample_rate);
                     let _ = decode_tx.push(decoded);
                 }
                 None => eprintln!("playback: failed to decode {}", path.display()),

@@ -369,7 +369,7 @@ impl LessonModel {
         let generation = self.preview_generation;
         let sample_rate = self.sample_rate;
         cx.spawn(move |proxy| {
-            let sources = crate::project::decode_sources(&take.arrangement);
+            let sources = crate::project::decode_sources(&take.arrangement, sample_rate);
             let job = engine::render::RenderJob { arrangement: take.arrangement, patches: take.patches, sources, sample_rate };
             let audio = engine::render::render_between(&job, take.from, take.to, preview::TAIL_SECONDS);
             let _ = proxy.emit(LessonEvent::PreviewReady { generation, which, audio: Arc::from(audio) });

@@ -341,6 +341,7 @@ where
     // The master bus's own chain - one instance, applied once to the
     // final mix, after every track's own chain/fader, before metering.
     let mut master_effects = EffectChain::new(sample_rate);
+    let mut master_limiter = fx::Limiter::new(sample_rate);
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -357,6 +358,7 @@ where
         .build_output_stream(
             config,
             move |data: &mut [T], _info: &OutputCallbackInfo| {
+                dsp::flush_denormals();
                 // Latest-wins: only the most recent params snapshot matters.
                 while let Ok(next) = synth_params.pop() {
                     if let Some(gain) = slot_gain.get_mut(next.slot as usize) {
@@ -439,6 +441,7 @@ where
                     &mut slot_effects,
                     &mut bus_effects,
                     &mut master_effects,
+                    &mut master_limiter,
                     &mut synth_telemetry,
                     &mut click_phase,
                     &mut click_env,
@@ -480,6 +483,7 @@ fn write_block<T>(
     slot_effects: &mut [EffectChain],
     bus_effects: &mut [EffectChain],
     master_effects: &mut EffectChain,
+    master_limiter: &mut fx::Limiter,
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
     click_phase: &mut f32,
     click_env: &mut f32,
@@ -548,11 +552,14 @@ fn write_block<T>(
         *click_env *= click_decay_coeff;
 
         let (clip_l, clip_r) = if playing {
-            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth)
+            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth, clip_fade_samples(sample_rate))
         } else {
             (0.0, 0.0)
         };
-        let (mut out_l, mut out_r) = master_effects.process(synth_l + click + clip_l, synth_r + click + clip_r);
+        let (out_l, out_r) = master_effects.process(synth_l + click + clip_l, synth_r + click + clip_r);
+        // The master's last stage: nothing reaches the device (or an
+        // export) over -0.5 dBFS - a hot mix used to hard-clip there.
+        let (mut out_l, mut out_r) = master_limiter.process(out_l, out_r);
         // A lesson preview: already mixed and mastered, added last.
         if let Some((buf, pos)) = preview.as_mut() {
             if buf.looping && *pos + 1 >= buf.audio.len() {
@@ -623,12 +630,25 @@ fn write_block<T>(
 /// sum. A clip whose source hasn't finished decoding yet, or whose
 /// source's sample rate doesn't match the engine's output, is silently
 /// skipped - no resampling in this pass (see `shared::playback`).
+/// How long a clip fades in and out at its edges (and where its file runs
+/// out inside it): long enough that a cut mid-waveform doesn't click,
+/// short enough not to soften a drum hit.
+const CLIP_FADE_SECONDS: f32 = 0.003;
+
+pub(crate) fn clip_fade_samples(sample_rate: f32) -> i64 {
+    ((CLIP_FADE_SECONDS * sample_rate) as i64).max(1)
+}
+
+/// Every audio clip playing at sample `pos`, through its track's effects
+/// and fader. Sources are already at the engine's rate (converted when
+/// decoded), so a clip reads one source frame per output sample.
 fn mix_audio_clips(
     plan: &PlaybackPlan,
     sources: &[DecodedSource],
     pos: i64,
     bus_effects: &mut [EffectChain],
     bus_gain_smooth: &mut [SmoothedGain],
+    fade: i64,
 ) -> (f32, f32) {
     let mut bus_raw = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut bus_gain_db = [0.0f32; MAX_BUS_TRACKS];
@@ -655,7 +675,12 @@ fn mix_audio_clips(
             (l, r)
         };
         let slot = (clip.bus_slot as usize).min(MAX_BUS_TRACKS - 1);
-        let clip_gain = db_to_gain(clip.clip_gain_db);
+        // Short fades at the clip's edges, and where its file ends.
+        let into = pos - clip.start_sample;
+        let left = (clip.start_sample + clip.length_samples - pos).min(frame_count - frame_index);
+        let edge = into.min(left - 1).min(fade);
+        let fade_gain = if edge < fade { (edge + 1) as f32 / fade as f32 } else { 1.0 };
+        let clip_gain = db_to_gain(clip.clip_gain_db) * fade_gain;
         bus_raw[slot].0 += l * clip_gain;
         bus_raw[slot].1 += r * clip_gain;
         bus_gain_db[slot] = clip.gain_db;

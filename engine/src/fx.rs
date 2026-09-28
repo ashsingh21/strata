@@ -210,7 +210,9 @@ const LIMITER_RELEASE_MS: f32 = 120.0;
 
 impl Limiter {
     pub fn new(sample_rate: f32) -> Self {
-        let lookahead = (LIMITER_LOOKAHEAD_MS * 0.001 * sample_rate).max(1.0);
+        // A whole number of samples, so its latency can be compensated
+        // exactly (see `latency`).
+        let lookahead = (LIMITER_LOOKAHEAD_MS * 0.001 * sample_rate).round().max(2.0);
         let coeff = |ms: f32| 1.0 - (-1.0 / (ms * 0.001 * sample_rate)).exp();
         Self {
             left: DelayLine::new(lookahead as usize + 4),
@@ -223,6 +225,11 @@ impl Limiter {
             held_peak: 0.0,
             hold_left: 0,
         }
+    }
+
+    /// How many samples late the output is (the lookahead).
+    pub fn latency(&self) -> usize {
+        self.lookahead as usize - 1
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {

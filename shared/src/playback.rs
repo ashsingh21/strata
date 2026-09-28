@@ -194,6 +194,84 @@ pub struct DecodedSource {
     pub samples: Arc<[f32]>,
 }
 
+impl DecodedSource {
+    /// This source at `rate`. The engine reads sources one frame per
+    /// output sample, so every source must be converted to the engine's
+    /// rate before it gets there - a 44.1 kHz file read at 48 kHz played
+    /// 9% fast and 1.5 semitones sharp. Done once, off the audio thread.
+    pub fn at_rate(self, rate: u32) -> Self {
+        if self.sample_rate == rate || rate == 0 || self.sample_rate == 0 {
+            return self;
+        }
+        let samples = resample(&self.samples, self.channels.max(1) as usize, self.sample_rate, rate);
+        Self { samples: Arc::from(samples), sample_rate: rate, ..self }
+    }
+}
+
+/// Zero crossings of the sinc kernel either side of its centre: enough
+/// for a transition band under 2 kHz, so content just above the new
+/// Nyquist is removed rather than folded back.
+const SINC_HALF_WIDTH: f32 = 64.0;
+/// Kernel table entries per input sample (linearly interpolated between).
+const SINC_TABLE_STEPS: f32 = 512.0;
+
+/// Converts interleaved `samples` from `from` Hz to `to` Hz with a
+/// Blackman-windowed sinc (128 taps at the lower of the two rates, band-
+/// limited to just under the lower Nyquist so downsampling doesn't alias).
+pub fn resample(samples: &[f32], channels: usize, from: u32, to: u32) -> Vec<f32> {
+    let channels = channels.max(1);
+    let frames = samples.len() / channels;
+    if from == to || frames == 0 {
+        return samples.to_vec();
+    }
+    let ratio = to as f64 / from as f64;
+    // Cutoff as a fraction of the input's Nyquist.
+    let fc = (ratio.min(1.0) * 0.95) as f32;
+    // The kernel's half-width in input samples.
+    let half = SINC_HALF_WIDTH / fc;
+    let table_len = (half * SINC_TABLE_STEPS) as usize + 2;
+    let table: Vec<f32> = (0..table_len)
+        .map(|i| {
+            let x = i as f32 / SINC_TABLE_STEPS;
+            if x >= half {
+                return 0.0;
+            }
+            let arg = std::f32::consts::PI * fc * x;
+            let sinc = if arg.abs() < 1.0e-6 { 1.0 } else { arg.sin() / arg };
+            let u = x / half;
+            let window = 0.42 + 0.5 * (std::f32::consts::PI * u).cos() + 0.08 * (std::f32::consts::TAU * u).cos();
+            fc * sinc * window
+        })
+        .collect();
+    let kernel = |d: f32| {
+        let pos = d.abs() * SINC_TABLE_STEPS;
+        let i = pos as usize;
+        if i + 1 >= table.len() {
+            return 0.0;
+        }
+        let frac = pos - i as f32;
+        table[i] + (table[i + 1] - table[i]) * frac
+    };
+    let out_frames = (frames as f64 * ratio).round() as usize;
+    let reach = half.ceil() as i64;
+    let mut out = Vec::with_capacity(out_frames * channels);
+    for n in 0..out_frames {
+        let t = n as f64 / ratio;
+        let centre = t.floor() as i64;
+        let frac = (t - centre as f64) as f32;
+        let lo = (centre - reach + 1).max(0);
+        let hi = (centre + reach).min(frames as i64 - 1);
+        for ch in 0..channels {
+            let mut acc = 0.0f32;
+            for k in lo..=hi {
+                acc += samples[k as usize * channels + ch] * kernel((k - centre) as f32 - frac);
+            }
+            out.push(acc);
+        }
+    }
+    out
+}
+
 pub const PLAYBACK_PLAN_CAPACITY: usize = 4;
 /// Generous relative to how many distinct audio sources a project is
 /// likely to reference at once.
@@ -363,4 +441,49 @@ pub struct PreviewEnds {
     pub retired_tx: rtrb::Producer<PreviewBuffer>,
     pub analyzer_tx: rtrb::Producer<f32>,
     pub gain: PreviewGain,
+}
+
+#[cfg(test)]
+mod resample_tests {
+    use super::*;
+
+    fn tone(hz: f32, rate: u32, seconds: f32) -> Vec<f32> {
+        (0..(rate as f32 * seconds) as usize).map(|i| 0.5 * (std::f32::consts::TAU * hz * i as f32 / rate as f32).sin()).collect()
+    }
+
+    /// Rising zero crossings per second, away from the edges.
+    fn frequency(x: &[f32], rate: u32) -> f32 {
+        let (a, b) = (x.len() / 10, x.len() * 9 / 10);
+        let crossings = (a..b).filter(|&i| x[i - 1] < 0.0 && x[i] >= 0.0).count();
+        crossings as f32 / ((b - a) as f32 / rate as f32)
+    }
+
+    #[test]
+    fn a_tone_keeps_its_pitch_length_and_level() {
+        let src = tone(1000.0, 44_100, 1.0);
+        let out = resample(&src, 1, 44_100, 48_000);
+        assert_eq!(out.len(), 48_000);
+        assert!((frequency(&out, 48_000) - 1000.0).abs() < 2.0, "{}", frequency(&out, 48_000));
+        let peak = out[4_800..43_200].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!((peak - 0.5).abs() < 0.01, "{peak}");
+    }
+
+    #[test]
+    fn downsampling_filters_what_would_alias() {
+        // 23 kHz is above 22.05 kHz, the new Nyquist: it must go, not fold.
+        let src = tone(23_000.0, 48_000, 0.5);
+        let out = resample(&src, 1, 48_000, 44_100);
+        let peak = out[4_410..17_640].iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(peak < 0.01, "{peak}");
+    }
+
+    #[test]
+    fn stereo_channels_stay_apart_and_same_rate_is_untouched() {
+        let left = tone(500.0, 44_100, 0.2);
+        let stereo: Vec<f32> = left.iter().flat_map(|&l| [l, 0.0]).collect();
+        let out = resample(&stereo, 2, 44_100, 48_000);
+        assert!(out.iter().skip(1).step_by(2).all(|r| r.abs() < 1.0e-6));
+        let same = DecodedSource { source: Arc::from("x"), sample_rate: 48_000, channels: 2, samples: Arc::from(stereo.clone()) }.at_rate(48_000);
+        assert_eq!(same.samples.len(), stereo.len());
+    }
 }

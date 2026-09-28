@@ -20,6 +20,30 @@ pub fn poly_blamp(t: f32, dt: f32) -> f32 {
     }
 }
 
+/// Makes this thread treat denormal floats (the tiny values a decaying
+/// reverb tail, filter or envelope passes through on its way to silence)
+/// as zero. x86 CPUs process denormals up to ~100x slower, so without this
+/// the CPU spiked - and could crackle - just after sounds stopped. Call at
+/// the top of every audio callback and offline render (it's per thread,
+/// and cheap).
+#[inline]
+pub fn flush_denormals() {
+    #[cfg(target_arch = "x86_64")]
+    // SAFETY: only sets MXCSR's flush-to-zero and denormals-are-zero bits.
+    #[allow(deprecated)]
+    unsafe {
+        use std::arch::x86_64::{_mm_getcsr, _mm_setcsr};
+        _mm_setcsr(_mm_getcsr() | 0x8040);
+    }
+    #[cfg(target_arch = "aarch64")]
+    // SAFETY: only sets FPCR's flush-to-zero bit.
+    unsafe {
+        let mut fpcr: u64;
+        std::arch::asm!("mrs {}, fpcr", out(reg) fpcr);
+        std::arch::asm!("msr fpcr, {}", in(reg) fpcr | (1 << 24));
+    }
+}
+
 /// One-pole smoothing towards a target, per sample: turns block-rate
 /// parameter jumps (a knob turned while a note plays) into short ramps,
 /// so they don't click or "zipper".
@@ -188,6 +212,14 @@ mod tests {
         }
         let x = 3.0 * (1999.0f32 * 0.001).sin();
         assert!((last - x.tanh()).abs() < 0.01, "{last} vs {}", x.tanh());
+    }
+
+    #[test]
+    fn denormals_flush_to_zero() {
+        flush_denormals();
+        let tiny = std::hint::black_box(f32::MIN_POSITIVE);
+        // Halving the smallest normal float would make a denormal.
+        assert_eq!(std::hint::black_box(tiny * 0.5), 0.0);
     }
 
     #[test]

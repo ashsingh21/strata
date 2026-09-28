@@ -14,7 +14,7 @@ use shared::synth::{NoteEvent, SynthState, MAX_INSTRUMENTS};
 use crate::drums::DrumEngine;
 use crate::effects::EffectChain;
 use crate::synth::SynthEngine;
-use crate::{db_to_gain, mix_audio_clips, SmoothedGain};
+use crate::{clip_fade_samples, db_to_gain, mix_audio_clips, SmoothedGain};
 
 /// Samples per render block: how often automation and instrument settings
 /// are re-read (~2.7 ms at 48 kHz - finer than live playback's frame).
@@ -65,7 +65,6 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
     let arr = &job.arrangement;
     let sr = job.sample_rate;
     let srf = sr as f32;
-    let total = end;
 
     // One engine slot per instrument track, in track order.
     let slots: Vec<TrackId> =
@@ -80,6 +79,13 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
     let mut bus_fx: Vec<EffectChain> = (0..MAX_BUS_TRACKS).map(|_| EffectChain::new(srf)).collect();
     let mut bus_smooth = [SmoothedGain::new(srf); MAX_BUS_TRACKS];
     let mut master_fx = EffectChain::new(srf);
+    let mut master_limiter = crate::fx::Limiter::new(srf);
+    // The limiter delays everything by its lookahead: render that much
+    // further and drop that much from the start, so a hit on beat 1 of the
+    // export is on beat 1 of the file, to the sample.
+    let latency = master_limiter.latency() as u64;
+    let total = end + latency;
+    crate::dsp::flush_denormals();
     let mut plan = PlaybackPlan::default();
 
     // (track, pitch) -> overlapping notes holding it, as live playback does.
@@ -179,10 +185,13 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
                 l += fl * g;
                 r += fr * g;
             }
-            let (cl, cr) = mix_audio_clips(&plan, &job.sources, sample as i64, &mut bus_fx, &mut bus_smooth);
+            let (cl, cr) = mix_audio_clips(&plan, &job.sources, sample as i64, &mut bus_fx, &mut bus_smooth, clip_fade_samples(srf));
             let (ol, or) = master_fx.process(l + cl, r + cr);
-            out.push(ol);
-            out.push(or);
+            let (ol, or) = master_limiter.process(ol, or);
+            if sample >= start + latency {
+                out.push(ol);
+                out.push(or);
+            }
         }
 
         pending.extend_from_slice(&events[next_event..]);
@@ -196,15 +205,36 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
     Some(out)
 }
 
-/// Writes interleaved stereo `samples` as a 16-bit WAV (the most widely
-/// playable format), clipping anything past full scale.
+/// Writes interleaved stereo `samples` as a 24-bit WAV with TPDF dither:
+/// a triangular-distributed noise of +/-1 step added before rounding, so
+/// quiet fades and reverb tails keep fading smoothly instead of breaking
+/// into the grainy distortion plain truncation leaves at low levels.
 pub fn write_wav(path: &std::path::Path, samples: &[f32], sample_rate: u32) -> Result<(), hound::Error> {
-    let spec = hound::WavSpec { channels: 2, sample_rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    let spec = hound::WavSpec { channels: 2, sample_rate, bits_per_sample: 24, sample_format: hound::SampleFormat::Int };
     let mut writer = hound::WavWriter::create(path, spec)?;
-    for &s in samples {
-        writer.write_sample((s.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16)?;
+    for s in to_24_bit(samples) {
+        writer.write_sample(s)?;
     }
     writer.finalize()
+}
+
+/// Full scale for 24-bit samples.
+const FULL_SCALE_24: f32 = 8_388_607.0;
+
+/// Float samples to dithered 24-bit integers.
+fn to_24_bit(samples: &[f32]) -> impl Iterator<Item = i32> + '_ {
+    let mut rng = 0x9E37_79B9u32;
+    let mut uniform = move || {
+        rng ^= rng << 13;
+        rng ^= rng >> 17;
+        rng ^= rng << 5;
+        rng as f32 / u32::MAX as f32
+    };
+    samples.iter().map(move |&s| {
+        // Two uniform draws make a triangle from -1 to +1 steps.
+        let dither = uniform() - uniform();
+        (s.clamp(-1.0, 1.0) * FULL_SCALE_24 + dither).round().clamp(-FULL_SCALE_24 - 1.0, FULL_SCALE_24) as i32
+    })
 }
 
 #[cfg(test)]
@@ -332,5 +362,64 @@ mod tests {
         // The kick lands half a second in.
         assert_eq!(out[(24_000 - 1) * 2], 0.0);
         assert!(out[24_000 * 2] > 0.01);
+    }
+
+    #[test]
+    fn export_is_24_bit_and_dithered() {
+        // A signal quieter than one 24-bit step: undithered it would be all
+        // zeros; dithered it's noise whose average still carries it.
+        let quiet = vec![0.3 / FULL_SCALE_24; 20_000];
+        let out: Vec<i32> = to_24_bit(&quiet).collect();
+        assert!(out.iter().any(|&x| x != 0), "dither adds noise");
+        let mean = out.iter().map(|&x| x as f64).sum::<f64>() / out.len() as f64;
+        assert!((mean - 0.3).abs() < 0.05, "the average keeps the signal: {mean}");
+        assert!(out.iter().all(|&x| x.abs() <= 2), "only a step or so of noise");
+        // Full scale stays in range.
+        let loud: Vec<i32> = to_24_bit(&[1.0, -1.0, 1.5]).collect();
+        assert!(loud.iter().all(|&x| (-8_388_608..=8_388_607).contains(&x)));
+    }
+
+    #[test]
+    fn clips_fade_in_and_out_and_the_master_never_clips() {
+        // A full-scale square audio clip: its first sample is faded (no
+        // click), and the output never goes past the limiter's ceiling.
+        let mut arr = Arrangement::new(TempoMap::constant(120.0, TimeSignature::FOUR_FOUR));
+        let track = arr.alloc_id();
+        arr.tracks.push(Track {
+            id: track,
+            name: "A".into(),
+            color: ClipColor::Blue,
+            kind: TrackKind::Audio,
+            mute: false,
+            solo: false,
+            arm: false,
+            gain_db: 6.0,
+            height: shared::arrangement::DEFAULT_TRACK_HEIGHT,
+            instrument: None,
+            effects: vec![],
+            effect_slots: vec![],
+            fx: Default::default(),
+        });
+        let id = arr.alloc_id();
+        arr.clips.push(Clip {
+            id,
+            track,
+            start: 0,
+            length: PPQ * 2,
+            name: "Square".into(),
+            content: ClipContent::Audio { source: Arc::from("sq.wav"), peaks: None, source_offset_samples: 0 },
+            recording: false,
+            gain_db: 0.0,
+        });
+        let square: Vec<f32> = (0..48_000).map(|i| if (i / 50) % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let source = DecodedSource { source: Arc::from("sq.wav"), sample_rate: 48_000, channels: 1, samples: Arc::from(square) };
+        let job = RenderJob { arrangement: arr, patches: BTreeMap::new(), sources: vec![source], sample_rate: 48_000 };
+        let out = render_between(&job, 0, PPQ * 2, 0.0);
+        let peak = out.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(peak <= 0.95, "the master limiter holds -0.5 dBFS: {peak}");
+        // The limiter's 2 ms lookahead delays everything; the clip's first
+        // sound is a ramp, not a jump to full level.
+        let first = out.iter().step_by(2).position(|x| x.abs() > 1.0e-6).unwrap();
+        assert!(out[first * 2].abs() < 0.05, "starts faded: {}", out[first * 2]);
     }
 }

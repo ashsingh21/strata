@@ -336,7 +336,7 @@ impl ProjectModel {
                 if engine::render::song_end(&arrangement) == 0 {
                     return Err("nothing to export: the project has no clips".to_string());
                 }
-                let sources = decode_sources(&arrangement);
+                let sources = decode_sources(&arrangement, SAMPLE_RATE);
                 let job = engine::render::RenderJob { arrangement, patches, sources, sample_rate: SAMPLE_RATE };
                 let mut last = -1.0f32;
                 let audio = engine::render::render(&job, |p| {
@@ -577,9 +577,10 @@ pub fn startup_path() -> Option<PathBuf> {
     legacy.exists().then_some(legacy)
 }
 
-/// Every sample `arrangement` can play, decoded for the offline renderer:
-/// its audio clips, and the drum kit if any track uses it.
-pub fn decode_sources(arrangement: &shared::arrangement::Arrangement) -> Vec<shared::playback::DecodedSource> {
+/// Every sample `arrangement` can play, decoded for the offline renderer at
+/// `sample_rate` (the render's): its audio clips, and the drum kit if any
+/// track uses it.
+pub fn decode_sources(arrangement: &shared::arrangement::Arrangement, sample_rate: u32) -> Vec<shared::playback::DecodedSource> {
     let assets = crate::timeline::assets_dir();
     let mut names: Vec<Arc<str>> = crate::timeline::peaks_loader::audio_sources(arrangement).into_iter().collect();
     if arrangement.tracks.iter().any(|t| t.instrument == Some(shared::arrangement::Instrument::Drums)) {
@@ -591,12 +592,46 @@ pub fn decode_sources(arrangement: &shared::arrangement::Arrangement) -> Vec<sha
         .into_iter()
         .filter_map(|name| {
             let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&assets.join(&*name))?;
-            Some(shared::playback::DecodedSource {
-                source: name,
-                sample_rate: spec.sample_rate,
-                channels: spec.channels,
-                samples: Arc::from(samples),
-            })
+            Some(
+                shared::playback::DecodedSource {
+                    source: name,
+                    sample_rate: spec.sample_rate,
+                    channels: spec.channels,
+                    samples: Arc::from(samples),
+                }
+                .at_rate(sample_rate),
+            )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod decode_tests {
+    #[test]
+    fn library_samples_are_decoded_at_the_render_rate() {
+        // The piano loops (and kick, snare...) are 44.1 kHz files.
+        let source: std::sync::Arc<str> = "drums/piano_octave_short_loop_120_bpm.wav".into();
+        let path = crate::timeline::assets_dir().join(&*source);
+        let (raw, spec) = crate::timeline::peaks_loader::decode_wav(&path).unwrap();
+        assert_eq!(spec.sample_rate, 44_100);
+        let seconds = raw.len() as f64 / spec.channels as f64 / 44_100.0;
+        let mut arr = shared::arrangement::empty_arrangement();
+        let track = arr.alloc_id();
+        let id = arr.alloc_id();
+        arr.clips.push(shared::arrangement::Clip {
+            id,
+            track,
+            start: 0,
+            length: 3840,
+            name: "Loop".into(),
+            content: shared::arrangement::ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+            recording: false,
+            gain_db: 0.0,
+        });
+        let decoded = super::decode_sources(&arr, 48_000);
+        let d = decoded.iter().find(|d| d.source == source).unwrap();
+        assert_eq!(d.sample_rate, 48_000);
+        let out_seconds = d.samples.len() as f64 / d.channels as f64 / 48_000.0;
+        assert!((out_seconds - seconds).abs() < 0.001, "{seconds} s became {out_seconds} s");
+    }
 }
