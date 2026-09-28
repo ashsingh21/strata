@@ -629,6 +629,7 @@ fn main() -> Result<(), ApplicationError> {
             // The key menu's one dropdown, over everything (see key_menu).
             key_menu::host(cx, interval_key, interval_scale_mask, interval_open);
             timeline::snap_menu_host(cx, tl_snap);
+            app::restyle_anchor(cx);
             // Selecting clips drops the Effects Board's node selection, so
             // Delete removes what was picked last (see TimelineState::fx_selected).
             Binding::new(cx, tl_selection, move |_cx| {

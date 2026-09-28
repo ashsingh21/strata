@@ -269,6 +269,32 @@ impl AppData {
 /// Every view, repainted: a theme change restyles the whole window, but
 /// Vizia repaints only regions it knows changed, so views whose own
 /// state didn't move (the status bar) kept the old theme's colours.
+///
+/// Vizia draws with the old styles too, unless everything is restyled: a
+/// click queues the root alone for restyle (its `:hover`/`:active` state),
+/// and `needs_restyle` on an already-queued view skips its descendants, so
+/// picking a theme from the Settings menu left the panels in the old one
+/// until the pointer next moved over them. The anchor below is never
+/// hovered, so it is never already queued, and restyling it restyles
+/// everything under the root.
 fn repaint_all(cx: &mut EventContext) {
+    if let Some(anchor) = RESTYLE_ANCHOR.with(|a| a.get()) {
+        cx.with_current(anchor, |cx| cx.needs_restyle());
+    }
     cx.with_current(Entity::root(), |cx| cx.needs_redraw());
+}
+
+thread_local! {
+    static RESTYLE_ANCHOR: std::cell::Cell<Option<Entity>> = const { std::cell::Cell::new(None) };
+}
+
+/// A zero-size child of the app's root view, restyled to restyle the
+/// whole app (see `repaint_all`).
+pub(crate) fn restyle_anchor(cx: &mut Context) {
+    let anchor = Element::new(cx)
+        .size(Pixels(0.0))
+        .position_type(PositionType::Absolute)
+        .hoverable(false)
+        .entity();
+    RESTYLE_ANCHOR.with(|a| a.set(Some(anchor)));
 }
