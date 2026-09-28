@@ -410,10 +410,12 @@ pub fn track_header<'a>(
             cx.emit(crate::browser::BrowserEvent::DropOnTrack { item: item.id, track: Some(track_id), tick: playhead.get() });
         }
     })
-    .on_press_down(move |cx| cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id)))
+    // Any press in the header selects its track. (`on_press_down` fired
+    // only for a press on the header itself, never on its name or rows,
+    // so clicking a header did nothing.)
     .on_mouse_down(move |cx, button| {
+        cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
         if button == MouseButton::Right {
-            cx.emit(crate::synth::state::SynthEvent::SelectTrack(track_id));
             let (x, y) = (cx.lmouse().0, cx.lmouse().1);
             cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target: ContextMenuTarget::Track(track_id), x, y }));
         }
