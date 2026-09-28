@@ -147,7 +147,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         VStack::new(cx, move |cx| {
             Binding::new(cx, renaming, move |cx| {
                 if renaming.get() {
-                    Textbox::new(cx, rename_draft)
+                    let rename_box = Textbox::new(cx, rename_draft)
                         .class("title")
                         .class("search")
                         .font_size(14.0)
@@ -157,7 +157,12 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                             renaming.set(false);
                         })
                         .on_cancel(move |_cx| renaming.set(false))
-                        .width(Pixels(126.0));
+                        .width(Pixels(126.0))
+                        .entity();
+                    // Ready to type: focused, with the old name selected so
+                    // typing replaces it (and Escape cancels straight away).
+                    cx.emit_to(rename_box, TextEvent::StartEdit);
+                    cx.emit_to(rename_box, TextEvent::SelectAll);
                 } else {
                     // The project menu: the name is its button, with a
                     // chevron like the Key dropdown's.
