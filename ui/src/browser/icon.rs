@@ -19,6 +19,8 @@ pub enum IconKind {
     Learn,
     Panel,
     Settings,
+    /// Strata's mark: layers, like rock strata.
+    Logo,
     // Result types (12px box).
     Instrument,
     Preset,
@@ -42,7 +44,7 @@ impl IconKind {
     fn view_box(self) -> f32 {
         use IconKind::*;
         match self {
-            Browse | Samples | Presets | Files | History | Learn | Panel | Settings => 16.0,
+            Browse | Samples | Presets | Files | History | Learn | Panel | Settings | Logo => 16.0,
             _ => 12.0,
         }
     }
@@ -191,6 +193,11 @@ pub fn draw_icon(canvas: &Canvas, kind: IconKind, x: f32, y: f32, size: f32, col
                 ],
                 &paint,
             );
+        }
+        Logo => {
+            let mut thick = paint.clone();
+            thick.set_stroke_width(1.8 * s);
+            lines(canvas, &[((3.0, 4.5), (13.0, 4.5)), ((2.0, 8.0), (11.0, 8.0)), ((5.0, 11.5), (14.0, 11.5))], &thick);
         }
         Instrument => {
             circle(canvas, 6.0, 6.0, 4.2, &paint);

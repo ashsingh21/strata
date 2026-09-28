@@ -45,7 +45,7 @@ fn end_drag() {
 
 fn tip<'a>(cx: &'a mut Context, text: &'static str) -> Handle<'a, Tooltip> {
     Tooltip::new(cx, move |cx| {
-        Label::new(cx, text);
+        Label::new(cx, text).class("body").text_wrap(false).width(Auto).height(Auto);
     })
     .placement(Placement::Bottom)
     .arrow(false)
@@ -137,11 +137,33 @@ impl BrowserProps {
     }
 }
 
-/// The whole sidebar: rail, then (while open) the panel and its edge.
-pub fn sidebar(cx: &mut Context, p: BrowserProps) {
+/// The rail: the window's full height, left of the header too, so the
+/// top-left corner is one clean L of ground colour. Its top cell, level
+/// with the header, holds the Strata mark.
+pub fn rail_column(cx: &mut Context, p: BrowserProps, header_height: f32) {
     HStack::new(cx, move |cx| {
-        rail(cx, p);
+        VStack::new(cx, move |cx| {
+            HStack::new(cx, move |cx| {
+                Icon::new(cx, IconKind::Logo, 16.0, Signal::new(false), p.theme, |pal, _| pal.ink);
+            })
+            .alignment(Alignment::Center)
+            .width(Pixels(super::RAIL_WIDTH))
+            .height(Pixels(header_height));
+            Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
+            rail(cx, p);
+        })
+        .class("brw-rail")
+        .width(Pixels(super::RAIL_WIDTH))
+        .height(Stretch(1.0));
         hairline(cx);
+    })
+    .width(Auto)
+    .height(Stretch(1.0));
+}
+
+/// The panel (while open) and its resize edge, beside the timeline.
+pub fn panel_area(cx: &mut Context, p: BrowserProps) {
+    HStack::new(cx, move |cx| {
         panel(cx, p);
         EdgeHandle::new(cx, p.width).toggle_class("hidden", p.open.map(|o| !*o));
         hairline(cx).toggle_class("hidden", p.open.map(|o| !*o));

@@ -438,13 +438,26 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   0% {{ opacity: 0; }}
   100% {{ opacity: 1; }}
 }}
-tooltip {{
+/* `.app tooltip`, not `tooltip`: Vizia's own layout sheet styles bare
+   `tooltip` (a 160px max width, no padding) and won the tie. */
+.app tooltip {{
   size: auto;
-  max-width: 260px;
-  padding: 4px 8px;
-  border-radius: {radius_sm}px;
+  max-width: 440px;
+  /* One value per side: Vizia's `padding` shorthand takes a single
+     length, and "6px 10px" was dropped. */
+  padding-left: 10px;
+  padding-right: 10px;
+  padding-top: 6px;
+  padding-bottom: 6px;
   border-width: 1px;
   font-size: 12px;
+  /* Above everything: a rail tooltip opens over the panel beside it,
+     which is drawn later and otherwise covered it. */
+  z-index: 200;
+}}
+/* Long tips wrap inside the box instead of running past it. */
+.app tooltip label {{
+  max-width: 420px;
 }}
 .context-menu {{
   border-radius: {radius_md}px;

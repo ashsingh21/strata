@@ -103,6 +103,9 @@ fn main() -> Result<(), ApplicationError> {
         cx.add_stylesheet(include_style!("styles/base.css")).expect("failed to add base.css");
         cx.add_stylesheet(include_style!("styles/studio.css")).expect("failed to add studio.css");
         cx.add_stylesheet(include_style!("styles/daylight.css")).expect("failed to add daylight.css");
+        // Tooltips after 0.4 s, not Vizia's 1.5 s: they're how the icon
+        // rail and the quieter controls explain themselves.
+        cx.emit(EnvironmentEvent::SetTooltipDelay(Duration::from_millis(400)));
 
         let app_data = AppData::new(params.clone(), telemetry_rx, engine_handle);
         let theme = app_data.theme;
@@ -469,6 +472,11 @@ fn main() -> Result<(), ApplicationError> {
 
         let header_menus = transport::HeaderMenus::new();
         VStack::new(cx, move |cx| {
+            // The rail runs the full height; the header and everything
+            // under it sit to its right.
+            HStack::new(cx, move |cx| {
+            browser::view::rail_column(cx, browser_props, transport::HEADER_HEIGHT);
+            VStack::new(cx, move |cx| {
             transport::header(
                 cx,
                 transport::HeaderProps {
@@ -498,7 +506,7 @@ fn main() -> Result<(), ApplicationError> {
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
 
             HStack::new(cx, move |cx| {
-                browser::view::sidebar(cx, browser_props);
+                browser::view::panel_area(cx, browser_props);
 
                 VStack::new(cx, move |cx| {
                     lessons::bar::lesson_bar(cx, lesson_bar_props);
@@ -595,6 +603,13 @@ fn main() -> Result<(), ApplicationError> {
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
+            })
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
+
+            })
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
             })
             .width(Stretch(1.0))
             .height(Stretch(1.0));

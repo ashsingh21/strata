@@ -26,7 +26,8 @@ use crate::tokens::{ThemeId, SPACE_1, SPACE_2, SPACE_3};
 /// own top bar reads as the one thing everything else sits below, so it
 /// gets a size of its own rather than sharing the generic device-header
 /// token.
-const HEADER_HEIGHT: f32 = 48.0;
+const INPUT_MENU_WIDTH: f32 = 220.0;
+pub const HEADER_HEIGHT: f32 = 48.0;
 
 /// The time signature picker's options - covers what anyone actually
 /// picks; free-form numerator/denominator fields aren't worth the extra
@@ -249,6 +250,8 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
     let menus = props.menus;
     let file_menu_open = menus.file;
     let input_device_menu_open = menus.input_device;
+    // Where the input menu opens: under its button (header coordinates).
+    let input_menu_left: Signal<f32> = Signal::new(0.0);
     let renaming: Signal<bool> = Signal::new(false);
     let rename_draft: Signal<String> = Signal::new(project_name.get());
 
@@ -290,7 +293,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             });
             Label::new(cx, status).class("value").font_size(12.0);
         })
-        .width(Pixels(126.0))
+        .width(Pixels(120.0))
         .height(Auto);
 
         // The File menu. Built once and toggled with `.hidden` (`display: none`, same as
@@ -573,6 +576,13 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                     // Opening: list again, so a just-plugged-in interface is there.
                     if !input_device_menu_open.get() {
                         cx.emit(crate::recorder::RecorderModelEvent::RefreshInputDevices);
+                        // Under the button, kept inside the window. The
+                        // header starts right of the sidebar's rail.
+                        let header_left = crate::browser::RAIL_WIDTH + 1.0;
+                        use crate::hidpi::Logical;
+                        let window_w = cx.with_current(Entity::root(), |cx| cx.lbounds().w);
+                        let x = cx.lbounds().x - header_left;
+                        input_menu_left.set(x.min(window_w - header_left - INPUT_MENU_WIDTH - SPACE_3).max(0.0));
                     }
                     menus.toggle(input_device_menu_open);
                 });
@@ -581,8 +591,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .alignment(Alignment::Center)
         .size(Auto);
 
-        // Right-anchored rather than left-anchored, since its trigger
-        // sits well into the header's right side, not its left edge.
+        // Opens under its button (see its on_press).
         VStack::new(cx, move |cx| {
             input_device_menu_item(cx, "Default", None, props.selected_input_device, input_device_menu_open);
             for device in props.available_input_devices.get().iter() {
@@ -600,13 +609,13 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         .toggle_class("hidden", input_device_menu_open.map(|o| !*o))
         .position_type(PositionType::Absolute)
         .top(Pixels(HEADER_HEIGHT))
-        .right(Pixels(SPACE_3))
+        .left(input_menu_left.map(|x| Pixels(*x)))
         .gap(Pixels(2.0))
         .padding_top(Pixels(SPACE_2))
         .padding_bottom(Pixels(SPACE_2))
         .padding_left(Pixels(SPACE_1))
         .padding_right(Pixels(SPACE_1))
-        .width(Pixels(220.0))
+        .width(Pixels(INPUT_MENU_WIDTH))
         .height(Auto);
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
@@ -651,7 +660,9 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
             .width(Pixels(38.0));
     })
     .class("transport")
-    .gap(Pixels(SPACE_2))
+    // Tighter than SPACE_2: the sidebar's rail now runs up beside the
+    // header, and everything still has to fit at the default 1440px.
+    .gap(Pixels(6.0))
     .padding_left(Pixels(SPACE_3))
     .padding_right(Pixels(SPACE_3))
     .alignment(Alignment::Left)

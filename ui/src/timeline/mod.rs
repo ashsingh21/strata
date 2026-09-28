@@ -181,12 +181,21 @@ pub fn timeline_view(
                     .height(Pixels(tokens::SIZE_RULER))
                     .width(Stretch(1.0))
                     .tooltip(|cx| {
+                        // One action per line: a wrapped paragraph outgrew
+                        // the box (Vizia sizes it before wrapping).
                         Tooltip::new(cx, |cx| {
-                            Label::new(
-                                cx,
-                                "Click: move the playhead \u{b7} Drag: set a loop region \u{b7} \
-                                 Click the loop bar: loop on/off \u{b7} Right-click: add a marker or remove the loop",
-                            );
+                            VStack::new(cx, |cx| {
+                                for line in [
+                                    "Click: move the playhead",
+                                    "Drag: set a loop region",
+                                    "Click the loop bar: loop on/off",
+                                    "Right-click: add a marker or remove the loop",
+                                ] {
+                                    Label::new(cx, line);
+                                }
+                            })
+                            .gap(Pixels(2.0))
+                            .size(Auto);
                         })
                         .placement(Placement::Bottom)
                         .arrow(false)
