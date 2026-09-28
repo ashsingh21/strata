@@ -20,10 +20,10 @@ use crate::synth::state::SynthEvent;
 use crate::timeline::state::TimelineEvent;
 
 /// Where New/Open/Save As start browsing from, if the current project
-/// doesn't already live somewhere else - a plain sibling of `assets/`,
-/// created on first use.
+/// doesn't already live somewhere else - "projects" in the user's data
+/// folder (see `paths`), created on first use.
 pub fn default_projects_dir() -> PathBuf {
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../projects"));
+    let dir = crate::paths::data_dir().join("projects");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -99,7 +99,7 @@ pub enum DiscardChoice {
 /// existed - still the default a fresh checkout opens, so upgrading
 /// doesn't lose anyone's place.
 fn legacy_project_path() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../project.json"))
+    crate::paths::data_dir().join("project.json")
 }
 
 /// A path's display name: the file stem, capitalized ("my-song.json" ->

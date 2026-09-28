@@ -24,8 +24,9 @@ use state::{TimelineEvent, TimelineTool};
 use crate::timeline::state::Selection;
 use crate::tokens::{self, ThemeId};
 
+/// The shipped samples (see `paths`).
 pub fn assets_dir() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../assets"))
+    crate::paths::assets_dir()
 }
 
 /// Wider than the `size-track-head` token (176px): more breathing room for
