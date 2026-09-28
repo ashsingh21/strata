@@ -30,7 +30,7 @@ pub(crate) fn audio_sources(arrangement: &Arrangement) -> HashSet<Arc<str>> {
 /// `arrangement`'s clips.
 pub fn spawn_peak_loaders(cx: &Context, assets_dir: &Path, arrangement: &Arrangement) {
     for source in audio_sources(arrangement) {
-        let path = assets_dir.join(&*source);
+        let path = crate::paths::audio_file(assets_dir, &source);
         cx.spawn(move |proxy| {
             if let Some(pyramid) = load_and_build(&path) {
                 let _ = proxy.emit(TimelineEvent::PeaksLoaded { source, peaks: Arc::new(pyramid) });
@@ -49,7 +49,7 @@ pub fn spawn_peak_loaders(cx: &Context, assets_dir: &Path, arrangement: &Arrange
 /// shape as `Context::spawn`), since that's what's available from inside
 /// a `Model`'s event handler.
 pub fn spawn_peak_loader_for_source(cx: &mut EventContext, assets_dir: &Path, source: Arc<str>) {
-    let path = assets_dir.join(&*source);
+    let path = crate::paths::audio_file(assets_dir, &source);
     cx.spawn(move |proxy| {
         if let Some(pyramid) = load_and_build(&path) {
             let _ = proxy.emit(TimelineEvent::PeaksLoaded { source, peaks: Arc::new(pyramid) });
@@ -149,7 +149,7 @@ pub fn spawn_audio_decoder_worker(
     let assets_dir = assets_dir.to_path_buf();
     std::thread::spawn(move || {
         for source in request_rx {
-            let path = assets_dir.join(&*source);
+            let path = crate::paths::audio_file(&assets_dir, &source);
             match decode_wav(&path) {
                 Some((samples, spec)) => {
                     let decoded = DecodedSource {

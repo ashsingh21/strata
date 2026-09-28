@@ -52,6 +52,15 @@ headers, and `zenity` for file dialogs).
 | Ctrl/⌘ F | Search the browser |
 | Ctrl/⌘ T | Cycle themes: Studio, Daylight, Midnight, High contrast, Paper |
 
+## Package for macOS
+
+On a Mac, `scripts/make-dmg.sh` builds `target/dmg/Shor-<version>.dmg`: the
+app for Apple silicon and Intel, with the shipped samples. Unsigned, macOS
+warns on first open (System Settings > Privacy & Security > Open Anyway);
+set `SIGN_ID` (and `NOTARY_PROFILE`) to sign and notarize it - see the
+script. An installed copy keeps settings, projects and recordings in
+`~/Library/Application Support/Shor`.
+
 ## Code
 
 - `engine`: the real-time audio thread (cpal). It plays the arrangement,

@@ -591,7 +591,7 @@ pub fn decode_sources(arrangement: &shared::arrangement::Arrangement, sample_rat
     names
         .into_iter()
         .filter_map(|name| {
-            let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&assets.join(&*name))?;
+            let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&crate::paths::audio_file(&assets, &name))?;
             Some(
                 shared::playback::DecodedSource {
                     source: name,

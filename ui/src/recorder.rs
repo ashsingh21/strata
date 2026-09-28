@@ -203,10 +203,16 @@ impl RecordingCoordinator {
         match (self.active.get(), should_record) {
             (None, true) => {
                 let track = armed_track.expect("should_record implies armed_track.is_some()");
-                let take = self.take_counter.get();
+                // The counter starts at 0 each launch: skip names an
+                // earlier session's takes already use, or they'd be
+                // written over.
+                let mut take = self.take_counter.get();
+                while crate::paths::recordings_dir().join(format!("rec_{track}_{take}.wav")).exists() {
+                    take += 1;
+                }
                 self.take_counter.set(take + 1);
                 let source: Arc<str> = format!("rec_{track}_{take}.wav").into();
-                let path = crate::timeline::assets_dir().join(&*source);
+                let path = crate::paths::recordings_dir().join(&*source);
                 let _ = command_tx.borrow_mut().push(RecordCommand::Start { path });
                 self.active.set(Some(ActiveRecording { track, start: tick, last_tick: tick, source: take }));
                 self.live_peaks.borrow_mut().clear();

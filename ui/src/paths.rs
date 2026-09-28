@@ -61,6 +61,26 @@ pub fn data_dir() -> PathBuf {
     dir
 }
 
+/// Where recorded takes go: your data folder's Recordings (an installed
+/// app's own folder isn't for writing), or `assets` in the source tree,
+/// where they always went.
+pub fn recordings_dir() -> PathBuf {
+    let dir = if in_source_tree() { assets_dir() } else { data_dir().join("Recordings") };
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// The file behind an audio clip's `source` name: a recorded take if
+/// there's one by that name, else a sample that ships in `assets`.
+pub fn audio_file(assets: &Path, source: &str) -> PathBuf {
+    let recorded = recordings_dir().join(source);
+    if recorded.exists() {
+        recorded
+    } else {
+        assets.join(source)
+    }
+}
+
 fn user_data_dir() -> Option<PathBuf> {
     let env = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
     if cfg!(target_os = "windows") {
