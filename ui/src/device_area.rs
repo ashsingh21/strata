@@ -52,6 +52,8 @@ pub struct DeviceAreaProps {
     pub edit_mode: Signal<EditMode>,
     pub label_mode: Signal<LabelMode>,
     pub selected_notes: Signal<HashSet<NoteKey>>,
+    pub rows_octave: Signal<i32>,
+    pub draw_chord: Signal<crate::piano_roll::state::ChordShape>,
     pub snap: Signal<SnapGrid>,
     pub playhead: Signal<Ticks>,
     // Interval Input.
@@ -96,6 +98,8 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                 p.key,
                 p.scale_mask,
                 p.playhead,
+                p.rows_octave,
+                p.draw_chord,
             );
             return;
         }

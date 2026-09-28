@@ -128,6 +128,8 @@ fn main() -> Result<(), ApplicationError> {
         let piano_roll_mode = piano_roll_model.mode;
         let piano_roll_label_mode = piano_roll_model.label_mode;
         let piano_roll_selected = piano_roll_model.selected;
+        let piano_roll_octave = piano_roll_model.octave;
+        let piano_roll_chord = piano_roll_model.chord;
         piano_roll_model.build(cx);
 
         // The selected track: which instrument the panel shows, and where
@@ -574,6 +576,8 @@ fn main() -> Result<(), ApplicationError> {
                                     edit_mode: piano_roll_mode,
                                     label_mode: piano_roll_label_mode,
                                     selected_notes: piano_roll_selected,
+                                    rows_octave: piano_roll_octave,
+                                    draw_chord: piano_roll_chord,
                                     snap: tl_snap,
                                     playhead: tl_playhead,
                                     key: interval_key,

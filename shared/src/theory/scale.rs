@@ -113,6 +113,26 @@ pub fn gaps_in_mask(mask: u16) -> Vec<u8> {
         .collect()
 }
 
+/// `pitch` moved `steps` notes along the scale (`key` + `mask`) - up if
+/// positive. An off-scale pitch lands on the nearest scale note that way
+/// first. `None` if that leaves MIDI's 0..=127 (or the mask is empty).
+pub fn scale_step(pitch: u8, key: u8, mask: u16, steps: i32) -> Option<u8> {
+    let degrees = degrees_in_mask(mask);
+    if degrees.is_empty() {
+        return None;
+    }
+    let in_scale = |p: i32| degrees.contains(&(((p - key as i32).rem_euclid(12)) as u8));
+    let dir = steps.signum();
+    let mut p = pitch as i32;
+    for _ in 0..steps.abs() {
+        p += dir;
+        while (0..=127).contains(&p) && !in_scale(p) {
+            p += dir;
+        }
+    }
+    u8::try_from(p).ok().filter(|p| *p <= 127)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +188,19 @@ mod tests {
         // keeps sharps.
         assert_eq!(note_name_for_key(1, 0), "C#"); // in C
         assert_eq!(note_name_for_key(6, 6), "F#"); // root F# spells itself F#, not Gb
+    }
+
+    #[test]
+    fn scale_steps_stay_in_key() {
+        let a_minor_pent = mask(&[0, 3, 5, 7, 10]);
+        // A3 up one step is C4, down one is G3.
+        assert_eq!(scale_step(57, 9, a_minor_pent, 1), Some(60));
+        assert_eq!(scale_step(57, 9, a_minor_pent, -1), Some(55));
+        // Five steps is an octave.
+        assert_eq!(scale_step(57, 9, a_minor_pent, 5), Some(69));
+        // Off-scale B3 goes to the next scale note in that direction.
+        assert_eq!(scale_step(59, 9, a_minor_pent, 1), Some(60));
+        assert_eq!(scale_step(59, 9, a_minor_pent, -1), Some(57));
+        assert_eq!(scale_step(127, 0, mask(&[0, 2, 4, 5, 7, 9, 11]), 1), None);
     }
 }

@@ -19,7 +19,7 @@ use vizia::vg;
 use shared::arrangement::{Arrangement, ClipId, MidiNote, SnapGrid, Ticks, DEFAULT_VELOCITY, PPQ};
 use shared::theory::{degree_name, degrees_in_mask, note_name};
 
-use crate::piano_roll::state::{EditMode, LabelMode, NoteKey, PianoRollEvent};
+use crate::piano_roll::state::{ChordShape, EditMode, LabelMode, NoteKey, PianoRollEvent};
 use crate::timeline::state::TimelineEvent;
 use crate::tokens::{Palette, ThemeId};
 
@@ -36,8 +36,9 @@ const STEM_GRAB_PX: f32 = 6.0;
 /// a half so there's room to write), or two octaves up from the key's
 /// third octave for an empty clip - plus any pitch the notes use even if
 /// it's off-scale (e.g. from before a key change). High to low,
-/// piano-style.
-pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, drums: bool) -> Vec<u8> {
+/// piano-style. `octave` moves the two-octave window (the Octave −/+ in
+/// the header); notes outside it still get their rows.
+pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, drums: bool, octave: i32) -> Vec<u8> {
     // A Drum Kit clip is a step grid: one row per pad (plus any other
     // pitch the notes use), kick at the bottom, scale ignored.
     if drums {
@@ -54,9 +55,13 @@ pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, drums: bool) -> Vec<u
     // pointer); an empty clip shows the octave from the key's third.
     let base = 48 + key as i32;
     // Only ever moved down (so the top row's note can't push it up).
-    let octave = notes.iter().map(|n| n.pitch as i32).min().map(|min| (min - base).div_euclid(12).min(0)).unwrap_or(0);
-    let mut lo = base + 12 * octave;
-    let mut hi = (lo + 24).max(notes.iter().map(|n| n.pitch as i32).max().unwrap_or(0));
+    let window = base + 12 * octave;
+    let lowest = notes.iter().map(|n| n.pitch as i32).min().map(|min| (min - window).div_euclid(12).min(0)).unwrap_or(0);
+    let mut lo = window + 12 * lowest;
+    // Left alone, the window follows low notes down (a bass clip gets a
+    // compact grid); moved by hand, it stays where it was put.
+    let top = if octave == 0 { lo + 24 } else { (lo + 24).max(window + 24) };
+    let mut hi = top.max(notes.iter().map(|n| n.pitch as i32).max().unwrap_or(0));
     lo = lo.max(0);
     hi = hi.min(127);
 
@@ -109,9 +114,20 @@ pub struct Grid {
     scale_mask: Signal<u16>,
     playhead: Signal<Ticks>,
     theme: Signal<ThemeId>,
+    /// Where the rows' two-octave window sits (see `row_pitches`).
+    octave: Signal<i32>,
+    /// What a Draw click writes: one note or a chord.
+    chord: Signal<ChordShape>,
     /// A velocity stem being dragged: the note and its live (uncommitted)
     /// velocity. Committed as one undoable edit on release.
     vel_drag: Option<(NoteKey, u8)>,
+    /// Wheel travel over the row labels in the current gesture, and when
+    /// the last scroll arrived: one gesture moves one octave, so a
+    /// trackpad flick (dozens of small steps, then momentum) doesn't fly
+    /// through all of them.
+    wheel: f32,
+    wheel_at: Option<std::time::Instant>,
+    wheel_moved: bool,
 }
 
 impl Grid {
@@ -128,8 +144,10 @@ impl Grid {
         scale_mask: Signal<u16>,
         playhead: Signal<Ticks>,
         theme: Signal<ThemeId>,
+        octave: Signal<i32>,
+        chord: Signal<ChordShape>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, vel_drag: None }
+        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, vel_drag: None, wheel: 0.0, wheel_at: None, wheel_moved: false }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(open_clip, |mut h| h.needs_redraw())
@@ -141,6 +159,7 @@ impl Grid {
             .bind(scale_mask, |mut h| h.needs_redraw())
             .bind(playhead, |mut h| h.needs_redraw())
             .bind(theme, |mut h| h.needs_redraw())
+            .bind(octave, |mut h| h.needs_redraw())
             .bind(crate::lessons::highlight_signal().unwrap_or_else(|| Signal::new(None)), |mut h| h.needs_redraw())
     }
 
@@ -217,7 +236,27 @@ fn text(canvas: &Canvas, s: &str, x: f32, y: f32, size: f32, color: Color) {
 
 impl View for Grid {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        event.map(|window_event, _| match window_event {
+        event.map(|window_event, meta| match window_event {
+            // The wheel over the row labels moves the rows an octave.
+            WindowEvent::MouseScroll(_, y) => {
+                let bounds = cx.lbounds();
+                if self.drums() || cx.lmouse().0 - bounds.x >= LABEL_W {
+                    return;
+                }
+                meta.consume();
+                let now = std::time::Instant::now();
+                let new_gesture = self.wheel_at.is_none_or(|at| now.duration_since(at).as_millis() > 150);
+                self.wheel_at = Some(now);
+                if new_gesture || self.wheel.signum() != y.signum() {
+                    self.wheel = 0.0;
+                    self.wheel_moved = false;
+                }
+                self.wheel += *y;
+                if !self.wheel_moved && self.wheel.abs() >= 1.0 {
+                    cx.emit(PianoRollEvent::ShiftOctave(self.wheel.signum() as i32));
+                    self.wheel_moved = true;
+                }
+            }
             // A quick second click on the same pixel arrives as a
             // Double/TripleClick instead of a MouseDown - still a click.
             WindowEvent::MouseDown(MouseButton::Left)
@@ -225,7 +264,7 @@ impl View for Grid {
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 let Some((clip_id, _clip_start, clip_length, notes)) = self.clip_info() else { return };
                 let bounds = cx.lbounds();
-                let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums());
+                let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums(), self.octave.get());
                 if rows.is_empty() || clip_length <= 0 {
                     return;
                 }
@@ -277,10 +316,13 @@ impl View for Grid {
                         } else {
                             let step = self.snap.get().ticks().unwrap_or(PPQ / 4);
                             let length = step.min(clip_length - snapped).max(1);
-                            cx.emit(TimelineEvent::AddMidiNoteAt {
-                                clip: clip_id,
-                                note: MidiNote { start: snapped, length, pitch, velocity: DEFAULT_VELOCITY },
-                            });
+                            let shape = if self.drums() { ChordShape::Note } else { self.chord.get() };
+                            let notes = shape
+                                .pitches(pitch, self.key.get(), self.scale_mask.get())
+                                .into_iter()
+                                .map(|pitch| MidiNote { start: snapped, length, pitch, velocity: DEFAULT_VELOCITY })
+                                .collect();
+                            cx.emit(TimelineEvent::AddMidiNotesAt { clip: clip_id, notes });
                         }
                     }
                     EditMode::Select => {
@@ -293,10 +335,21 @@ impl View for Grid {
                     }
                 }
             }
+            // Selected notes: up/down a scale step, or with Shift an
+            // octave. (The grid has focus once you've clicked in it.)
+            WindowEvent::KeyDown(code @ (Code::ArrowUp | Code::ArrowDown), _) => {
+                if self.selected.get().is_empty() {
+                    return;
+                }
+                meta.consume();
+                let dir = if *code == Code::ArrowUp { 1 } else { -1 };
+                let (octaves, steps) = if cx.modifiers().shift() { (dir, 0) } else { (0, dir) };
+                cx.emit(TimelineEvent::MoveSelectedNotes { octaves, steps, key: self.key.get(), mask: self.scale_mask.get() });
+            }
             WindowEvent::MouseMove(_, y) => {
                 if let Some((key, _)) = self.vel_drag {
                     let Some((_, _, _, notes)) = self.clip_info() else { return };
-                    let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums());
+                    let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums(), self.octave.get());
                     let lane_top = cx.lbounds().y + RULER_H + rows.len() as f32 * ROW_H;
                     self.vel_drag = Some((key, Self::velocity_at(lane_top, crate::hidpi::l(cx, *y))));
                     cx.needs_redraw();
@@ -326,7 +379,7 @@ impl View for Grid {
         }
         let key = self.key.get();
         let drums = self.drums();
-        let rows = row_pitches(&notes, key, self.scale_mask.get(), drums);
+        let rows = row_pitches(&notes, key, self.scale_mask.get(), drums, self.octave.get());
         if rows.is_empty() {
             return;
         }
@@ -541,30 +594,40 @@ mod tests {
 
     #[test]
     fn an_empty_clip_starts_on_the_keys_third_octave() {
-        let rows = row_pitches(&[], A, MINOR_PENTATONIC, false);
+        let rows = row_pitches(&[], A, MINOR_PENTATONIC, false, 0);
         assert_eq!(*rows.last().unwrap(), 57, "A3 at the bottom");
     }
 
     #[test]
     fn adding_a_note_on_a_visible_row_never_moves_the_rows() {
-        let empty = row_pitches(&[], A, MINOR_PENTATONIC, false);
+        let empty = row_pitches(&[], A, MINOR_PENTATONIC, false, 0);
         for &pitch in &empty {
-            assert_eq!(row_pitches(&[note(pitch)], A, MINOR_PENTATONIC, false), empty, "after adding {pitch}");
+            assert_eq!(row_pitches(&[note(pitch)], A, MINOR_PENTATONIC, false, 0), empty, "after adding {pitch}");
         }
         // The same from a clip that already has low notes.
         let low = [note(33), note(45)];
-        let rows = row_pitches(&low, A, MINOR_PENTATONIC, false);
+        let rows = row_pitches(&low, A, MINOR_PENTATONIC, false, 0);
         for &pitch in &rows {
             let mut more = low.to_vec();
             more.push(note(pitch));
-            assert_eq!(row_pitches(&more, A, MINOR_PENTATONIC, false), rows, "after adding {pitch}");
+            assert_eq!(row_pitches(&more, A, MINOR_PENTATONIC, false, 0), rows, "after adding {pitch}");
         }
     }
 
     #[test]
     fn low_notes_get_a_compact_grid_round_them() {
-        let rows = row_pitches(&[note(29), note(43)], A, MINOR_PENTATONIC, false);
+        let rows = row_pitches(&[note(29), note(43)], A, MINOR_PENTATONIC, false, 0);
         assert!(rows.contains(&29) && rows.contains(&43));
         assert!(rows.len() <= 12, "{} rows", rows.len());
+    }
+
+    #[test]
+    fn the_octave_moves_the_window_but_keeps_every_note() {
+        let up = row_pitches(&[], A, MINOR_PENTATONIC, false, 1);
+        assert_eq!(*up.last().unwrap(), 69, "A4 at the bottom");
+        let down = row_pitches(&[], A, MINOR_PENTATONIC, false, -2);
+        assert_eq!(*down.last().unwrap(), 33, "A1 at the bottom");
+        let with_low_note = row_pitches(&[note(45)], A, MINOR_PENTATONIC, false, 1);
+        assert!(with_low_note.contains(&45) && with_low_note.contains(&93), "A2 note kept, A6 top kept");
     }
 }

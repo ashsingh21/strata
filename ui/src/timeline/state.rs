@@ -460,10 +460,11 @@ pub enum TimelineEvent {
     /// rest) as one step of a step-entry recording.
     CommitStepChord(HashSet<u8>),
 
-    /// The piano roll's own note add/remove (one at a time; a multi-note
-    /// delete of the piano roll's selection goes through
-    /// `DeleteSelected` instead, batched into one undo step).
-    AddMidiNoteAt { clip: ClipId, note: MidiNote },
+    /// The piano roll's own note add/remove. A Draw click adds one note
+    /// or a whole chord - every note that isn't already there, as one undo
+    /// step; a multi-note delete of the selection goes through
+    /// `DeleteSelected` instead.
+    AddMidiNotesAt { clip: ClipId, notes: Vec<MidiNote> },
     RemoveMidiNoteAt { clip: ClipId, start: Ticks, pitch: u8 },
     /// Ctrl/Cmd+C, X, V: clips on the timeline, or notes when the piano
     /// roll is open with a note selection.
@@ -525,6 +526,10 @@ pub enum TimelineEvent {
     /// A velocity-lane drag ended: its notes (a chord's, usually) to one
     /// velocity, as one undo step.
     SetNoteVelocities { clip: ClipId, notes: Vec<(Ticks, u8)>, velocity: u8 },
+    /// The piano roll's selected notes moved `octaves` octaves, or
+    /// `steps` notes along the scale (`key` + `mask`), as one undo step.
+    /// Nothing moves if any would leave MIDI's range or land on a note.
+    MoveSelectedNotes { octaves: i32, steps: i32, key: u8, mask: u16 },
 
     /// A finished guitar/mic take: insert it as a real clip on `track`,
     /// one undo step, same as any other clip insertion.
@@ -1081,8 +1086,17 @@ impl Model for TimelineState {
             TimelineEvent::CommitStepChord(pitches) => {
                 self.commit_step(pitches);
             }
-            TimelineEvent::AddMidiNoteAt { clip, note } => {
-                self.do_command(Command::AddMidiNote { clip: *clip, note: *note });
+            TimelineEvent::AddMidiNotesAt { clip, notes } => {
+                let arr = self.arrangement.get();
+                let Some(ClipContent::Midi { notes: existing, .. }) = arr.clip(*clip).map(|c| &c.content) else { return };
+                let commands: Vec<Command> = notes
+                    .iter()
+                    .filter(|n| !existing.iter().any(|e| e.start == n.start && e.pitch == n.pitch))
+                    .map(|n| Command::AddMidiNote { clip: *clip, note: *n })
+                    .collect();
+                if !commands.is_empty() {
+                    self.do_command(Command::Batch(commands));
+                }
             }
             TimelineEvent::SetInstrument { track, instrument } => {
                 let arr = self.arrangement.get();
@@ -1253,6 +1267,39 @@ impl Model for TimelineState {
                     .map(|&(start, pitch)| Command::SetNoteVelocity { clip: *clip, start, pitch, velocity: *velocity })
                     .collect();
                 self.do_command(Command::Batch(commands));
+            }
+            TimelineEvent::MoveSelectedNotes { octaves, steps, key, mask } => {
+                let (Some(clip), selected) = (self.piano_roll_open_clip.get(), self.piano_roll_selected.get()) else { return };
+                let arr = self.arrangement.get();
+                if selected.is_empty() || crate::piano_roll::grid::is_drum_clip(&arr, clip) {
+                    return;
+                }
+                let Some(ClipContent::Midi { notes, .. }) = arr.clip(clip).map(|c| &c.content) else { return };
+                let moved: Option<Vec<(MidiNote, MidiNote)>> = notes
+                    .iter()
+                    .filter(|n| selected.contains(&(n.start, n.pitch)))
+                    .map(|n| {
+                        let pitch = if *octaves != 0 {
+                            u8::try_from(n.pitch as i32 + 12 * octaves).ok().filter(|p| *p <= 127)
+                        } else {
+                            shared::theory::scale_step(n.pitch, *key, *mask, *steps)
+                        }?;
+                        Some((*n, MidiNote { pitch, ..*n }))
+                    })
+                    .collect();
+                let Some(moved) = moved else { return };
+                let lands_on_a_note = moved.iter().any(|(_, to)| {
+                    !selected.contains(&(to.start, to.pitch)) && notes.iter().any(|n| n.start == to.start && n.pitch == to.pitch)
+                });
+                if moved.is_empty() || lands_on_a_note {
+                    return;
+                }
+                let removes = moved.iter().map(|(from, _)| Command::RemoveMidiNote { clip, start: from.start, pitch: from.pitch });
+                let adds = moved.iter().map(|(_, to)| Command::AddMidiNote { clip, note: *to });
+                self.do_command(Command::Batch(removes.chain(adds).collect()));
+                cx.emit(crate::piano_roll::state::PianoRollEvent::SetSelection(
+                    moved.iter().map(|(_, to)| (to.start, to.pitch)).collect(),
+                ));
             }
             TimelineEvent::RemoveMidiNoteAt { clip, start, pitch } => {
                 self.do_command(Command::RemoveMidiNote { clip: *clip, start: *start, pitch: *pitch });

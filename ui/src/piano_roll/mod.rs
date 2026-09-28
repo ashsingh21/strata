@@ -18,7 +18,7 @@ use crate::synth::segmented::segmented;
 use crate::timeline::state::TimelineEvent;
 use crate::tokens::{self, ThemeId};
 use grid::{grid_height, is_drum_clip, note_with_octave, row_pitches, ticks_to_bbs, Grid};
-use state::{EditMode, LabelMode, NoteKey, PianoRollEvent};
+use state::{ChordShape, EditMode, LabelMode, NoteKey, PianoRollEvent};
 
 /// The footer's description of the selection: how many, which degrees and
 /// notes, where, how long and how hard - or the clip's note count.
@@ -80,6 +80,8 @@ pub fn piano_roll_view(
     key: Signal<u8>,
     scale_mask: Signal<u16>,
     playhead: Signal<Ticks>,
+    octave: Signal<i32>,
+    chord: Signal<ChordShape>,
 ) {
     VStack::new(cx, move |cx| {
         // Header: the clip, then how it's labelled, then how you edit it.
@@ -196,6 +198,50 @@ pub fn piano_roll_view(
             // instruments; a Drum Kit clip's rows are its pads.
             let drums = Memo::new(move |_| open_clip.get().is_some_and(|id| is_drum_clip(&arrangement.get(), id)));
             HStack::new(cx, move |cx| {
+                // Which octaves the rows show - an empty clip can't reach a
+                // low bass or a high lead otherwise.
+                let range = Memo::new(move |_| {
+                    let arr = arrangement.get();
+                    let notes = open_clip
+                        .get()
+                        .and_then(|id| arr.clip(id))
+                        .map(|c| match &c.content {
+                            ClipContent::Midi { notes, .. } => notes.clone(),
+                            ClipContent::Audio { .. } => Vec::new(),
+                        })
+                        .unwrap_or_default();
+                    let rows = row_pitches(&notes, key.get(), scale_mask.get(), false, octave.get());
+                    match (rows.last(), rows.first()) {
+                        (Some(&lo), Some(&hi)) => format!("{}\u{2013}{}", note_with_octave(lo), note_with_octave(hi)),
+                        _ => String::new(),
+                    }
+                });
+                Label::new(cx, "Octave").class("label");
+                let octave_tip = "Move the rows up or down an octave. Shift+\u{2191}/\u{2193} moves selected notes an octave; \u{2191}/\u{2193} a scale step.";
+                Button::new(cx, |cx| Label::new(cx, "\u{2212}"))
+                    .class("btn")
+                    .class("sm")
+                    .class("quiet")
+                    .tooltip(move |cx| {
+                        Tooltip::new(cx, move |cx| {
+                            Label::new(cx, octave_tip);
+                        })
+                        .arrow(false)
+                    })
+                    .on_press(|cx| cx.emit(PianoRollEvent::ShiftOctave(-1)));
+                Label::new(cx, range).class("value");
+                Button::new(cx, |cx| Label::new(cx, "+"))
+                    .class("btn")
+                    .class("sm")
+                    .class("quiet")
+                    .tooltip(move |cx| {
+                        Tooltip::new(cx, move |cx| {
+                            Label::new(cx, octave_tip);
+                        })
+                        .arrow(false)
+                    })
+                    .on_press(|cx| cx.emit(PianoRollEvent::ShiftOctave(1)));
+                Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
                 let label_modes = [LabelMode::Notes, LabelMode::Intervals];
                 segmented(
                     cx,
@@ -228,6 +274,29 @@ pub fn piano_roll_view(
                 move |i| mode.map(move |m| *m == modes[i]),
                 move |cx, i| cx.emit(PianoRollEvent::SetMode(modes[i])),
             );
+            // What a Draw click writes - a chord for rhythm parts. Pitched
+            // clips only.
+            HStack::new(cx, move |cx| {
+                segmented(
+                    cx,
+                    3,
+                    |cx, i| Label::new(cx, ChordShape::ALL[i].label()),
+                    move |i| chord.map(move |c| *c == ChordShape::ALL[i]),
+                    move |cx, i| {
+                        cx.emit(PianoRollEvent::SetChord(ChordShape::ALL[i]));
+                        cx.emit(PianoRollEvent::SetMode(EditMode::Draw));
+                    },
+                );
+            })
+            .toggle_class("hidden", drums)
+            .tooltip(|cx| {
+                Tooltip::new(cx, |cx| {
+                    Label::new(cx, "What one click in Draw writes: a note, or a chord built on it from the key's notes.");
+                })
+                .arrow(false)
+            })
+            .width(Auto)
+            .height(Auto);
             Label::new(cx, "Snap").class("label");
             let snap_text = snap.map(|s| s.label().to_string());
             Button::new(cx, move |cx| Label::new(cx, snap_text))
@@ -260,9 +329,9 @@ pub fn piano_roll_view(
                 })
                 .unwrap_or_default();
             let drums = open_clip.get().is_some_and(|id| is_drum_clip(&arr, id));
-            Pixels(grid_height(row_pitches(&notes, key.get(), scale_mask.get(), drums).len()))
+            Pixels(grid_height(row_pitches(&notes, key.get(), scale_mask.get(), drums, octave.get()).len()))
         });
-        Grid::new(cx, arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme)
+        Grid::new(cx, arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord)
             .width(Stretch(1.0))
             .height(height);
         Element::new(cx).class("hairline").width(Stretch(1.0)).height(Pixels(1.0));

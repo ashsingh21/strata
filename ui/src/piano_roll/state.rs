@@ -4,7 +4,7 @@
 //! the arrangement and undo stack - this model only tracks what's shown
 //! and selected, none of which is itself undo-able.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use vizia::prelude::*;
 
@@ -28,6 +28,42 @@ pub enum LabelMode {
     Intervals,
 }
 
+/// What one Draw click writes: a note, or a chord stacked on it in thirds
+/// of the current scale (so it's always in key).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChordShape {
+    Note,
+    Triad,
+    Seventh,
+}
+
+impl ChordShape {
+    pub const ALL: [ChordShape; 3] = [ChordShape::Note, ChordShape::Triad, ChordShape::Seventh];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ChordShape::Note => "Note",
+            ChordShape::Triad => "Triad",
+            ChordShape::Seventh => "7th",
+        }
+    }
+
+    /// The pitches a click on `root` writes: the root, then every other
+    /// scale note above it (a third each). Notes past MIDI's top are left
+    /// out.
+    pub fn pitches(self, root: u8, key: u8, mask: u16) -> Vec<u8> {
+        let size = match self {
+            ChordShape::Note => 1,
+            ChordShape::Triad => 3,
+            ChordShape::Seventh => 4,
+        };
+        std::iter::once(Some(root))
+            .chain((1..size).map(|i| shared::theory::scale_step(root, key, mask, 2 * i)))
+            .flatten()
+            .collect()
+    }
+}
+
 /// A note's identity within its clip: `(start tick, pitch)`. Matches how
 /// `Command::RemoveMidiNote` already identifies a note, so no separate id
 /// scheme is needed.
@@ -40,6 +76,11 @@ pub struct PianoRollModel {
     pub mode: Signal<EditMode>,
     pub label_mode: Signal<LabelMode>,
     pub selected: Signal<HashSet<NoteKey>>,
+    /// The open clip's row window, in octaves from its default (see
+    /// `grid::row_pitches`), and where each clip's was left.
+    pub octave: Signal<i32>,
+    pub chord: Signal<ChordShape>,
+    octaves: HashMap<ClipId, i32>,
 }
 
 pub enum PianoRollEvent {
@@ -51,6 +92,11 @@ pub enum PianoRollEvent {
     /// `extend` (shift-click).
     SelectNote { key: NoteKey, extend: bool },
     ClearSelection,
+    /// Replaces the selection - after moving notes, so they stay selected.
+    SetSelection(HashSet<NoteKey>),
+    /// Moves the rows' window up or down by whole octaves.
+    ShiftOctave(i32),
+    SetChord(ChordShape),
 }
 
 impl PianoRollModel {
@@ -60,6 +106,9 @@ impl PianoRollModel {
             mode: Signal::new(EditMode::Draw),
             label_mode: Signal::new(LabelMode::Intervals),
             selected: Signal::new(HashSet::new()),
+            octave: Signal::new(0),
+            chord: Signal::new(ChordShape::Note),
+            octaves: HashMap::new(),
         }
     }
 }
@@ -76,6 +125,7 @@ impl Model for PianoRollModel {
             PianoRollEvent::Open(clip) => {
                 self.open_clip.set(Some(*clip));
                 self.selected.set(HashSet::new());
+                self.octave.set(self.octaves.get(clip).copied().unwrap_or(0));
             }
             PianoRollEvent::Close => {
                 self.open_clip.set(None);
@@ -95,6 +145,35 @@ impl Model for PianoRollModel {
                 });
             }
             PianoRollEvent::ClearSelection => self.selected.set(HashSet::new()),
+            PianoRollEvent::SetChord(shape) => self.chord.set(*shape),
+            PianoRollEvent::SetSelection(keys) => self.selected.set(keys.clone()),
+            PianoRollEvent::ShiftOctave(by) => {
+                let Some(clip) = self.open_clip.get() else { return };
+                // MIDI's range: A0 up to about C8 is plenty either way.
+                let octave = (self.octave.get() + by).clamp(-3, 3);
+                self.octave.set(octave);
+                self.octaves.insert(clip, octave);
+            }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const C: u8 = 0;
+    const C_MINOR: u16 = 0b0101_1010_1101; // 0 2 3 5 7 8 10
+
+    #[test]
+    fn chords_stack_thirds_in_the_key() {
+        assert_eq!(ChordShape::Note.pitches(60, C, C_MINOR), vec![60]);
+        // C minor: C Eb G, and with the 7th Bb.
+        assert_eq!(ChordShape::Triad.pitches(60, C, C_MINOR), vec![60, 63, 67]);
+        assert_eq!(ChordShape::Seventh.pitches(60, C, C_MINOR), vec![60, 63, 67, 70]);
+        // On the 3rd degree (Eb): Eb G Bb.
+        assert_eq!(ChordShape::Triad.pitches(63, C, C_MINOR), vec![63, 67, 70]);
+        // Nothing past 127.
+        assert_eq!(ChordShape::Seventh.pitches(120, C, C_MINOR), vec![120, 123, 127]);
     }
 }
