@@ -487,15 +487,15 @@ scrollview > scroll-content {{
   font-size: 11px;
 }}
 
-/* The sidebar (design/sidebar): rail, panel, results, preview dock. */
+/* The sidebar (design/sidebar): rail, panel, results, preview dock.
+   Square like the rest of Strata; only the type chips and the round
+   preview buttons are pills. */
 .brw-rail-btn {{
   border-width: 0px;
-  corner-radius: {radius_sm}px;
   padding: 0px;
 }}
 .brw-search {{
   border-width: 1px;
-  corner-radius: {radius_sm}px;
 }}
 .brw-search-field {{
   border-width: 0px;
@@ -505,7 +505,6 @@ scrollview > scroll-content {{
 .brw-kbd {{
   font-size: 11px;
   border-width: 1px;
-  corner-radius: {radius_xs}px;
   padding: 0px 4px;
 }}
 .brw-chip {{
@@ -516,13 +515,10 @@ scrollview > scroll-content {{
   font-weight: 500;
 }}
 .brw-coll {{
-  corner-radius: {radius_sm}px;
 }}
 .brw-swatch {{
-  corner-radius: 2px;
 }}
 .brw-row {{
-  corner-radius: {radius_sm}px;
 }}
 .brw-fav {{
   border-width: 0px;
@@ -538,7 +534,6 @@ scrollview > scroll-content {{
 .brw-mini {{
   border-width: 0px;
   padding: 0px;
-  corner-radius: 2px;
 }}
 .brw-pv {{
   corner-radius: 9px;
@@ -556,7 +551,6 @@ scrollview > scroll-content {{
   opacity: 1;
 }}
 .brw-fit {{
-  corner-radius: {radius_xs}px;
   padding: 0px 4px;
 }}
 .brw-fit-text {{

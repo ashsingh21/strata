@@ -756,7 +756,7 @@ impl View for Waveform {
         let mut bg = vg::Paint::default();
         bg.set_color(pal.bg_000);
         bg.set_anti_alias(true);
-        canvas.draw_rrect(vg::RRect::new_rect_xy(vg::Rect::new(b.x, b.y, b.x + b.w, b.y + b.h), 3.0, 3.0), &bg);
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(b.x, b.y, b.x + b.w, b.y + b.h), None), &bg);
         let peaks = self.p.pv_peaks.get();
         if peaks.is_empty() {
             return;
@@ -834,12 +834,12 @@ impl View for VolumeBar {
         let mut track = vg::Paint::default();
         track.set_color(pal.bg_300);
         track.set_anti_alias(true);
-        canvas.draw_rrect(vg::RRect::new_rect_xy(vg::Rect::new(b.x, y, b.x + b.w, y + 4.0), 2.0, 2.0), &track);
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(b.x, y, b.x + b.w, y + 4.0), None), &track);
         let f = ((self.p.pv_volume.get() + 48.0) / 48.0).clamp(0.0, 1.0);
         let mut fill = vg::Paint::default();
         fill.set_color(pal.ink_muted);
         fill.set_anti_alias(true);
-        canvas.draw_rrect(vg::RRect::new_rect_xy(vg::Rect::new(b.x, y, b.x + b.w * f, y + 4.0), 2.0, 2.0), &fill);
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(b.x, y, b.x + b.w * f, y + 4.0), None), &fill);
     }
 }
 
@@ -923,7 +923,7 @@ impl View for DragGhost {
         let mut bg = vg::Paint::default();
         bg.set_color(pal.bg_300);
         bg.set_anti_alias(true);
-        canvas.draw_rrect(vg::RRect::new_rect_xy(vg::Rect::new(bx, by, bx + w + 16.0, by + 22.0), 3.0, 3.0), &bg);
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(bx, by, bx + w + 16.0, by + 22.0), None), &bg);
         let mut text = vg::Paint::default();
         text.set_color(pal.ink);
         text.set_anti_alias(true);
