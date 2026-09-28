@@ -47,6 +47,10 @@ pub struct Snapshot {
     /// In a Sound match challenge: how close the patch is to the target
     /// (0 to 1; 0 elsewhere).
     pub match_score: f32,
+    /// The song's key: its home note (0 = C) and scale (bit n = n
+    /// semitones above it).
+    pub key: u8,
+    pub scale_mask: u16,
 }
 
 /// A control a step can make glow.
@@ -79,6 +83,8 @@ pub enum Target {
     Solo(TrackId),
     /// A bar on the ruler (0-based) - where to click.
     RulerBar(i64),
+    /// The Key button (header and clip editor): opens the key menu.
+    KeyMenu,
     /// A track's automation lanes (a canvas wash).
     Automation(TrackId),
 }
@@ -140,6 +146,8 @@ pub enum LessonEvent {
     ShowMe,
     /// Take back what "Show me" just did and return to that step.
     TryYourself,
+    /// A quiz step's answer (an index into its options).
+    Answer(usize),
     /// A preview finished rendering; `generation` drops a stale one.
     PreviewReady { generation: u64, which: preview::Which, audio: Arc<[f32]> },
     /// A Sound match measurement finished: the target's, or (with the
@@ -163,6 +171,10 @@ pub struct LessonModel {
     open_clip: Signal<Option<shared::arrangement::ClipId>>,
     playhead: Signal<shared::arrangement::Ticks>,
     patches: Signal<BTreeMap<TrackId, SynthState>>,
+    key: Signal<u8>,
+    scale_mask: Signal<u16>,
+    /// A quiz step's answer that was wrong (cleared on the next step).
+    pub quiz_wrong: Signal<Option<usize>>,
     /// The preview playing (for the buttons' labels), and when it ends.
     pub previewing: Signal<Option<preview::Which>>,
     /// Bumped per request, so a slow render can't start after a newer one.
@@ -223,6 +235,8 @@ impl LessonModel {
         open_clip: Signal<Option<shared::arrangement::ClipId>>,
         playhead: Signal<shared::arrangement::Ticks>,
         patches: Signal<BTreeMap<TrackId, SynthState>>,
+        key: Signal<u8>,
+        scale_mask: Signal<u16>,
         player: crate::preview_player::SharedPlayer,
         sample_rate: u32,
     ) -> Self {
@@ -242,6 +256,9 @@ impl LessonModel {
             open_clip,
             playhead,
             patches,
+            key,
+            scale_mask,
+            quiz_wrong: Signal::new(None),
             previewing: Signal::new(None),
             preview_generation: 0,
             player,
@@ -276,6 +293,8 @@ impl LessonModel {
             open_clip: self.open_clip.get().filter(|id| self.arrangement.get().clip(*id).is_some()),
             playhead: self.playhead.get(),
             match_score: self.match_score.get().unwrap_or(0.0),
+            key: self.key.get(),
+            scale_mask: self.scale_mask.get(),
         }
     }
 
@@ -298,6 +317,7 @@ impl LessonModel {
         }
         self.shown_step.set(self.shown.as_ref().map(|(i, ..)| *i));
         self.hint_visible.set(false);
+        self.quiz_wrong.set(None);
         self.set_highlight(None);
         // Reaching the closing step is finishing the lesson.
         if step == steps.len() - 1 {
@@ -352,12 +372,16 @@ impl LessonModel {
             self.stop_preview();
             return;
         }
-        let Some((lesson, _)) = self.active.get() else { return };
+        let Some((lesson, step)) = self.active.get() else { return };
         let take = match which {
             preview::Which::Goal => preview::goal(course::LESSONS[lesson].id, &self.snapshot(), &self.patches.get()),
             preview::Which::Before => self.last_change.as_ref().map(|(_, before, _)| before.clone()),
             preview::Which::After => self.last_change.as_ref().map(|(_, _, after)| after.clone()),
             preview::Which::Yours => Some(preview::take_of(&self.snapshot(), &self.patches.get())),
+            preview::Which::Quiz => match course::LESSONS[lesson].steps[step].kind {
+                course::Kind::Quiz { notes, .. } => Some(preview::quiz_take(notes)),
+                _ => None,
+            },
         };
         let Some(take) = take else { return };
         // One thing at a time: the song stops for a preview.
@@ -567,6 +591,16 @@ impl Model for LessonModel {
                 }
             }
             LessonEvent::TryYourself => self.try_yourself(cx),
+            LessonEvent::Answer(choice) => {
+                let Some((lesson, step)) = self.active.get() else { return };
+                let course::Kind::Quiz { answer, .. } = course::LESSONS[lesson].steps[step].kind else { return };
+                if *choice == answer {
+                    self.stop_preview();
+                    self.go_to(lesson, step + 1);
+                } else {
+                    self.quiz_wrong.set(Some(*choice));
+                }
+            }
             LessonEvent::PreviewReady { generation, which, audio } => {
                 if *generation != self.preview_generation || self.active.get().is_none() {
                     return;

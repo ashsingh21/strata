@@ -10,6 +10,7 @@ use shared::lessons::{
     PROJECT_ARRANGE, PROJECT_BASS, PROJECT_BASS_ROOTS, PROJECT_CHORDS, PROJECT_CHORDS_NOTES, PROJECT_FINISH, PROJECT_GROOVE,
     RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
+    THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -21,6 +22,9 @@ pub enum Kind {
     Action { check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target> },
     /// Read, then Continue.
     Info,
+    /// Listen, then pick the answer: `notes` - (16th, pitch, 16ths) - is
+    /// what Play plays, `options` the buttons, `answer` the right one.
+    Quiz { notes: &'static [(i64, u8, i64)], options: &'static [&'static str], answer: usize },
 }
 
 pub struct Step {
@@ -48,6 +52,7 @@ pub const RECIPES: &str = "Recipes";
 pub const ARRANGEMENT: &str = "Arrangement";
 pub const PROJECTS: &str = "Projects";
 pub const SOUND_MATCH: &str = "Sound match";
+pub const THEORY: &str = "Theory";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -66,6 +71,18 @@ const fn recipe(
 
 const fn info(text: &'static str) -> Step {
     Step { text, why: "", hint: "", kind: Kind::Info }
+}
+
+/// A listening question: Play, then pick one of `options`. `why` is shown
+/// once it's answered, like a recipe step's.
+const fn quiz(
+    text: &'static str,
+    why: &'static str,
+    notes: &'static [(i64, u8, i64)],
+    options: &'static [&'static str],
+    answer: usize,
+) -> Step {
+    Step { text, why, hint: "", kind: Kind::Quiz { notes, options, answer } }
 }
 
 pub const LESSONS: &[Lesson] = &[
@@ -215,6 +232,299 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "Two chords, four hits. A minor and C major share two notes (C and E), \
                  which is why one flows so smoothly into the other.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_OCTAVES,
+        group: THEORY,
+        title: "Octaves",
+        steps: &[
+            act(
+                "Press Space and listen: C, D, E, C - the start of Frère Jacques.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Tune clip: double-click it.",
+                "Two quick clicks on the clip in the Keys lane. Its notes open below.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "Move the whole tune up an octave. Pick Select (above the grid), click the first note, Shift-click the other three, then press Shift+\u{2191}.",
+                "Every note now vibrates twice as fast, yet it's plainly the same tune. That's an octave: the same note, higher.",
+                "Shift+\u{2191} moves the notes you've picked up an octave; \u{2191} on its own moves them one note of the scale.",
+                |s| theory_pattern_has_all(s, &OCTAVE_TUNE, 12) && !theory_pattern_has_any(s, &OCTAVE_TUNE, 0),
+                |s| if theory_open(s) { None } else { theory_lane(s) },
+            ),
+            recipe(
+                "Put the first C back where it was: pick Draw and click C4 on the very first square, under the moved C5.",
+                "C4 and C5 together blend almost into one note - an octave's two notes share most of what you hear in them.",
+                "C4 is the row with the dark mark, at the bottom of the grid.",
+                |s| theory_clip(s).is_some_and(|c| has_notes(c, 60, &[0])),
+                |s| theory_row(s, 60),
+            ),
+            info(
+                "An octave is 12 semitones, and both notes share a name: C4 and C5 are both C. \
+                 The number says which octave. Note names only go A to G, then repeat - octave after octave.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_SCALES,
+        group: THEORY,
+        title: "Steps and scales",
+        steps: &[
+            act(
+                "Open the Notes clip: double-click it. Every row of the grid is one semitone, the smallest step between two notes.",
+                "Two quick clicks on the empty clip in the Keys lane.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            act(
+                "Start on C: click C4 on beat 1 (the first square).",
+                "C4 is the row with the dark mark.",
+                |s| theory_beats(s, &[(60, 0)]),
+                |s| theory_row(s, 60),
+            ),
+            act(
+                "A whole step is two semitones: skip a row. Click D4 on beat 2, then E4 on beat 3.",
+                "Beats are the 1.2 and 1.3 marks on the ruler above the grid.",
+                |s| theory_beats(s, &[(62, 1), (64, 2)]),
+                |s| theory_first_missing(s, &[(62, 1), (64, 2)]),
+            ),
+            recipe(
+                "A half step is one semitone: the very next row. Click F4 on beat 4.",
+                "E to F has no row between them - on a piano, no black key.",
+                "F4 is the row right above E4.",
+                |s| theory_beats(s, &[(65, 3)]),
+                |s| theory_row(s, 65),
+            ),
+            act(
+                "Whole, whole, whole: G4, A4 and B4 on beats 1, 2 and 3 of bar 2.",
+                "Bar 2 starts at the 2 mark. Skip a row between each.",
+                |s| theory_beats(s, &[(67, 4), (69, 5), (71, 6)]),
+                |s| theory_first_missing(s, &[(67, 4), (69, 5), (71, 6)]),
+            ),
+            act(
+                "Half: C5 on beat 4 of bar 2 - the row right above B4.",
+                "C5 is the top row, with the dark mark.",
+                |s| theory_beats(s, &[(72, 7)]),
+                |s| theory_row(s, 72),
+            ),
+            recipe(
+                "Press Space: you've built a scale.",
+                "Whole, whole, half, whole, whole, whole, half: that pattern is every major scale, whatever note it starts on.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            info(
+                "That's C major - the piano's white keys. Start the same whole-and-half pattern on G and you get G major \
+                 (it needs F#, a black key, to keep the pattern). A scale is a pattern of steps; the note it starts on names it.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_KEYS,
+        group: THEORY,
+        title: "Keys: where home is",
+        steps: &[
+            act(
+                "Press Space: a tune in C major. Listen to its last note, C - it sounds like arriving home.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Tune clip: double-click it.",
+                "Two quick clicks on the clip in the Keys lane.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "Change where it lands: click the last note (C4, beat 4 of bar 2) to remove it, then click A3 in the same spot.",
+                "Now it stops on A and doesn't feel finished - or it feels sadder. Every other note is the same; only home moved.",
+                "A3 is two rows below C4. With Draw on, clicking a note removes it.",
+                |s| theory_beats(s, &[(57, 7)]) && !theory_beats(s, &[(60, 7)]),
+                |s| if theory_beats(s, &[(60, 7)]) { theory_row(s, 60) } else { theory_row(s, 57) },
+            ),
+            recipe(
+                "A key names the home note. Open the Key menu at the top of the window and pick A, then Natural minor.",
+                "A minor uses exactly C major's notes - it's C major's relative minor. The rows didn't change; the shaded home row did.",
+                "Key sits left of the tempo. Pick the note first, then the scale.",
+                |s| s.key == 9 && s.scale_mask == scale_mask("Natural minor"),
+                |_| Some(Target::KeyMenu),
+            ),
+            info(
+                "A key is a home note plus a scale: C major, A minor. Songs in the same key share their notes - \
+                 that's what the browser's Fits key button checks. Where a tune comes to rest tells your ear which key it's in.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_MAJOR_MINOR,
+        group: THEORY,
+        title: "Major and minor",
+        steps: &[
+            act(
+                "Press Space: C, E and G, up and down. Bright, like a fanfare.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            recipe(
+                "Switch the scale: open the Key menu at the top and pick Natural minor (keep C).",
+                "The rows now follow C minor: E\u{266d} replaced E. Your E's are still there, now on shaded rows - off the scale.",
+                "Key sits left of the tempo.",
+                |s| s.key == 0 && s.scale_mask == scale_mask("Natural minor"),
+                |_| Some(Target::KeyMenu),
+            ),
+            act(
+                "Open the Tune clip: double-click it.",
+                "Two quick clicks on the clip in the Keys lane.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "Lower every E to E\u{266d}: pick Select, click an E, Shift-click the other two, then press \u{2193}.",
+                "One semitone, and bright turned dark. The third note of the scale - E or E\u{266d} over C - decides major or minor.",
+                "\u{2193} moves the notes you've picked to the next note of the scale below: from E, that's E\u{266d}.",
+                |s| theory_beats_16(s, &[(63, 2), (63, 6), (63, 10)]) && !theory_pattern_has_any(s, &[(2, 64, 2), (6, 64, 2), (10, 64, 2)], 0),
+                |s| if theory_open(s) { None } else { theory_lane(s) },
+            ),
+            info(
+                "A major third is 4 semitones above the root (C to E); a minor third is 3 (C to E\u{266d}). \
+                 That one semitone is the whole difference between a major chord and a minor one.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_INTERVALS,
+        group: THEORY,
+        title: "Intervals by ear",
+        steps: &[
+            info(
+                "An interval is the distance between two notes. Four to know by ear: the octave (the same note, higher), \
+                 the fifth (open and strong - a power chord), and the thirds: major (bright) and minor (dark).",
+            ),
+            act(
+                "Press Space to hear all four, in that order: octave, fifth, major third, minor third.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            quiz(
+                "Play it, then name the interval.",
+                "An octave: the second note is the first, higher.",
+                &[(0, 60, 4), (4, 72, 6)],
+                &["Octave", "Fifth", "Third"],
+                0,
+            ),
+            quiz(
+                "And this one?",
+                "A fifth: open and hollow, the power chord's two notes.",
+                &[(0, 60, 4), (4, 67, 6)],
+                &["Octave", "Fifth", "Third"],
+                1,
+            ),
+            quiz(
+                "Major or minor third?",
+                "A major third: C to E, bright.",
+                &[(0, 60, 4), (4, 64, 6)],
+                &["Major third", "Minor third"],
+                0,
+            ),
+            quiz(
+                "And this third?",
+                "A minor third: A to C, darker.",
+                &[(0, 57, 4), (4, 60, 6)],
+                &["Major third", "Minor third"],
+                1,
+            ),
+            quiz(
+                "Now from another note.",
+                "A fifth again, from D this time: the distance is the sound, not the notes.",
+                &[(0, 62, 4), (4, 69, 6)],
+                &["Octave", "Fifth", "Minor third"],
+                1,
+            ),
+            quiz(
+                "Both at once this time.",
+                "A fifth, played together: that's how guitarists' power chords sound.",
+                &[(0, 60, 8), (0, 67, 8)],
+                &["Octave", "Fifth", "Major third"],
+                1,
+            ),
+            quiz(
+                "Last one.",
+                "A minor third: E to G, the top of a C major chord.",
+                &[(0, 64, 4), (4, 67, 6)],
+                &["Major third", "Minor third", "Fifth"],
+                1,
+            ),
+            info(
+                "Fifths make a chord solid, thirds give it its mood, octaves just double it. \
+                 Hum along when you listen to songs: you'll start hearing these everywhere.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_TRIADS,
+        group: THEORY,
+        title: "Triads",
+        steps: &[
+            act(
+                "Open the Notes clip: double-click it.",
+                "Two quick clicks on the empty clip in the Keys lane.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "Pick Triad (right of Select / Draw, above the grid), then click C4 on beat 1.",
+                "C, E and G: every other note of the scale, stacked. That's a triad - C major.",
+                "Triad writes three notes per click. C4 is the row with the dark mark.",
+                |s| theory_chord(s, &[60, 64, 67], 0),
+                |s| theory_row(s, 60),
+            ),
+            recipe(
+                "Now click D4 on beat 2.",
+                "The same shape from D - but D to F is only 3 semitones, a minor third. That makes it D minor.",
+                "Beat 2 is the 1.2 mark.",
+                |s| theory_chord(s, &[62, 65, 69], 1),
+                |s| theory_row(s, 62),
+            ),
+            recipe(
+                "E4 on beat 3, then F4 on beat 4.",
+                "E minor, then F major: the shape stays, the thirds inside it change.",
+                "Beats 3 and 4 are the 1.3 and 1.4 marks.",
+                |s| theory_chord(s, &[64, 67, 71], 2) && theory_chord(s, &[65, 69, 72], 3),
+                |s| if theory_chord(s, &[64, 67, 71], 2) { theory_row(s, 65) } else { theory_row(s, 64) },
+            ),
+            recipe(
+                "Bar 2: G4 on beat 1, A4 on beat 2, B4 on beat 3.",
+                "G major, A minor - and B diminished, the odd one: two minor thirds, tense.",
+                "Bar 2 starts at the 2 mark.",
+                |s| theory_chord(s, &[67, 71, 74], 4) && theory_chord(s, &[69, 72, 76], 5) && theory_chord(s, &[71, 74, 77], 6),
+                |s| {
+                    [(67, 4), (69, 5), (71, 6)]
+                        .into_iter()
+                        .find(|&(p, beat)| !theory_beats(s, &[(p, beat)]))
+                        .and_then(|(p, _)| theory_row(s, p))
+                },
+            ),
+            act(
+                "Come home: C4 again, on beat 4 of bar 2.",
+                "The last beat of bar 2.",
+                |s| theory_chord(s, &[60, 64, 67], 7),
+                |s| theory_row(s, 60),
+            ),
+            act("Press Space and listen to all eight.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            info(
+                "C major's seven triads: C, Dm, Em, F, G, Am and B\u{b0}. Three major, three minor, one diminished. \
+                 Most songs in C use only these - and the same shapes work in every key.",
             ),
         ],
     },
@@ -2064,7 +2374,8 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// The suggested order for someone new: a beat first, then the notes on
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
-    FIRST_BEAT, BASSLINE, CHORDS, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
+    FIRST_BEAT, BASSLINE, CHORDS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
+    THEORY_TRIADS, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
     LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE,
 ];
@@ -2096,6 +2407,13 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("major", "a brighter, happier-sounding chord or scale"),
     ("suspended", "a chord without its middle note, so it floats"),
     ("octave", "the same note, higher or lower (12 semitones apart)"),
+    ("semitone", "the smallest step between two notes: one row of the grid, one piano key to the next"),
+    ("interval", "the distance between two notes"),
+    ("scale", "the set of notes a tune uses, from a pattern of whole and half steps"),
+    ("triad", "a three-note chord: a note, the third above it and the fifth"),
+    ("third", "3 or 4 semitones up: the interval that makes a chord major or minor"),
+    ("fifth", "7 semitones up: open and strong"),
+    ("diminished", "a tense chord built from two minor thirds"),
     ("oscillator", "the part of a synth that makes the raw tone"),
     ("wave", "the shape of a tone: sine is pure, saw is buzzy"),
     ("harmonic", "the quieter, higher tones inside every note: more of them sounds brighter"),
@@ -2495,6 +2813,60 @@ fn row_or_clip(s: &Snapshot, instrument: Instrument, pitch: u8) -> Option<Target
     clips_on(s, instrument).next().map(|c| Target::Lane(c.track))
 }
 
+/// The theory lessons' Keys track's clip.
+fn theory_clip(s: &Snapshot) -> Option<&Clip> {
+    let track = track_named(s, "Keys")?;
+    s.arrangement.clips.iter().find(|c| c.track == track.id)
+}
+
+fn theory_open(s: &Snapshot) -> bool {
+    theory_clip(s).is_some_and(|c| s.open_clip == Some(c.id))
+}
+
+fn theory_lane(s: &Snapshot) -> Option<Target> {
+    track_named(s, "Keys").map(|t| Target::Lane(t.id))
+}
+
+/// `pitch`'s row once the clip is open, else the lane to open it from.
+fn theory_row(s: &Snapshot, pitch: u8) -> Option<Target> {
+    if theory_open(s) { Some(Target::PianoRollRow(pitch)) } else { theory_lane(s) }
+}
+
+/// The clip has each (pitch, beat) - a note starting anywhere in that
+/// beat (0-based, across bars), so a click in any of its squares counts.
+fn theory_beats(s: &Snapshot, want: &[(u8, i64)]) -> bool {
+    let Some(ClipContent::Midi { notes, .. }) = theory_clip(s).map(|c| &c.content) else { return false };
+    want.iter().all(|&(pitch, beat)| notes.iter().any(|n| n.pitch == pitch && n.start / PPQ == beat))
+}
+
+/// Like `theory_beats`, at exact 16ths.
+fn theory_beats_16(s: &Snapshot, want: &[(u8, i64)]) -> bool {
+    theory_clip(s).is_some_and(|c| want.iter().all(|&(pitch, at)| has_notes(c, pitch, &[at * SIXTEENTH])))
+}
+
+fn theory_first_missing(s: &Snapshot, want: &[(u8, i64)]) -> Option<Target> {
+    want.iter().find(|&&w| !theory_beats(s, &[w])).and_then(|&(p, _)| theory_row(s, p))
+}
+
+/// A tune's notes, each moved by `shift` semitones: all there / any there.
+fn theory_pattern_has_all(s: &Snapshot, tune: &[(i64, u8, i64)], shift: i32) -> bool {
+    theory_clip(s).is_some_and(|c| tune.iter().all(|&(at, p, _)| has_notes(c, (p as i32 + shift) as u8, &[at * SIXTEENTH])))
+}
+
+fn theory_pattern_has_any(s: &Snapshot, tune: &[(i64, u8, i64)], shift: i32) -> bool {
+    theory_clip(s).is_some_and(|c| tune.iter().any(|&(at, p, _)| has_notes(c, (p as i32 + shift) as u8, &[at * SIXTEENTH])))
+}
+
+/// Every one of `pitches` on `beat`.
+fn theory_chord(s: &Snapshot, pitches: &[u8], beat: i64) -> bool {
+    pitches.iter().all(|&p| theory_beats(s, &[(p, beat)]))
+}
+
+/// A scale preset's mask, by name.
+fn scale_mask(name: &str) -> u16 {
+    shared::theory::SCALE_PRESETS.iter().find(|p| p.name == name).map(|p| p.mask).unwrap_or(0)
+}
+
 /// Whether `clip`'s pattern has `pitch` at every one of `starts`.
 fn has_notes(clip: &Clip, pitch: u8, starts: &[Ticks]) -> bool {
     let ClipContent::Midi { notes, .. } = &clip.content else { return false };
@@ -2532,14 +2904,9 @@ mod tests {
 
     /// The app state a lesson starts in.
     fn start(id: &str) -> Snapshot {
-        let p = starting_project(id);
         // As `LessonEvent::Begin` leaves it: the last track selected, its
-        // patch on screen.
-        let selected = p.arrangement.tracks.last().map(|t| t.id);
-        let synth = selected
-            .and_then(|id| p.instruments.iter().find(|(t, _)| *t == id).map(|(_, patch)| patch.clone()))
-            .unwrap_or_else(shared::synth::seed_synth);
-        Snapshot { arrangement: p.arrangement, selected_track: selected, playing: false, synth, open_clip: None, playhead: 0, match_score: 0.0 }
+        // patch on screen, the lesson's key set.
+        crate::lessons::preview::starting_snapshot(id).0
     }
 
     fn lesson(id: &str) -> &'static Lesson {
@@ -2658,6 +3025,28 @@ mod tests {
         assert!(!groove_has_extra(&s));
         add_notes(&mut s, KICK, &[3 * PPQ + 3 * PPQ / 4]);
         assert!(groove_has_extra(&s));
+    }
+
+    /// The theory lessons expect what the editor really writes: the
+    /// Triad tool's chords in C major, and the down arrow taking E to E flat
+    /// in C minor.
+    #[test]
+    fn theory_steps_match_the_editor() {
+        use crate::piano_roll::state::ChordShape;
+        let major = scale_mask("Major");
+        for chord in [[60, 64, 67], [62, 65, 69], [64, 67, 71], [65, 69, 72], [67, 71, 74], [69, 72, 76], [71, 74, 77]] {
+            assert_eq!(ChordShape::Triad.pitches(chord[0], 0, major), chord.to_vec());
+        }
+        assert_eq!(shared::theory::scale_step(64, 0, scale_mask("Natural minor"), -1), Some(63));
+        assert_eq!(scale_mask("Chromatic"), 0xfff);
+        // Every quiz's answer is one of its buttons, and it has something to play.
+        for l in LESSONS {
+            for step in l.steps {
+                if let Kind::Quiz { notes, options, answer } = step.kind {
+                    assert!(answer < options.len() && !notes.is_empty(), "{}: {}", l.id, step.text);
+                }
+            }
+        }
     }
 
     #[test]

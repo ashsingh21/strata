@@ -21,6 +21,7 @@ pub struct LessonBarProps {
     pub match_target: Signal<Option<std::sync::Arc<shared::analysis::Analysis>>>,
     pub match_yours: Signal<Option<std::sync::Arc<shared::analysis::Analysis>>>,
     pub match_score: Signal<Option<f32>>,
+    pub quiz_wrong: Signal<Option<usize>>,
     pub theme: Signal<crate::tokens::ThemeId>,
 }
 
@@ -36,6 +37,7 @@ impl LessonBarProps {
             match_target: model.match_target,
             match_yours: model.match_yours,
             match_score: model.match_score,
+            quiz_wrong: model.quiz_wrong,
             theme,
         }
     }
@@ -94,6 +96,19 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
                     .height(Auto)
                     .toggle_class("hidden", p.hint_visible.map(move |v| *v && !s.hint.is_empty()));
                 }
+                // A quiz answered wrong: try again, by ear.
+                if let Kind::Quiz { options, .. } = s.kind {
+                    Label::new(
+                        cx,
+                        p.quiz_wrong.map(move |w| match w {
+                            Some(i) => format!("Not {} - play it again and listen.", options[*i].to_lowercase()),
+                            None => String::new(),
+                        }),
+                    )
+                    .class("value")
+                    .class("lesson-why")
+                    .toggle_class("hidden", p.quiz_wrong.map(|w| w.is_none()));
+                }
                 if !s.hint.is_empty() {
                     Label::new(cx, s.hint)
                         .class("value")
@@ -117,8 +132,9 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
 
             // Where this lesson is going, to have in your ears first (a
             // Sound match has its own Target / Yours buttons instead).
+            // A quiz has its own Play.
             let is_match = super::sound_match::target(l.id).is_some();
-            if !is_match {
+            if !is_match && !matches!(s.kind, Kind::Quiz { .. }) {
                 preview_button(cx, p, Which::Goal, "Hear the goal").toggle_class("hidden", p.has_goal.map(|g| !*g));
             }
 
@@ -137,6 +153,20 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps) {
                         .class("btn")
                         .class("is-on")
                         .on_press(|cx| cx.emit(LessonEvent::Continue));
+                }
+                Kind::Quiz { options, .. } => {
+                    preview_button(cx, p, Which::Quiz, "Play").class("is-on");
+                    Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(22.0));
+                    for (i, option) in options.iter().enumerate() {
+                        Button::new(cx, move |cx| Label::new(cx, *option))
+                            .class("btn")
+                            .toggle_class("quiet", p.quiz_wrong.map(move |w| *w == Some(i)))
+                            .on_press(move |cx| cx.emit(LessonEvent::Answer(i)));
+                    }
+                    Button::new(cx, |cx| Label::new(cx, "Skip"))
+                        .class("btn")
+                        .class("quiet")
+                        .on_press(|cx| cx.emit(LessonEvent::Skip));
                 }
                 Kind::Action { .. } => {
                     // Stuck? Watch it done - then Undo to try it yourself.

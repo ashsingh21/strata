@@ -38,6 +38,28 @@ pub enum Which {
     After,
     /// Sound match: your patch now.
     Yours,
+    /// A quiz step's question.
+    Quiz,
+}
+
+/// A quiz question's notes - (16th, pitch, 16ths) - played by the theory
+/// lessons' Keys sound, on their own.
+pub fn quiz_take(notes: &[(i64, u8, i64)]) -> Take {
+    let mut project = shared::lessons::starting_project(shared::lessons::THEORY_TRIADS);
+    project.migrate();
+    let sixteenth = shared::lessons::SIXTEENTH;
+    let end = notes.iter().map(|&(at, _, len)| at + len).max().unwrap_or(4);
+    let clip = project.arrangement.clips.first_mut().expect("the Keys clip");
+    clip.length = end * sixteenth;
+    clip.content = shared::arrangement::ClipContent::Midi {
+        notes: notes
+            .iter()
+            .map(|&(at, pitch, len)| shared::arrangement::MidiNote { start: at * sixteenth, length: len * sixteenth, pitch, velocity: 100 })
+            .collect(),
+        loop_len: None,
+        link: None,
+    };
+    Take { arrangement: project.arrangement, patches: project.instruments.into_iter().collect(), from: 0, to: end * sixteenth }
 }
 
 /// The app as it stands in `snap`: the on-screen patch is the selected
@@ -77,9 +99,28 @@ pub fn starting_snapshot(lesson: &str) -> (Snapshot, BTreeMap<TrackId, SynthStat
     let patches: BTreeMap<_, _> = project.instruments.iter().cloned().collect();
     let last = project.arrangement.tracks.last().map(|t| t.id);
     let synth = last.and_then(|t| patches.get(&t).cloned()).unwrap_or_else(shared::synth::seed_synth);
-    let snap =
-        Snapshot { arrangement: project.arrangement, selected_track: last, playing: false, synth, open_clip: None, playhead: 0, match_score: 0.0 };
+    let (key, scale_mask) = lesson_key_mask(lesson);
+    let snap = Snapshot {
+        arrangement: project.arrangement,
+        selected_track: last,
+        playing: false,
+        synth,
+        open_clip: None,
+        playhead: 0,
+        match_score: 0.0,
+        key,
+        scale_mask,
+    };
     (snap, patches)
+}
+
+/// The key and scale a lesson starts in (as `ProjectEvent::StartLesson`
+/// sets them): its own, or the app's default, A minor pentatonic.
+pub fn lesson_key_mask(lesson: &str) -> (u8, u16) {
+    let preset = |name: &str| shared::theory::SCALE_PRESETS.iter().find(|p| p.name == name).map(|p| p.mask);
+    shared::lessons::lesson_key(lesson)
+        .and_then(|(root, scale)| Some((root, preset(scale)?)))
+        .unwrap_or((9, preset("Minor pentatonic").unwrap_or(1)))
 }
 
 /// Where `lesson` ends up, to hear before starting it - `None` for the
@@ -159,6 +200,15 @@ mod tests {
         assert_eq!(take.patches[&snap.selected_track.unwrap()].name, "Flute");
         // Starting the lesson hasn't changed: the goal is a copy.
         assert_ne!(snap.synth.name, "Flute");
+    }
+
+    #[test]
+    fn a_quiz_question_renders_to_sound() {
+        let take = quiz_take(&[(0, 60, 4), (4, 67, 6)]);
+        let job = engine::render::RenderJob { arrangement: take.arrangement, patches: take.patches, sources: vec![], sample_rate: 48_000 };
+        let audio = engine::render::render_between(&job, take.from, take.to, TAIL_SECONDS);
+        let peak = audio.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(peak > 0.05, "the question is silent (peak {peak})");
     }
 
     #[test]

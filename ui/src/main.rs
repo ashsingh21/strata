@@ -269,6 +269,8 @@ fn main() -> Result<(), ApplicationError> {
             piano_roll_open_clip,
             tl_playhead,
             synth_patches,
+            interval_key,
+            interval_scale_mask,
             preview_player.clone(),
             engine_sample_rate,
         );

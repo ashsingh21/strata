@@ -244,6 +244,7 @@ pub fn piano_roll_view(
                 Button::new(cx, move |cx| Label::new(cx, key_text))
                     .class("btn")
                     .class("sm")
+                    .lesson_target(crate::lessons::Target::KeyMenu)
                     .on_press(crate::key_menu::toggle_under);
             })
             .toggle_class("hidden", drums)

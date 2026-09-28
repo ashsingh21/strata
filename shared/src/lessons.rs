@@ -66,6 +66,31 @@ pub const MATCH_MYSTERY: &str = "match-mystery";
 pub const MATCH_NOTE: u8 = 57;
 /// How long it's held, in 16ths.
 pub const MATCH_NOTE_16THS: i64 = 12;
+/// "Theory": the ideas behind the notes, heard first, then written.
+pub const THEORY_OCTAVES: &str = "theory-octaves";
+pub const THEORY_SCALES: &str = "theory-scales";
+pub const THEORY_KEYS: &str = "theory-keys";
+pub const THEORY_MAJOR_MINOR: &str = "theory-major-minor";
+pub const THEORY_INTERVALS: &str = "theory-intervals";
+pub const THEORY_TRIADS: &str = "theory-triads";
+/// The theory lessons' tempo: unhurried, so each note can be heard.
+pub const THEORY_BPM: f64 = 100.0;
+/// Frere Jacques' opening, C D E C - a tune everyone can hum, so "the
+/// same, an octave up" is easy to hear. (16th, pitch, 16ths).
+pub const OCTAVE_TUNE: [(i64, u8, i64); 4] = [(0, 60, 3), (4, 62, 3), (8, 64, 3), (12, 60, 3)];
+/// A two-bar tune in C major that walks home to C on its last note
+/// (16th 28) - the lesson swaps that note for A.
+pub const HOME_TUNE: [(i64, u8, i64); 11] = [
+    (0, 64, 2), (2, 62, 2), (4, 60, 4), (8, 62, 2), (10, 64, 2), (12, 65, 4),
+    (16, 67, 4), (20, 65, 2), (22, 64, 2), (24, 62, 4), (28, 60, 4),
+];
+/// A C major arpeggio: C E G E, C E G. Its E's (16ths 2, 6, 10) are what
+/// the major/minor lesson lowers.
+pub const MAJOR_TUNE: [(i64, u8, i64); 7] = [(0, 60, 2), (2, 64, 2), (4, 67, 2), (6, 64, 2), (8, 60, 2), (10, 64, 2), (12, 67, 4)];
+/// The intervals lesson's reference clip: an octave, a fifth, a major
+/// third and a minor third, each from C (the minor third from A).
+pub const INTERVAL_EXAMPLES: [(i64, u8, i64); 8] =
+    [(0, 60, 3), (4, 72, 3), (8, 60, 3), (12, 67, 3), (16, 60, 3), (20, 64, 3), (24, 57, 3), (28, 60, 3)];
 pub const LOFI_BEAT: &str = "lofi-beat";
 pub const LOFI_KEYS: &str = "lofi-keys";
 pub const LOFI_BASS: &str = "lofi-bass";
@@ -214,6 +239,41 @@ fn carve_lesson(lesson: &str) -> Project {
     Project { arrangement: arr, instruments: vec![(synth, init_patch())], synth: None }
 }
 
+/// A plain, clear keyboard sound for the theory lessons: a triangle with
+/// a little saw, struck and fading like a piano - no wobble, no effects
+/// that smear pitch, so every note is easy to place by ear.
+pub fn theory_keys() -> SynthState {
+    let mut p = init_patch();
+    p.name = "Keys";
+    p.osc1.waveform = Waveform::Triangle;
+    p.osc2.waveform = Waveform::Saw;
+    p.mix.osc2_db = -18.0;
+    p.filter.cutoff_hz = 3500.0;
+    p.filter.resonance = 0.0;
+    p.amp_env = Envelope { attack_ms: 3.0, decay_ms: 700.0, sustain: 0.35, release_ms: 350.0 };
+    p.fx.reverb_mix = 0.12;
+    p.fx.reverb_size = 0.35;
+    p
+}
+
+/// The theory lessons: one Keys track at 100 BPM, holding the lesson's
+/// tune (or an empty clip to write into).
+fn theory_lesson(lesson: &str) -> Project {
+    let mut arr = empty_arrangement();
+    arr.tempo_map = TempoMap::constant(THEORY_BPM, TimeSignature::FOUR_FOUR);
+    let keys = add_track(&mut arr, "Keys", ClipColor::Teal, Instrument::Carve, -4.0);
+    let (name, notes, pattern_bars, total_bars) = match lesson {
+        THEORY_OCTAVES => ("Tune", steps(&OCTAVE_TUNE), 1, 4),
+        THEORY_KEYS => ("Tune", steps(&HOME_TUNE), 2, 4),
+        THEORY_MAJOR_MINOR => ("Tune", steps(&MAJOR_TUNE), 1, 4),
+        THEORY_INTERVALS => ("Examples", steps(&INTERVAL_EXAMPLES), 2, 2),
+        // Written by the learner.
+        _ => ("Notes", Vec::new(), 2, 2),
+    };
+    add_loop(&mut arr, keys, name, notes, pattern_bars, total_bars);
+    Project { arrangement: arr, instruments: vec![(keys, theory_keys())], synth: None }
+}
+
 /// The project `lesson` starts from (a blank one for an unknown id).
 pub fn starting_project(lesson: &str) -> Project {
     match lesson {
@@ -234,6 +294,9 @@ pub fn starting_project(lesson: &str) -> Project {
     }
     if lesson.starts_with("carve-") || lesson.starts_with("recipe-") || lesson.starts_with("match-") {
         return carve_lesson(lesson);
+    }
+    if lesson.starts_with("theory-") {
+        return theory_lesson(lesson);
     }
     let mut arr = empty_arrangement();
     let mut instruments = Vec::new();
@@ -279,6 +342,9 @@ pub fn lesson_key(lesson: &str) -> Option<(u8, &'static str)> {
         RECIPE_HARP => (9, "Raga Malkauns"),
         RECIPE_REED => (0, "Raga Bhairav"),
         RECIPE_TANPURA => return None,
+        // Every semitone a row: this lesson counts them.
+        THEORY_SCALES => (0, "Chromatic"),
+        _ if lesson.starts_with("theory-") => (0, "Major"),
         _ => (9, "Minor pentatonic"),
     })
 }

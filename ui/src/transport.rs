@@ -372,6 +372,7 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         Button::new(cx, move |cx| Label::new(cx, key_text).font_size(13.0))
             .class("btn")
             .toggle_class("is-on", menus.key)
+            .lesson_target(crate::lessons::Target::KeyMenu)
             .on_press(crate::key_menu::toggle_under);
 
         // Right-click for an exact typed value - drag/scroll (BpmField's

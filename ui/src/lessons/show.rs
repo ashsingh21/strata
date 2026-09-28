@@ -600,8 +600,95 @@ pub fn steps(lesson: &str) -> Vec<Show> {
         MATCH_PLUCK => vec![b(|s| s.synth = super::sound_match::target(MATCH_PLUCK).unwrap())],
         MATCH_SWELL => vec![b(|s| s.synth = super::sound_match::target(MATCH_SWELL).unwrap())],
         MATCH_MYSTERY => vec![b(|s| s.synth = super::sound_match::target(MATCH_MYSTERY).unwrap())],
+        THEORY_OCTAVES => vec![
+            b(play),
+            b(open_theory_clip),
+            b(|s| {
+                for (at, p, _) in OCTAVE_TUNE {
+                    move_note(s, at * SIXTEENTH, p, p + 12);
+                }
+            }),
+            b(|s| add_notes(s, 60, &[0])),
+        ],
+        THEORY_SCALES => vec![
+            b(open_theory_clip),
+            b(|s| add_notes(s, 60, &[0])),
+            b(|s| {
+                add_notes(s, 62, &[PPQ]);
+                add_notes(s, 64, &[2 * PPQ]);
+            }),
+            b(|s| add_notes(s, 65, &[3 * PPQ])),
+            b(|s| {
+                add_notes(s, 67, &[4 * PPQ]);
+                add_notes(s, 69, &[5 * PPQ]);
+                add_notes(s, 71, &[6 * PPQ]);
+            }),
+            b(|s| add_notes(s, 72, &[7 * PPQ])),
+            b(play),
+        ],
+        THEORY_KEYS => vec![
+            b(play),
+            b(open_theory_clip),
+            b(|s| move_note(s, 7 * PPQ, 60, 57)),
+            b(|s| set_key(s, 9, "Natural minor")),
+        ],
+        THEORY_MAJOR_MINOR => vec![
+            b(play),
+            b(|s| set_key(s, 0, "Natural minor")),
+            b(open_theory_clip),
+            b(|s| {
+                for at in [2, 6, 10] {
+                    move_note(s, at * SIXTEENTH, 64, 63);
+                }
+            }),
+        ],
+        THEORY_INTERVALS => vec![b(play)],
+        THEORY_TRIADS => {
+            let triad = |s: &mut Snapshot, pitches: [u8; 3], beat: i64| {
+                for p in pitches {
+                    add_notes(s, p, &[beat * PPQ]);
+                }
+            };
+            vec![
+                b(open_theory_clip),
+                b(move |s| triad(s, [60, 64, 67], 0)),
+                b(move |s| triad(s, [62, 65, 69], 1)),
+                b(move |s| {
+                    triad(s, [64, 67, 71], 2);
+                    triad(s, [65, 69, 72], 3);
+                }),
+                b(move |s| {
+                    triad(s, [67, 71, 74], 4);
+                    triad(s, [69, 72, 76], 5);
+                    triad(s, [71, 74, 77], 6);
+                }),
+                b(move |s| triad(s, [60, 64, 67], 7)),
+                b(play),
+            ]
+        }
         _ => vec![],
     }
+}
+
+/// Double-clicking the theory lessons' one clip.
+fn open_theory_clip(s: &mut Snapshot) {
+    s.open_clip = Some(s.arrangement.clips.first().unwrap().id);
+}
+
+/// The note at `start` moved from pitch `from` to `to` (what picking it
+/// and pressing an arrow key does).
+fn move_note(s: &mut Snapshot, start: Ticks, from: u8, to: u8) {
+    let clip = last_clip(s);
+    let ClipContent::Midi { notes, .. } = &s.arrangement.clip(clip).unwrap().content else { panic!() };
+    let note = *notes.iter().find(|n| n.start == start && n.pitch == from).unwrap();
+    Command::RemoveMidiNote { clip, start, pitch: from }.apply(&mut s.arrangement);
+    Command::AddMidiNote { clip, note: MidiNote { pitch: to, ..note } }.apply(&mut s.arrangement);
+}
+
+/// Picking a key and scale in the Key menu.
+fn set_key(s: &mut Snapshot, root: u8, scale: &str) {
+    s.key = root;
+    s.scale_mask = shared::theory::SCALE_PRESETS.iter().find(|p| p.name == scale).unwrap().mask;
 }
 
 pub(super) fn add_midi_track(s: &mut Snapshot, name: &str) {
