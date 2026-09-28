@@ -17,7 +17,7 @@ use crate::hidpi::Logical;
 use vizia::vg;
 
 use shared::arrangement::{Arrangement, ClipId, MidiNote, SnapGrid, Ticks, DEFAULT_VELOCITY, PPQ};
-use shared::theory::{degree_name, degrees_in_mask, note_name};
+use shared::theory::{degree_name, degrees_in_mask, note_name, sargam_name};
 
 use crate::piano_roll::state::{ChordShape, EditMode, LabelMode, NoteKey, PianoRollEvent};
 use crate::timeline::state::TimelineEvent;
@@ -274,11 +274,7 @@ impl View for Grid {
                 let ly = cx.lmouse().1 - bounds.y - RULER_H;
                 // The label column's head: Interval / Note.
                 if lx < 0.0 && ly < 0.0 && !self.drums() {
-                    let next = match self.label_mode.get() {
-                        LabelMode::Intervals => LabelMode::Notes,
-                        LabelMode::Notes => LabelMode::Intervals,
-                    };
-                    cx.emit(PianoRollEvent::SetLabelMode(next));
+                    cx.emit(PianoRollEvent::SetLabelMode(self.label_mode.get().next()));
                     return;
                 }
                 if lx < 0.0 || ly < 0.0 {
@@ -441,26 +437,24 @@ impl View for Grid {
                 ),
                 (false, LabelMode::Intervals) => (degree_name(rel).to_string(), note_with_octave(pitch)),
                 (false, LabelMode::Notes) => (note_with_octave(pitch), degree_name(rel).to_string()),
+                (false, LabelMode::Sargam) => (sargam_name(rel).to_string(), note_with_octave(pitch)),
             };
             let baseline = y0 + ROW_H * 0.5 + 4.0;
             text(canvas, &big, bounds.x + 10.0, baseline, 12.0, p.ink);
             text(canvas, &small, bounds.x + 44.0, baseline, 11.0, p.ink_muted);
         }
 
-        // Column heads. A pitched clip's is also the switch between
-        // naming rows by interval or by note: both words, the one in use
-        // in ink - click to swap.
+        // Column heads. A pitched clip's is also the switch for how rows
+        // are named - Interval, Note or Sargam: the one in use, and a
+        // faint arrow saying a click moves on to the next.
         if drums {
             text(canvas, "Pad", bounds.x + 10.0, bounds.y + 16.0, 11.0, p.ink_muted);
         } else {
             let font = crate::canvas_text::canvas_font(11.0);
-            let (on, off) = (p.ink, p.ink_faint);
-            let (interval, note) = if label_mode == LabelMode::Intervals { (on, off) } else { (off, on) };
-            let mut x = bounds.x + 10.0;
-            for (word, color) in [("Interval", interval), (" \u{b7} ", p.ink_faint), ("Note", note)] {
-                text(canvas, word, x, bounds.y + 16.0, 11.0, color);
-                x += font.measure_str(word, None).0;
-            }
+            let title = label_mode.title();
+            text(canvas, title, bounds.x + 10.0, bounds.y + 16.0, 11.0, p.ink);
+            let x = bounds.x + 10.0 + font.measure_str(title, None).0;
+            text(canvas, " \u{203a}", x, bounds.y + 16.0, 11.0, p.ink_faint);
         }
         text(canvas, "Velocity", bounds.x + 10.0, lane_top + 18.0, 11.0, p.ink_muted);
 
@@ -554,6 +548,7 @@ impl View for Grid {
                 let name = match label_mode {
                     LabelMode::Notes => note_name(note.pitch % 12).to_string(),
                     LabelMode::Intervals => degree_name(rel).to_string(),
+                    LabelMode::Sargam => sargam_name(rel).to_string(),
                 };
                 let mut paint = vg::Paint::default();
                 paint.set_color(crate::tokens::ON_CLIP);

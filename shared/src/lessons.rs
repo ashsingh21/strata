@@ -73,6 +73,16 @@ pub const THEORY_KEYS: &str = "theory-keys";
 pub const THEORY_MAJOR_MINOR: &str = "theory-major-minor";
 pub const THEORY_INTERVALS: &str = "theory-intervals";
 pub const THEORY_TRIADS: &str = "theory-triads";
+pub const THEORY_PROGRESSIONS: &str = "theory-progressions";
+pub const THEORY_MELODY: &str = "theory-melody";
+pub const THEORY_SEVENTHS: &str = "theory-sevenths";
+pub const THEORY_RAAG: &str = "theory-raag";
+/// I-V-vi-IV in C, one chord a bar, voiced close together: C (C4), G
+/// (G3), Am (A3), F (F3) - what the progressions lesson writes, and what
+/// the melody lesson starts with.
+pub const PROGRESSION: [[u8; 3]; 4] = [[60, 64, 67], [55, 59, 62], [57, 60, 64], [53, 57, 60]];
+/// The raag lesson's tanpura with Sa on C: Pa, Sa, Sa, low Sa.
+pub const RAAG_TANPURA: [(i64, u8, i64); 4] = [(0, 55, 4), (4, 60, 4), (8, 60, 4), (12, 48, 4)];
 /// The theory lessons' tempo: unhurried, so each note can be heard.
 pub const THEORY_BPM: f64 = 100.0;
 /// Frere Jacques' opening, C D E C - a tune everyone can hum, so "the
@@ -261,9 +271,27 @@ pub fn theory_keys() -> SynthState {
 fn theory_lesson(lesson: &str) -> Project {
     let mut arr = empty_arrangement();
     arr.tempo_map = TempoMap::constant(THEORY_BPM, TimeSignature::FOUR_FOUR);
+    let mut instruments = Vec::new();
+    // Raag: the tanpura's drone comes first, the Keys to write on last.
+    if lesson == THEORY_RAAG {
+        let drone = add_track(&mut arr, "Tanpura", ClipColor::Amber, Instrument::Carve, -10.0);
+        add_loop(&mut arr, drone, "Drone", steps(&RAAG_TANPURA), 1, 16);
+        instruments.push((drone, crate::synth::recipes::tanpura()));
+    }
     let keys = add_track(&mut arr, "Keys", ClipColor::Teal, Instrument::Carve, -4.0);
+    instruments.push((keys, theory_keys()));
     let (name, notes, pattern_bars, total_bars) = match lesson {
         THEORY_OCTAVES => ("Tune", steps(&OCTAVE_TUNE), 1, 4),
+        THEORY_PROGRESSIONS => ("Chords", Vec::new(), 4, 4),
+        THEORY_MELODY => {
+            let chords = PROGRESSION
+                .iter()
+                .enumerate()
+                .flat_map(|(bar, chord)| chord.iter().map(move |&p| (bar as i64 * 16, p, 15)))
+                .collect::<Vec<_>>();
+            ("Chords", steps(&chords), 4, 8)
+        }
+        THEORY_RAAG => ("Aroha", Vec::new(), 2, 2),
         THEORY_KEYS => ("Tune", steps(&HOME_TUNE), 2, 4),
         THEORY_MAJOR_MINOR => ("Tune", steps(&MAJOR_TUNE), 1, 4),
         THEORY_INTERVALS => ("Examples", steps(&INTERVAL_EXAMPLES), 2, 2),
@@ -271,7 +299,13 @@ fn theory_lesson(lesson: &str) -> Project {
         _ => ("Notes", Vec::new(), 2, 2),
     };
     add_loop(&mut arr, keys, name, notes, pattern_bars, total_bars);
-    Project { arrangement: arr, instruments: vec![(keys, theory_keys())], synth: None }
+    // The melody lesson writes on a track of its own, over the chords.
+    if lesson == THEORY_MELODY {
+        let melody = add_track(&mut arr, "Melody", ClipColor::Violet, Instrument::Carve, -4.0);
+        add_loop(&mut arr, melody, "Melody", Vec::new(), 4, 8);
+        instruments.push((melody, theory_keys()));
+    }
+    Project { arrangement: arr, instruments, synth: None }
 }
 
 /// The project `lesson` starts from (a blank one for an unknown id).

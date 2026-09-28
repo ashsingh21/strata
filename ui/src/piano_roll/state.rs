@@ -26,6 +26,27 @@ pub enum LabelMode {
     Notes,
     /// Row/note labels lead with the scale-degree interval (e.g. "b3").
     Intervals,
+    /// Row/note labels lead with the sargam name (Sa, re, Re...).
+    Sargam,
+}
+
+impl LabelMode {
+    /// The next one, as clicking the row labels' heading cycles them.
+    pub fn next(self) -> Self {
+        match self {
+            LabelMode::Intervals => LabelMode::Notes,
+            LabelMode::Notes => LabelMode::Sargam,
+            LabelMode::Sargam => LabelMode::Intervals,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            LabelMode::Intervals => "Interval",
+            LabelMode::Notes => "Note",
+            LabelMode::Sargam => "Sargam",
+        }
+    }
 }
 
 /// What one Draw click writes: a note, or a chord stacked on it in thirds

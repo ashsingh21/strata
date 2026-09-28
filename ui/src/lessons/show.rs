@@ -666,19 +666,95 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 b(play),
             ]
         }
+        THEORY_PROGRESSIONS => {
+            let chord = |s: &mut Snapshot, i: usize| {
+                for p in PROGRESSION[i] {
+                    add_notes(s, p, &[i as i64 * BAR]);
+                }
+            };
+            vec![
+                b(open_theory_clip),
+                b(move |s| chord(s, 0)),
+                b(move |s| chord(s, 1)),
+                b(move |s| chord(s, 2)),
+                b(move |s| chord(s, 3)),
+                b(play),
+            ]
+        }
+        THEORY_MELODY => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+            // E over C, D over G.
+            b(|s| {
+                add_notes_on(s, "Melody", 64, &[0]);
+                add_notes_on(s, "Melody", 62, &[BAR]);
+            }),
+            // C over A minor, A over F.
+            b(|s| {
+                add_notes_on(s, "Melody", 60, &[2 * BAR]);
+                add_notes_on(s, "Melody", 69, &[3 * BAR]);
+            }),
+            // Stepping towards each next note.
+            b(|s| {
+                for (bar, p) in [(0, 62), (1, 60), (2, 67), (3, 65)] {
+                    add_notes_on(s, "Melody", p, &[bar * BAR + 2 * PPQ]);
+                }
+            }),
+        ],
+        THEORY_SEVENTHS => {
+            let chord = |s: &mut Snapshot, pitches: [u8; 4], beat: i64| {
+                for p in pitches {
+                    add_notes(s, p, &[beat * PPQ]);
+                }
+            };
+            vec![
+                b(open_theory_clip),
+                b(move |s| chord(s, [50, 53, 57, 60], 0)),
+                b(move |s| chord(s, [55, 59, 62, 65], 2)),
+                b(move |s| chord(s, [48, 52, 55, 59], 4)),
+                b(play),
+            ]
+        }
+        THEORY_RAAG => vec![
+            b(play),
+            b(open_theory_clip),
+            b(|s| {
+                for (beat, p) in [60, 62, 64, 65, 67, 69, 71, 72].into_iter().enumerate() {
+                    add_notes(s, p, &[beat as i64 * PPQ]);
+                }
+            }),
+            b(|s| set_key(s, 0, "Raga Bhairav")),
+            b(|s| {
+                move_note(s, PPQ, 62, 61);
+                move_note(s, 5 * PPQ, 69, 68);
+            }),
+        ],
         _ => vec![],
     }
 }
 
-/// Double-clicking the theory lessons' one clip.
+/// Double-clicking the theory lessons' clip on the Keys track.
 fn open_theory_clip(s: &mut Snapshot) {
-    s.open_clip = Some(s.arrangement.clips.first().unwrap().id);
+    s.open_clip = Some(clip_on_track(s, "Keys"));
+}
+
+fn clip_on_track(s: &Snapshot, name: &str) -> shared::arrangement::ClipId {
+    let track = s.arrangement.tracks.iter().find(|t| t.name == name).unwrap().id;
+    s.arrangement.clips.iter().find(|c| c.track == track).unwrap().id
+}
+
+/// Clicks on `name`'s clip, one note per start.
+fn add_notes_on(s: &mut Snapshot, name: &str, pitch: u8, starts: &[Ticks]) {
+    let clip = clip_on_track(s, name);
+    for &start in starts {
+        Command::AddMidiNote { clip, note: MidiNote { start, length: PPQ / 4, pitch, velocity: 100 } }.apply(&mut s.arrangement);
+    }
 }
 
 /// The note at `start` moved from pitch `from` to `to` (what picking it
 /// and pressing an arrow key does).
 fn move_note(s: &mut Snapshot, start: Ticks, from: u8, to: u8) {
-    let clip = last_clip(s);
+    let clip = clip_on_track(s, "Keys");
     let ClipContent::Midi { notes, .. } = &s.arrangement.clip(clip).unwrap().content else { panic!() };
     let note = *notes.iter().find(|n| n.start == start && n.pitch == from).unwrap();
     Command::RemoveMidiNote { clip, start, pitch: from }.apply(&mut s.arrangement);

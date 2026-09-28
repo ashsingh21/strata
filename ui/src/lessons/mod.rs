@@ -442,6 +442,13 @@ impl LessonModel {
         if let Some(clip) = after.open_clip.filter(|c| Some(*c) != before.open_clip) {
             cx.emit(PianoRollEvent::Open(clip));
         }
+        // A key step: what picking it in the Key menu does.
+        if after.key != before.key {
+            cx.emit(crate::interval_input::state::IntervalInputEvent::SetKey(after.key));
+        }
+        if after.scale_mask != before.scale_mask {
+            cx.emit(crate::interval_input::state::IntervalInputEvent::SetScaleMask(after.scale_mask));
+        }
         if after.playhead != before.playhead {
             cx.emit(TimelineEvent::ScrubPlayhead(after.playhead));
         }

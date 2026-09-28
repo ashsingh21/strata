@@ -11,6 +11,7 @@ use shared::lessons::{
     RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
+    THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -525,6 +526,187 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "C major's seven triads: C, Dm, Em, F, G, Am and B\u{b0}. Three major, three minor, one diminished. \
                  Most songs in C use only these - and the same shapes work in every key.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_PROGRESSIONS,
+        group: THEORY,
+        title: "Chord progressions",
+        steps: &[
+            info(
+                "Chords get numbers from where they sit in the key: I is built on the 1st note (C), IV on the 4th (F), \
+                 V on the 5th (G), vi on the 6th (A). Lower case means minor. Write the most used order in pop: I, V, vi, IV.",
+            ),
+            act(
+                "Open the Chords clip: double-click it.",
+                "Two quick clicks on the empty clip in the Keys lane.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "I: pick Triad (right of Select / Draw) and click C4 on beat 1 of bar 1.",
+                "Home: the I chord, C major.",
+                "C4 is the row with the dark mark.",
+                |s| track_chord(s, "Keys", &PROGRESSION[0], 0),
+                |s| theory_row(s, 60),
+            ),
+            recipe(
+                "V: G3 on beat 1 of bar 2.",
+                "G major, a fifth above home, pulls back towards it. G3 sits below C4, so the chords stay close.",
+                "Bar 2 starts at the 2 mark. G3 is three rows below C4.",
+                |s| track_chord(s, "Keys", &PROGRESSION[1], 4),
+                |s| theory_row(s, 55),
+            ),
+            recipe(
+                "vi: A3 on beat 1 of bar 3.",
+                "A minor: it shares two notes with C major, so it feels like home turned darker.",
+                "A3 is the row just above G3.",
+                |s| track_chord(s, "Keys", &PROGRESSION[2], 8),
+                |s| theory_row(s, 57),
+            ),
+            recipe(
+                "IV: F3 on beat 1 of bar 4.",
+                "F major lifts, and leads round to C again when the clip loops.",
+                "F3 is just below G3.",
+                |s| track_chord(s, "Keys", &PROGRESSION[3], 12),
+                |s| theory_row(s, 53),
+            ),
+            act("Press Space and let it loop.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            info(
+                "I - V - vi - IV runs under hundreds of songs, in every key. Other loops to try: vi - IV - I - V (the same \
+                 chords, starting sad), or I - vi - IV - V (the fifties). The numbers stay the same when the key changes.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_MELODY,
+        group: THEORY,
+        title: "Melody over chords",
+        steps: &[
+            act(
+                "Press Space: the chords from last lesson, C, G, Am, F, one a bar. Keep it looping while you write.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "On beat 1 of bars 1 and 2, click a note of that bar's chord: bar 1 is C (C, E or G), bar 2 is G (G, B or D).",
+                "A chord's own note on the beat it lands sounds settled - the melody and the chord agree.",
+                "Any octave counts. Bar 2 starts at the 2 mark.",
+                |s| melody_on_chord(s, 0) && melody_on_chord(s, 1),
+                |s| melody_target(s),
+            ),
+            act(
+                "Bars 3 and 4 the same way: bar 3 is A minor (A, C or E), bar 4 is F (F, A or C).",
+                "Any octave counts. Bars 3 and 4 start at the 3 and 4 marks.",
+                |s| melody_on_chord(s, 2) && melody_on_chord(s, 3),
+                |s| melody_target(s),
+            ),
+            recipe(
+                "Now move between them: add a note on beat 3 of every bar - any note of the scale.",
+                "Notes off the chord, between the beats that matter, are what make a melody move instead of just outlining chords.",
+                "Beat 3 is the .3 mark of each bar. Try stepping towards the next bar's first note.",
+                |s| (0..4).all(|bar| melody_has_beat(s, bar, 2)),
+                |s| melody_target(s),
+            ),
+            info(
+                "Chord notes on the strong beats (1 and 3), anything from the scale in between: that's most melodies. \
+                 The Interval labels help - 1, 3 and 5 are the home chord's notes.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_SEVENTHS,
+        group: THEORY,
+        title: "7th chords",
+        steps: &[
+            act(
+                "Open the Notes clip: double-click it.",
+                "Two quick clicks on the empty clip in the Keys lane.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "Pick 7th (right of Triad) and click D3 on beat 1.",
+                "D, F, A and C: a triad with one more third on top. D minor 7 - softer and more open than D minor.",
+                "D3 is the row just above the bottom C3.",
+                |s| track_chord(s, "Keys", &[50, 53, 57, 60], 0),
+                |s| theory_row(s, 50),
+            ),
+            recipe(
+                "G3 on beat 3.",
+                "G7: the added F leans hard towards home. It's the chord that wants to resolve most.",
+                "Beat 3 is the 1.3 mark.",
+                |s| track_chord(s, "Keys", &[55, 59, 62, 65], 2),
+                |s| theory_row(s, 55),
+            ),
+            recipe(
+                "And home: C3 on beat 1 of bar 2.",
+                "C major 7: home, but dreamy rather than final - the sound of lo-fi and jazz.",
+                "C3 is the bottom row. Bar 2 starts at the 2 mark.",
+                |s| track_chord(s, "Keys", &[48, 52, 55, 59], 4),
+                |s| theory_row(s, 48),
+            ),
+            act("Press Space and let it loop.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            info(
+                "ii - V - I: the move jazz is built on. A 7th chord is a triad plus the next third up; it softens the \
+                 triad and makes it want to move. The lo-fi lessons' keys use them all the way through.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_RAAG,
+        group: THEORY,
+        title: "Raag basics",
+        steps: &[
+            act(
+                "Press Space: the tanpura plays Sa, the home note (here C), with Pa, a fifth above. Everything is heard against it.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            info(
+                "Indian music names notes by their place above Sa: Sa Re Ga ma Pa Dha Ni - like 1 to 7. Click the grid's \
+                 top-left heading (Interval \u{203a}) until it says Sargam, and the rows are named that way.",
+            ),
+            act(
+                "Open the Aroha clip: double-click it (in the Keys lane).",
+                "Two quick clicks on the empty clip under the drone.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "Aroha means going up. One note a beat: Sa Re Ga ma in bar 1 (C4 D4 E4 F4), Pa Dha Ni Sa in bar 2 (G4 A4 B4 C5).",
+                "Every note is heard against the drone's Sa - that's how a raag's notes get their colour.",
+                "Start on the Sa row with the dark mark; one row up each beat.",
+                |s| theory_beats(s, &[(60, 0), (62, 1), (64, 2), (65, 3), (67, 4), (69, 5), (71, 6), (72, 7)]),
+                |s| theory_first_missing(s, &[(60, 0), (62, 1), (64, 2), (65, 3), (67, 4), (69, 5), (71, 6), (72, 7)]),
+            ),
+            recipe(
+                "Now Raag Bhairav: open the Key menu at the top and pick Raga Bhairav (keep C).",
+                "Bhairav's Re and Dha are komal - lowered. Yours are now on shaded rows: outside the raag.",
+                "Key sits left of the tempo. The ragas are in the right-hand column.",
+                |s| s.key == 0 && s.scale_mask == scale_mask("Raga Bhairav"),
+                |_| Some(Target::KeyMenu),
+            ),
+            recipe(
+                "Make them komal: pick Select, click D4, Shift-click A4, then press \u{2193}.",
+                "Sa re Ga ma Pa dha Ni Sa: two lowered notes turn a bright scale into a solemn dawn raag.",
+                "\u{2193} moves the notes you've picked to the next note of the raag below.",
+                |s| theory_beats(s, &[(61, 1), (68, 5)]) && !theory_beats(s, &[(62, 1)]) && !theory_beats(s, &[(69, 5)]),
+                |s| if theory_open(s) { None } else { theory_lane(s) },
+            ),
+            info(
+                "A raag is more than its notes: it has phrases it returns to (its pakad), notes it dwells on, a way up \
+                 (aroha) and down (avaroha), and a time of day - Bhairav belongs to dawn. Hear it at work in the Bhairav \
+                 rave demo and the Reed recipe.",
             ),
         ],
     },
@@ -2375,7 +2557,7 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
     FIRST_BEAT, BASSLINE, CHORDS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
-    THEORY_TRIADS, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
+    THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
     LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE,
 ];
@@ -2414,6 +2596,11 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("third", "3 or 4 semitones up: the interval that makes a chord major or minor"),
     ("fifth", "7 semitones up: open and strong"),
     ("diminished", "a tense chord built from two minor thirds"),
+    ("progression", "a series of chords, usually looping"),
+    ("resolve", "move from a tense chord or note to a restful one"),
+    ("sargam", "the Indian note names: Sa Re Ga ma Pa Dha Ni"),
+    ("komal", "lowered, in Indian music: re, ga, dha and ni are the komal notes"),
+    ("aroha", "a raag's way up; avaroha is its way down"),
     ("oscillator", "the part of a synth that makes the raw tone"),
     ("wave", "the shape of a tone: sine is pure, saw is buzzy"),
     ("harmonic", "the quieter, higher tones inside every note: more of them sounds brighter"),
@@ -2862,6 +3049,40 @@ fn theory_chord(s: &Snapshot, pitches: &[u8], beat: i64) -> bool {
     pitches.iter().all(|&p| theory_beats(s, &[(p, beat)]))
 }
 
+/// A clip on the track called `name`.
+fn named_clip<'a>(s: &'a Snapshot, name: &str) -> Option<&'a Clip> {
+    let track = track_named(s, name)?;
+    s.arrangement.clips.iter().find(|c| c.track == track.id)
+}
+
+fn track_open(s: &Snapshot, name: &str) -> bool {
+    named_clip(s, name).is_some_and(|c| s.open_clip == Some(c.id))
+}
+
+/// Every one of `pitches` on `beat` (0-based, across bars) of `name`'s clip.
+fn track_chord(s: &Snapshot, name: &str, pitches: &[u8], beat: i64) -> bool {
+    let Some(ClipContent::Midi { notes, .. }) = named_clip(s, name).map(|c| &c.content) else { return false };
+    pitches.iter().all(|&p| notes.iter().any(|n| n.pitch == p && n.start / PPQ == beat))
+}
+
+/// The melody lesson: a note of bar `bar`'s chord (any octave) on its beat 1.
+fn melody_on_chord(s: &Snapshot, bar: usize) -> bool {
+    let Some(ClipContent::Midi { notes, .. }) = named_clip(s, "Melody").map(|c| &c.content) else { return false };
+    let beat = bar as i64 * 4;
+    notes.iter().any(|n| n.start / PPQ == beat && PROGRESSION[bar].iter().any(|&p| same_class(p, n.pitch)))
+}
+
+/// Some note starting on beat `beat` (0-3) of bar `bar` of the melody.
+fn melody_has_beat(s: &Snapshot, bar: i64, beat: i64) -> bool {
+    let Some(ClipContent::Midi { notes, .. }) = named_clip(s, "Melody").map(|c| &c.content) else { return false };
+    notes.iter().any(|n| n.start / PPQ == bar * 4 + beat)
+}
+
+/// The melody lane until its clip is open; then nothing (any row will do).
+fn melody_target(s: &Snapshot) -> Option<Target> {
+    if track_open(s, "Melody") { None } else { track_named(s, "Melody").map(|t| Target::Lane(t.id)) }
+}
+
 /// A scale preset's mask, by name.
 fn scale_mask(name: &str) -> u16 {
     shared::theory::SCALE_PRESETS.iter().find(|p| p.name == name).map(|p| p.mask).unwrap_or(0)
@@ -3037,7 +3258,17 @@ mod tests {
         for chord in [[60, 64, 67], [62, 65, 69], [64, 67, 71], [65, 69, 72], [67, 71, 74], [69, 72, 76], [71, 74, 77]] {
             assert_eq!(ChordShape::Triad.pitches(chord[0], 0, major), chord.to_vec());
         }
+        for chord in PROGRESSION {
+            assert_eq!(ChordShape::Triad.pitches(chord[0], 0, major), chord.to_vec());
+        }
+        for chord in [[50, 53, 57, 60], [55, 59, 62, 65], [48, 52, 55, 59]] {
+            assert_eq!(ChordShape::Seventh.pitches(chord[0], 0, major), chord.to_vec());
+        }
         assert_eq!(shared::theory::scale_step(64, 0, scale_mask("Natural minor"), -1), Some(63));
+        // Bhairav: Re and Dha step down to their komal forms.
+        let bhairav = scale_mask("Raga Bhairav");
+        assert_eq!(shared::theory::scale_step(62, 0, bhairav, -1), Some(61));
+        assert_eq!(shared::theory::scale_step(69, 0, bhairav, -1), Some(68));
         assert_eq!(scale_mask("Chromatic"), 0xfff);
         // Every quiz's answer is one of its buttons, and it has something to play.
         for l in LESSONS {

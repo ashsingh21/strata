@@ -46,6 +46,14 @@ pub fn degree_name(semitones_from_root: u8) -> &'static str {
     DEGREE_NAMES[(semitones_from_root % 12) as usize]
 }
 
+/// The note `semitones_from_root` above Sa, in sargam: shuddh (natural)
+/// notes capitalised, komal (flat) ones lower case - re, ga, dha, ni - and
+/// tivra (sharp) Ma capitalised against shuddh ma.
+pub fn sargam_name(semitones_from_root: u8) -> &'static str {
+    const NAMES: [&str; 12] = ["Sa", "re", "Re", "ga", "Ga", "ma", "Ma", "Pa", "dha", "Dha", "ni", "Ni"];
+    NAMES[(semitones_from_root % 12) as usize]
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScalePreset {
     pub name: &'static str,

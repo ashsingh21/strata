@@ -1,7 +1,7 @@
 # Strata
 
 A small DAW written in Rust, built to teach people how to make music. It has a
-subtractive synth, a drum kit, audio recording, and 42 hands-on lessons that
+subtractive synth, a drum kit, audio recording, and 46 hands-on lessons that
 run inside the app.
 
 ![Strata, Studio theme: the House demo with Carve open](docs/screenshots/house-studio.png)
@@ -23,7 +23,9 @@ run inside the app.
 - **Spectrum analyzer** and **WAV export**.
 - **Learn:** interactive lessons that check your work as you go.
   - Beats, bass and chords.
-  - Theory: octaves, scales, keys, major and minor, intervals by ear, triads.
+  - Theory: octaves, scales, keys, major and minor, intervals by ear, triads,
+    progressions, melody over chords, 7th chords, raag basics (with sargam
+    note names).
   - Carve from waves to sound recipes (flute, tanpura, lo-fi keys...).
   - How house and raag-based tracks are arranged.
   - Full projects: a house track, a lo-fi beat, Bollywood lo-fi.
