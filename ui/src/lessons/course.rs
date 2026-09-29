@@ -616,7 +616,7 @@ pub const LESSONS: &[Lesson] = &[
         title: "Octaves",
         steps: &[
             act(
-                "Press Space and listen: C, D, E, C - the start of Frère Jacques.",
+                "Press Space and listen: C, C, G, G, A, A, G - the start of Twinkle Twinkle Little Star.",
                 "Or click the play button at the top.",
                 |s| s.playing,
                 |_| Some(Target::Play),
@@ -628,7 +628,7 @@ pub const LESSONS: &[Lesson] = &[
                 |s| theory_lane(s),
             ),
             recipe(
-                "Move the whole tune up an octave. Pick Select (above the grid), click the first note, Shift-click the other three, then press Shift+\u{2191}.",
+                "Move the whole tune up an octave. Pick Select (above the grid), click the first note, Shift-click the other six, then press Shift+\u{2191}.",
                 "Every note now vibrates twice as fast, yet it's plainly the same tune. That's an octave: the same note, higher.",
                 "Shift+\u{2191} moves the notes you've picked up an octave; \u{2191} on its own moves them one note of the scale.",
                 |s| theory_pattern_has_all(s, &OCTAVE_TUNE, 12) && !theory_pattern_has_any(s, &OCTAVE_TUNE, 0),

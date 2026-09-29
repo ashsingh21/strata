@@ -141,9 +141,10 @@ pub const PROGRESSION: [[u8; 3]; 4] = [[60, 64, 67], [55, 59, 62], [57, 60, 64],
 pub const RAAG_TANPURA: [(i64, u8, i64); 4] = [(0, 55, 4), (4, 60, 4), (8, 60, 4), (12, 48, 4)];
 /// The theory lessons' tempo: unhurried, so each note can be heard.
 pub const THEORY_BPM: f64 = 100.0;
-/// Frere Jacques' opening, C D E C - a tune everyone can hum, so "the
-/// same, an octave up" is easy to hear. (16th, pitch, 16ths).
-pub const OCTAVE_TUNE: [(i64, u8, i64); 4] = [(0, 60, 3), (4, 62, 3), (8, 64, 3), (12, 60, 3)];
+/// Twinkle Twinkle Little Star's opening, C C G G A A G - a tune nearly
+/// everyone can hum, so "the same tune, higher" is plain by ear.
+/// (16th, pitch, 16ths)
+pub const OCTAVE_TUNE: [(i64, u8, i64); 7] = [(0, 60, 3), (4, 60, 3), (8, 67, 3), (12, 67, 3), (16, 69, 3), (20, 69, 3), (24, 67, 7)];
 /// A two-bar tune in C major that walks home to C on its last note
 /// (16th 28) - the lesson swaps that note for A.
 pub const HOME_TUNE: [(i64, u8, i64); 11] = [
@@ -340,7 +341,7 @@ fn theory_lesson(lesson: &str) -> Project {
     let keys = add_track(&mut arr, "Keys", ClipColor::Teal, Instrument::Carve, -4.0);
     instruments.push((keys, theory_keys()));
     let (name, notes, pattern_bars, total_bars) = match lesson {
-        THEORY_OCTAVES => ("Tune", steps(&OCTAVE_TUNE), 1, 4),
+        THEORY_OCTAVES => ("Tune", steps(&OCTAVE_TUNE), 2, 4),
         THEORY_PROGRESSIONS => ("Chords", Vec::new(), 4, 4),
         THEORY_MELODY => {
             let chords = PROGRESSION
