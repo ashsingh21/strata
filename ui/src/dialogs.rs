@@ -10,6 +10,13 @@
 
 #[cfg(target_os = "linux")]
 pub use linux::*;
+
+const CRASH_TEXT: &str = "Shor closed unexpectedly last time. A crash report was saved on this computer - \
+sending it to whoever gave you Shor helps them fix it.";
+
+fn recover_text(when: &str) -> String {
+    format!("Shor closed with work that hadn't been saved ({when}). Recover it?")
+}
 #[cfg(not(target_os = "linux"))]
 pub use native::*;
 
@@ -120,6 +127,30 @@ mod linux {
         Some(PathBuf::from(path))
     }
 
+    /// "Shor closed unexpectedly": true for Show report.
+    pub fn crash_notice() -> bool {
+        std::process::Command::new("zenity")
+            .arg("--question")
+            .arg("--title=Shor")
+            .arg(format!("--text={}", super::CRASH_TEXT))
+            .arg("--ok-label=Show report")
+            .arg("--cancel-label=OK")
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    /// "Recover unsaved work?": true for Recover.
+    pub fn ask_recover(when: &str) -> bool {
+        std::process::Command::new("zenity")
+            .arg("--question")
+            .arg("--title=Recover unsaved work")
+            .arg(format!("--text={}", super::recover_text(when)))
+            .arg("--ok-label=Recover")
+            .arg("--cancel-label=Discard")
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
     /// A fatal error, before the window exists.
     pub fn error(message: &str) {
         let _ = std::process::Command::new("zenity")
@@ -178,6 +209,36 @@ mod native {
             .add_filter("WAV audio", &["wav"])
             .save_file()?;
         Some(if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) { path } else { path.with_extension("wav") })
+    }
+
+    /// "Shor closed unexpectedly": true for Show report.
+    pub fn crash_notice() -> bool {
+        let result = MessageDialog::new()
+            .set_level(MessageLevel::Warning)
+            .set_title("Shor")
+            .set_description(super::CRASH_TEXT)
+            .set_buttons(MessageButtons::OkCancelCustom("Show report".into(), "OK".into()))
+            .show();
+        match result {
+            MessageDialogResult::Ok => true,
+            MessageDialogResult::Custom(label) => label == "Show report",
+            _ => false,
+        }
+    }
+
+    /// "Recover unsaved work?": true for Recover.
+    pub fn ask_recover(when: &str) -> bool {
+        let result = MessageDialog::new()
+            .set_level(MessageLevel::Info)
+            .set_title("Recover unsaved work")
+            .set_description(super::recover_text(when))
+            .set_buttons(MessageButtons::OkCancelCustom("Recover".into(), "Discard".into()))
+            .show();
+        match result {
+            MessageDialogResult::Ok => true,
+            MessageDialogResult::Custom(label) => label == "Recover",
+            _ => false,
+        }
     }
 
     /// A fatal error, before the window exists.

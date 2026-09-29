@@ -48,6 +48,19 @@ pub fn load_theme() -> Option<String> {
     all.get("daylight")?.as_bool().map(|d| if d { "daylight" } else { "studio" }.to_string())
 }
 
+/// Crash reports already mentioned at a launch (paths).
+pub fn load_crashes_seen() -> Vec<String> {
+    load_all()
+        .get("crashes_seen")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+pub fn save_crashes_seen(paths: &[String]) {
+    save_key("crashes_seen", serde_json::json!(paths));
+}
+
 pub fn save_theme(id: &str) {
     save_key("theme", serde_json::json!(id));
 }

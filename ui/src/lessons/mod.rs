@@ -250,8 +250,6 @@ pub struct LessonModel {
     /// The explainer open under the bar, if any (an index into
     /// `course::EXPLAINERS`).
     pub explaining: Signal<Option<usize>>,
-    /// When the lesson's project was last auto-saved to My tracks.
-    last_save: Instant,
     /// A lesson just reached its end (reported to the project on the
     /// next tick).
     finished: Option<&'static str>,
@@ -272,8 +270,6 @@ pub struct LessonModel {
 /// copies the whole project).
 const CHECK_EVERY: Duration = Duration::from_millis(66);
 
-/// How often a running lesson saves the learner's track.
-const AUTO_SAVE_EVERY: Duration = Duration::from_secs(5);
 
 impl LessonModel {
     #[allow(clippy::too_many_arguments)]
@@ -329,7 +325,6 @@ impl LessonModel {
             reviewing: Signal::new(None),
             completed: Signal::new(false),
             explaining: Signal::new(None),
-            last_save: Instant::now(),
             finished: None,
             last_check: Instant::now(),
             match_target: Signal::new(None),
@@ -623,10 +618,6 @@ impl Model for LessonModel {
                 let Some((lesson, step)) = self.active.get() else { return };
                 if self.match_target.get().is_some() {
                     self.measure_yours(cx, lesson);
-                }
-                if self.last_save.elapsed() >= AUTO_SAVE_EVERY {
-                    self.last_save = Instant::now();
-                    cx.emit(crate::project::ProjectEvent::AutoSave);
                 }
                 let course::Kind::Action { check, target } = course::LESSONS[lesson].steps[step].kind else { return };
                 // Still reading about the step just done: this one waits.

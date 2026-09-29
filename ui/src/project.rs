@@ -141,7 +141,32 @@ pub struct ProjectModel {
     allow_close: bool,
     /// The files in My tracks, newest first (the sidebar lists them).
     pub my_tracks: Signal<Vec<PathBuf>>,
+    /// Autosave (see `ProjectEvent::Tick`): when the project was last
+    /// looked at, how it looked then, and the last recovery copy written.
+    last_check: std::time::Instant,
+    last_seen: String,
+    last_recovery: String,
+    /// A recovery copy from last time is waiting on "Recover?" - don't
+    /// write over it meanwhile.
+    recovery_pending: bool,
 }
+
+/// Where unsaved work goes (a project with no file: Untitled, or an edited
+/// demo) so a crash doesn't lose it. Removed whenever the work is saved or
+/// knowingly left; still there at launch only after a crash.
+fn recovery_path() -> PathBuf {
+    let dir = crate::paths::data_dir().join("Recovery");
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("unsaved.json")
+}
+
+fn clear_recovery() {
+    let _ = std::fs::remove_file(recovery_path());
+}
+
+/// How often autosave looks: a change is saved once it's held still this
+/// long, so a drag isn't saved at every step.
+const AUTOSAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Actions that would throw away unsaved changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,8 +192,18 @@ pub enum ProjectEvent {
     StartLesson(usize),
     /// Open one of My tracks.
     OpenTrack(PathBuf),
-    /// A lesson is running: save it to its My tracks file if it's changed.
+    /// Save to the project's file now if it's changed (leaving a lesson).
     AutoSave,
+    /// Every frame: autosave once a change has settled - to the project's
+    /// file, or a recovery copy if it has none.
+    Tick,
+    /// After launch: say if the app crashed last time, and offer to recover
+    /// unsaved work it left.
+    StartupChecks,
+    /// "Recover" was chosen: open the recovery copy.
+    Recover,
+    /// "Discard" was chosen: the copy's gone; recovery copies resume.
+    RecoveryDeclined,
     /// Lesson `id` just finished: save, and remember the file as that
     /// part's result.
     LessonFinished(&'static str),
@@ -268,13 +303,42 @@ impl ProjectModel {
             asking: false,
             allow_close: false,
             my_tracks: Signal::new(my_tracks()),
+            last_check: std::time::Instant::now(),
+            last_seen: String::new(),
+            last_recovery: String::new(),
+            recovery_pending: false,
         }
     }
 
-    /// Saves to the current file if it's a My tracks one and anything
-    /// changed, without renaming the project in the header.
+    /// Autosave, once a second: a change that has held still since the last
+    /// look is saved - into the project's own file, like a lesson's always
+    /// was, or for a project with no file yet into a recovery copy.
+    fn tick(&mut self) {
+        if self.last_check.elapsed() < AUTOSAVE_EVERY || self.asking {
+            return;
+        }
+        self.last_check = std::time::Instant::now();
+        let now = snapshot(&self.arrangement.get(), &self.patches.get());
+        let settled = now == self.last_seen;
+        self.last_seen = now.clone();
+        if !settled || now == self.saved.get() {
+            return;
+        }
+        if self.current_path.get().is_some() {
+            self.auto_save();
+        } else if !self.recovery_pending && now != self.last_recovery {
+            let project = project(&self.arrangement.get(), &self.patches.get());
+            match save(&project, &recovery_path()) {
+                Ok(()) => self.last_recovery = now,
+                Err(e) => eprintln!("project: failed to write the recovery copy: {e}"),
+            }
+        }
+    }
+
+    /// Saves to the current file if anything changed, without renaming the
+    /// project in the header.
     fn auto_save(&mut self) {
-        let Some(path) = self.current_path.get().filter(|p| p.starts_with(my_tracks_dir())) else { return };
+        let Some(path) = self.current_path.get() else { return };
         if !self.is_dirty() {
             return;
         }
@@ -362,6 +426,8 @@ impl ProjectModel {
                 self.current_path.set(Some(path.clone()));
                 self.display_name.set(name_from_path(Some(&path)));
                 self.saved.set(snapshot(&arrangement, &patches));
+                // It has a file now: no need for the recovery copy.
+                clear_recovery();
                 true
             }
             Err(e) => {
@@ -380,7 +446,7 @@ impl ProjectModel {
         if self.asking {
             return;
         }
-        // A lesson's track saves itself: nothing to ask about.
+        // A project with a file saves itself: nothing to ask about.
         self.auto_save();
         if !self.is_dirty() {
             self.perform(cx, action);
@@ -403,6 +469,13 @@ impl ProjectModel {
     }
 
     fn perform(&mut self, cx: &mut EventContext, action: GuardedAction) {
+        // The unsaved work was saved or knowingly let go: its recovery copy
+        // goes with it. (Only a crash leaves one behind.) A recovery offer
+        // still open keeps its copy until answered.
+        if !self.recovery_pending {
+            clear_recovery();
+        }
+        self.last_recovery.clear();
         match action {
             GuardedAction::Close => {
                 self.allow_close = true;
@@ -512,6 +585,46 @@ impl Model for ProjectModel {
             ProjectEvent::StartLesson(n) => self.guard(cx, GuardedAction::Lesson(*n)),
             ProjectEvent::OpenTrack(path) => self.guard(cx, GuardedAction::OpenPath(path.clone())),
             ProjectEvent::AutoSave => self.auto_save(),
+            ProjectEvent::Tick => self.tick(),
+            ProjectEvent::StartupChecks => {
+                let recovery = recovery_path();
+                let when = std::fs::metadata(&recovery)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(|t| chrono::DateTime::<chrono::Local>::from(t).format("last changed %H:%M on %e %b").to_string());
+                self.recovery_pending = when.is_some();
+                cx.spawn(move |proxy| {
+                    let crashes = crate::logging::unseen_crashes();
+                    if let Some(newest) = crashes.first() {
+                        if crate::dialogs::crash_notice() {
+                            crate::logging::reveal(newest);
+                        }
+                    }
+                    if let Some(when) = when {
+                        if crate::dialogs::ask_recover(&when) {
+                            let _ = proxy.emit(ProjectEvent::Recover);
+                        } else {
+                            clear_recovery();
+                            let _ = proxy.emit(ProjectEvent::RecoveryDeclined);
+                        }
+                    }
+                });
+            }
+            ProjectEvent::RecoveryDeclined => self.recovery_pending = false,
+            ProjectEvent::Recover => {
+                self.recovery_pending = false;
+                match load(&recovery_path()) {
+                    Ok(project) => {
+                        self.replace_project(cx, project);
+                        self.current_path.set(None);
+                        self.display_name.set("Recovered".to_string());
+                        // Unsaved, as it was: the header says Edited until
+                        // it's saved somewhere.
+                        self.saved.set(String::new());
+                    }
+                    Err(e) => eprintln!("project: failed to recover: {e}"),
+                }
+            }
             ProjectEvent::LessonFinished(id) => {
                 self.auto_save();
                 if let Some(path) = self.current_path.get().filter(|p| p.exists()) {

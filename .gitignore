@@ -2,6 +2,10 @@
 ui/styles/*.css
 /project.json
 /settings.json
+# The log, crash reports and recovery copy, when run from the repo (an
+# installed copy keeps them in the user's data folder - see ui/src/paths.rs).
+/Logs/
+/Recovery/
 
 # Downloaded sample packs - kept locally for testing, not tracked (large
 # binaries, and not all of them are ours to redistribute from this repo).

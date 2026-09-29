@@ -21,6 +21,7 @@ mod menu;
 mod paths;
 mod knob;
 mod lessons;
+mod logging;
 mod meter;
 mod piano_roll;
 mod pill;
@@ -48,6 +49,8 @@ use synth::state::{SynthEvent, SynthModel};
 use timeline::state::{TimelineEvent, TimelineState};
 
 fn main() -> Result<(), ApplicationError> {
+    // First: the log file and crash reports, so anything after is recorded.
+    logging::init();
     let (params, telemetry_tx, telemetry_rx) = shared::bridge();
     let synth_bridge = shared::synth::synth_bridge();
     let playback_bridge = shared::playback::playback_bridge();
@@ -239,6 +242,9 @@ fn main() -> Result<(), ApplicationError> {
         let my_tracks = project_model.my_tracks;
         let project_path = project_model.current_path;
         project_model.build(cx);
+        // Crashed last time? Unsaved work left behind? (Asked once the
+        // window is up.)
+        cx.emit(project::ProjectEvent::StartupChecks);
         let save_status = Memo::new(move |_| {
             let edited = project::snapshot(&tl_arrangement.get(), &synth_patches.get()) != project_saved.get();
             if edited { "Edited".to_string() } else { "Saved".to_string() }
@@ -347,6 +353,7 @@ fn main() -> Result<(), ApplicationError> {
                 midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing);
                 cx.emit(SynthEvent::Tick(dt));
                 cx.emit(lessons::LessonEvent::Tick);
+                cx.emit(project::ProjectEvent::Tick);
 
                 // Latest-wins: cheap to rebuild every tick, and avoids
                 // needing to dirty-track arrangement changes separately.
