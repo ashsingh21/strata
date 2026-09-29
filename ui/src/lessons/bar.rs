@@ -65,11 +65,12 @@ pub(super) fn title_and_dots(cx: &mut Context, lesson: usize, marked: usize, cur
     .height(Auto);
 }
 
-/// One line above the timeline while a lesson runs - the lesson itself is
-/// in the sidebar's Learn panel: the step now (or that one's just done),
-/// with "Show lesson" when that panel isn't showing, and Exit.
+/// One line above the timeline while a lesson runs but its panel (the
+/// sidebar's Learn) isn't on screen: the step now (or that one's just
+/// done), Show lesson and Exit. With the panel showing it would only
+/// repeat it, so it steps aside and gives the timeline its height back.
 pub fn lesson_bar(cx: &mut Context, p: LessonBarProps, panel_shown: Memo<bool>) {
-    let shown = Memo::new(move |_| (p.active.get(), p.completed.get()));
+    let shown = Memo::new(move |_| (p.active.get(), p.completed.get(), panel_shown.get()));
     Binding::new(cx, shown, move |cx| {
         let Some((lesson, step)) = p.active.get() else { return };
         let l = &LESSONS[lesson];
@@ -77,6 +78,9 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps, panel_shown: Memo<bool>) 
             Some(done) => format!("\u{2713} Step {} done - why it sounds that way is in the lesson panel", done + 1),
             None => format!("Step {} of {}: {}", step + 1, l.steps.len(), l.steps[step].text),
         };
+        // Rebuilt rather than toggled hidden: shown again that way, views
+        // can come back blank.
+        if !panel_shown.get() {
         HStack::new(cx, move |cx| {
             title_and_dots(cx, lesson, step, step);
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(24.0));
@@ -88,7 +92,6 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps, panel_shown: Memo<bool>) 
             Button::new(cx, |cx| Label::new(cx, "Show lesson"))
                 .class("btn")
                 .class("is-on")
-                .toggle_class("hidden", panel_shown)
                 .on_press(|cx| cx.emit(crate::browser::BrowserEvent::ShowLearn));
             Button::new(cx, |cx| Label::new(cx, "Exit"))
                 .class("btn")
@@ -102,6 +105,7 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps, panel_shown: Memo<bool>) 
         .alignment(Alignment::Left)
         .width(Stretch(1.0))
         .height(Pixels(44.0));
+        }
 
         if super::sound_match::target(l.id).is_some() {
             match_panel(cx, p);

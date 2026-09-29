@@ -841,6 +841,8 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     // The lesson panel's current step.
     rule(".lesson-card", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
     rule(".lesson-step.is-done:hover", vec![("background-color", c("bg-300"))]);
+    // Steps still to come: readable, but a step behind the current card.
+    rule(".lesson-step.is-future .value", vec![("color", c("ink-faint"))]);
     rule(".side-row.side-next .body", vec![("color", c("signal"))]);
     // The sidebar. ON / selected states use the app's `active` accent
     // (design/tokens.json retired bg-400 for them); hover is bg-300.

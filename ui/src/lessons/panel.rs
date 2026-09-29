@@ -71,6 +71,7 @@ fn step_line<'a>(cx: &'a mut Context, i: usize, s: &'static Step, done: bool) ->
     })
     .class("lesson-step")
     .toggle_class("is-done", done)
+    .toggle_class("is-future", !done)
     .cursor(if done { CursorIcon::Hand } else { CursorIcon::Default })
     .gap(Pixels(tokens::SPACE_1))
     .alignment(Alignment::Left)
