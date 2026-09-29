@@ -4,7 +4,7 @@ A small DAW written in Rust, built to teach people how to make music. It has a
 subtractive synth, a drum kit, audio recording, and 66 hands-on lessons that
 run inside the app.
 
-![Shor, Studio theme: the House demo with Carve open, its filter drawn over the sound's harmonics](docs/screenshots/house-studio.png)
+![Shor, Studio theme: the House demo playing - live spectrum, meters in the track faders, and Carve's filter drawn over the sound's harmonics](docs/screenshots/house-studio.png)
 ![A lesson running in the sidebar: each step checks itself, then explains why it sounds the way it does](docs/screenshots/lesson-daylight.png)
 ![Daylight theme: the Bhairav rave demo with the drum step sequencer open](docs/screenshots/bhairav-daylight.png)
 
