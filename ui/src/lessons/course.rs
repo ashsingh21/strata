@@ -1360,40 +1360,64 @@ pub const LESSONS: &[Lesson] = &[
         group: CARVE,
         title: "The filter",
         steps: &[
+            info(
+                "A filter turns part of a sound down. Its graph shows which part: left to right is low to high pitch; the curve is \
+                 how much of each passes - on the line, untouched; below it, turned down. The green bars behind are this sound's \
+                 harmonics, as loud as they come out.",
+            ),
             act("Press Space: a bright saw riff.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
-            act(
-                "Turn Cutoff down below 400 Hz. The low-pass filter removes the highs: darker, muffled.",
+            recipe(
+                "Turn Cutoff down below 400 Hz.",
+                "Everything above the cutoff is turned down, so the saw's upper harmonics - its buzz - drop away: watch the green bars right of the line shrink. Darker, muffled. That's a low-pass filter.",
                 "Cutoff is the big knob in the Filter section.",
                 |s| carve(s).is_some_and(|p| p.filter.cutoff_hz < 400.0),
                 |_| Some(Target::Knob(SynthParam::Cutoff)),
             ),
-            act(
-                "Turn Resonance up past 70%. It boosts right at the cutoff - that whistling edge.",
+            recipe(
+                "Turn Resonance up past 70%.",
+                "Resonance boosts the harmonics right at the cutoff - the curve's peak - so the filter rings at that pitch. Everything below it still passes as before: the flat part of the curve hasn't moved.",
                 "Resonance is next to Cutoff.",
                 |s| carve(s).is_some_and(|p| p.filter.resonance > 0.7),
                 |_| Some(Target::Knob(SynthParam::Resonance)),
             ),
-            act(
-                "Now sweep Cutoff slowly back up past 3 kHz while it plays: the classic filter sweep of acid house.",
+            recipe(
+                "Now sweep Cutoff slowly back up past 3 kHz while it plays.",
+                "The ringing peak slides up through the harmonics one by one - the \u{201c}wow\u{201d} of acid house. Most filter movement in songs is exactly this, done by an envelope, an LFO or automation instead of your hand.",
                 "Drag it up gradually and listen.",
                 |s| carve(s).is_some_and(|p| p.filter.cutoff_hz > 3000.0),
                 |_| Some(Target::Knob(SynthParam::Cutoff)),
             ),
-            act(
-                "Try another filter type: click HP (high-pass). It keeps only the highs - thin and airy.",
-                "The LP 24 / LP 12 / BP / HP switch at the top of the Filter.",
+            recipe(
+                "Compare the slopes: click LP 12, on the switch at the top of the Filter.",
+                "LP 12 falls away half as steeply above the cutoff - 12 dB quieter per octave instead of 24 - so more high harmonics leak through: brighter and gentler. LP 24 is the thick, classic synth filter; LP 12 is more open.",
+                "The LP 24 / LP 12 / BP / HP switch.",
+                |s| carve(s).is_some_and(|p| p.filter.filter_type == FilterType::Lp12),
+                |_| Some(Target::FilterType),
+            ),
+            recipe(
+                "Now BP, band-pass.",
+                "Band-pass keeps only a band around the cutoff and turns down both sides of it: thin and nasal, like a telephone - and with the cutoff moving, a wah pedal.",
+                "The third option on the switch.",
+                |s| carve(s).is_some_and(|p| p.filter.filter_type == FilterType::Bp),
+                |_| Some(Target::FilterType),
+            ),
+            recipe(
+                "And HP, high-pass.",
+                "High-pass is low-pass the other way round: it turns the lows down and keeps the highs. Thin and airy - and in a mix, it's what clears rumble out of everything that isn't bass or kick.",
+                "The last option on the switch.",
                 |s| carve(s).is_some_and(|p| p.filter.filter_type == FilterType::Hp),
                 |_| Some(Target::FilterType),
             ),
-            act(
-                "Back to LP 24, the warm low-pass most sounds use.",
-                "The first option on the same switch.",
+            recipe(
+                "Back to LP 24.",
+                "Warm and full again. Most basses, pads and leads start from a low-pass: begin bright, then take away what you don't want.",
+                "The first option on the switch.",
                 |s| carve(s).is_some_and(|p| p.filter.filter_type == FilterType::Lp24),
                 |_| Some(Target::FilterType),
             ),
             info(
-                "Low-pass cuts highs (warm), high-pass cuts lows (thin), band-pass keeps a middle band. \
-                 Cutoff sets where the filter cuts; resonance sets how sharp the edge is.",
+                "Low-pass keeps the lows (LP 24 steep and thick, LP 12 gentler and brighter), high-pass keeps the highs, band-pass a band \
+                 in the middle. Cutoff sets where; resonance adds a ringing peak there. Next: envelopes, which move the filter on every note.",
             ),
         ],
     },
@@ -3786,6 +3810,13 @@ pub const EXPLAINERS: &[(&str, &str, &str)] = &[
         "Removes part of a sound's frequencies. A low-pass (LP) keeps what's below its cutoff and cuts what's above - taking \
          harmonics away, so the sound goes darker and rounder. High-pass (HP) does the opposite, band-pass (BP) keeps a band. \
          Starting bright and filtering down is subtractive synthesis, what Carve is built on.",
+    ),
+    (
+        "low-pass",
+        "Low-pass, and the slope",
+        "A low-pass filter keeps what's below its cutoff and turns down what's above. How fast it turns it down is its slope, \
+         in dB per octave: LP 24 takes each octave above the cutoff 24 dB quieter (steep - the thick sound of classic Moog-style \
+         synths), LP 12 only 12 dB (gentler, brighter - closer to Oberheim or Juno). Steeper isn't better; it's a choice of colour.",
     ),
     (
         "cutoff",

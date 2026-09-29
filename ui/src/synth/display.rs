@@ -8,7 +8,7 @@ use vizia::prelude::*;
 use crate::hidpi::Logical;
 use vizia::vg;
 
-use shared::synth::{envelope_points, filter_response_points, waveform_points, SynthState};
+use shared::synth::{db_height, envelope_points, filter_gain, filter_response_points, harmonics, waveform_points, SynthState};
 
 use crate::canvas_text::canvas_font;
 use crate::tokens::ThemeId;
@@ -139,6 +139,15 @@ impl View for FilterDisplay {
             canvas.draw_path(&vg::Path::rect(vg::Rect::new(x, bounds.y, x + 1.0, bounds.y + bounds.h), None), &grid);
         }
 
+        // "Passes untouched": the 0 dB line the curve sits on below the
+        // cutoff, and resonance rises above.
+        let unity_y = bounds.y + bounds.h * (1.0 - db_height(0.0));
+        let mut unity = vg::Paint::default();
+        unity.set_color(palette.line);
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(bounds.x, unity_y, bounds.x + bounds.w, unity_y + 1.0), None), &unity);
+
+        harmonic_bars(canvas, bounds, &palette, &state);
+
         let n = 170usize;
         let response = filter_response_points(filter.filter_type, filter.cutoff_hz, filter.resonance, n);
         let points: Vec<(f32, f32)> =
@@ -180,12 +189,6 @@ impl View for FilterDisplay {
 
         draw_signal(canvas, bounds, &palette, &points, 1.0);
 
-        // Axis (drawn after the fill so it stays visible).
-        let mut axis = vg::Paint::default();
-        axis.set_color(palette.line);
-        axis.set_anti_alias(true);
-        let axis_y = bounds.y + bounds.h * (1.0 - response[0]).max(0.0);
-        canvas.draw_path(&vg::Path::rect(vg::Rect::new(bounds.x, axis_y, bounds.x + bounds.w, axis_y + 1.0), None), &axis);
 
         // Cutoff marker.
         let mut marker = vg::Paint::default();
@@ -211,6 +214,50 @@ impl View for FilterDisplay {
         let plate_rect = vg::Rect::new(label_x - 3.0, bounds.y + 2.0, label_x + text_w + 3.0, bounds.y + 16.0);
         canvas.draw_path(&vg::Path::rect(plate_rect, None), &plate);
         canvas.draw_str(&label, vg::Point::new(label_x, bounds.y + 13.0), &font, &text_paint);
+    }
+}
+
+/// The patch's own harmonics behind the filter curve, at the note being
+/// held (A2 otherwise): each a green bar as loud as it is after the
+/// filter, with a faint tick where it was before - so turning Cutoff shows
+/// the high harmonics pressed down, and Resonance lifts the ones near it.
+/// Worked out from the knobs (oscillators, their octaves and levels, the
+/// sub), not measured, so it always matches this patch alone.
+fn harmonic_bars(canvas: &Canvas, bounds: BoundingBox, palette: &crate::tokens::Palette, state: &SynthState) {
+    let note = state.held_notes.last().copied().unwrap_or(45);
+    let base = 440.0 * 2f32.powf((note as f32 - 69.0) / 12.0);
+    let db = |gain: f32| 20.0 * gain.max(1e-9).log10();
+    let gain = |level_db: f32| 10f32.powf(level_db / 20.0);
+    let mut partials: Vec<(f32, f32)> = Vec::new();
+    for (osc, level_db) in [(state.osc1, state.mix.osc1_db), (state.osc2, state.mix.osc2_db)] {
+        if level_db <= -59.0 {
+            continue;
+        }
+        let root = base * 2f32.powi(osc.octave as i32);
+        partials.extend(harmonics(osc.waveform, 64).into_iter().map(|(n, level)| (root * n as f32, level * gain(level_db))));
+    }
+    if state.mix.sub_db > -59.0 {
+        partials.push((base * 2f32.powi(state.osc1.octave as i32 - 1), gain(state.mix.sub_db)));
+    }
+
+    let (log_min, log_max) = (20f32.ln(), 20_000f32.ln());
+    let mut after = vg::Paint::default();
+    after.set_color(Color::rgba(palette.signal.r(), palette.signal.g(), palette.signal.b(), 110));
+    let mut before = vg::Paint::default();
+    before.set_color(Color::rgba(palette.ink_faint.r(), palette.ink_faint.g(), palette.ink_faint.b(), 160));
+    let floor = bounds.y + bounds.h;
+    for (freq, level) in partials {
+        if !(20.0..20_000.0).contains(&freq) {
+            continue;
+        }
+        let x = bounds.x + bounds.w * (freq.ln() - log_min) / (log_max - log_min);
+        let filtered = level * filter_gain(state.filter.filter_type, state.filter.cutoff_hz, state.filter.resonance, freq);
+        let y_after = floor - bounds.h * db_height(db(filtered));
+        let y_before = floor - bounds.h * db_height(db(level));
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(x - 1.0, y_after, x + 1.0, floor), None), &after);
+        if y_after - y_before > 2.0 {
+            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x - 2.0, y_before, x + 2.0, y_before + 1.0), None), &before);
+        }
     }
 }
 

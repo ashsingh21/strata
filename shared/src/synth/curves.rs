@@ -76,8 +76,49 @@ pub fn filter_response_points(
         })
         .collect();
 
-    let peak = raw.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
-    raw.into_iter().map(|v| (v / peak).clamp(0.0, 1.0)).collect()
+    raw.into_iter().map(|v| db_height(gain_db(v))).collect()
+}
+
+/// The filter display's vertical scale, in dB: fixed, like an EQ's, so
+/// what passes untouched always sits on the 0 dB line and resonance rises
+/// above it. (Scaled to its own peak, a resonant curve squashed the
+/// passband to the floor - it looked as if the filter removed everything.)
+pub const FILTER_DB_TOP: f32 = 24.0;
+pub const FILTER_DB_FLOOR: f32 = -48.0;
+
+/// A level in dB as a height on the filter display: 0 at the floor, 1 at
+/// the top, `db_height(0.0)` the "passes untouched" line.
+pub fn db_height(db: f32) -> f32 {
+    ((db - FILTER_DB_FLOOR) / (FILTER_DB_TOP - FILTER_DB_FLOOR)).clamp(0.0, 1.0)
+}
+
+fn gain_db(gain: f32) -> f32 {
+    20.0 * gain.max(1e-9).log10()
+}
+
+/// How much the filter passes at `freq` (linear gain; 1 = untouched).
+pub fn filter_gain(filter_type: FilterType, cutoff_hz: f32, resonance: f32, freq: f32) -> f32 {
+    let q = 0.5 + resonance.clamp(0.0, 1.0) * 8.0;
+    resonant_magnitude(filter_type, freq / cutoff_hz.max(1.0), q)
+}
+
+/// The harmonics a wave holds, as (multiple of the note, level): a sine
+/// only its fundamental, a triangle the odd ones falling fast (1/n²), a
+/// square the odd ones (1/n), a saw all of them (1/n). The Shape knob's
+/// bending isn't included - this is what each wave is, to see the filter
+/// against.
+pub fn harmonics(waveform: Waveform, max_harmonic: u32) -> Vec<(u32, f32)> {
+    (1..=max_harmonic)
+        .filter_map(|n| {
+            let level = match waveform {
+                Waveform::Sine => (n == 1).then_some(1.0)?,
+                Waveform::Triangle => (n % 2 == 1).then(|| 1.0 / (n * n) as f32)?,
+                Waveform::Square => (n % 2 == 1).then(|| 1.0 / n as f32)?,
+                Waveform::Saw => 1.0 / n as f32,
+            };
+            Some((n, level))
+        })
+        .collect()
 }
 
 fn resonant_magnitude(filter_type: FilterType, ratio: f32, q: f32) -> f32 {
@@ -154,13 +195,28 @@ mod tests {
         assert!(high(0.0).abs_diff(n / 2) <= 1, "0 is a true square: high half the cycle");
     }
 
+    /// Resonance adds a peak at the cutoff; the lows below it still pass
+    /// untouched, on the 0 dB line, however high the resonance goes.
     #[test]
-    fn filter_response_is_normalized() {
-        let points = filter_response_points(FilterType::Lp24, 1200.0, 0.6, 170);
-        assert_eq!(points.len(), 170);
-        let peak = points.iter().cloned().fold(0.0f32, f32::max);
-        assert!((peak - 1.0).abs() < 1e-4);
-        assert!(points.iter().all(|&v| (0.0..=1.0).contains(&v)));
+    fn resonance_rises_above_an_unchanged_passband() {
+        let unity = db_height(0.0);
+        for resonance in [0.0, 0.7, 1.0] {
+            let points = filter_response_points(FilterType::Lp24, 1200.0, resonance, 170);
+            assert_eq!(points.len(), 170);
+            assert!((points[0] - unity).abs() < 0.01, "passband moved at resonance {resonance}");
+            assert!(points.iter().all(|&v| (0.0..=1.0).contains(&v)));
+        }
+        let peak = |r| filter_response_points(FilterType::Lp24, 1200.0, r, 170).into_iter().fold(0.0f32, f32::max);
+        assert!(peak(0.7) > unity + 0.1, "resonance should rise above 0 dB");
+    }
+
+    #[test]
+    fn harmonics_follow_each_wave() {
+        assert_eq!(harmonics(Waveform::Sine, 8), vec![(1, 1.0)]);
+        assert!(harmonics(Waveform::Square, 8).iter().all(|(n, _)| n % 2 == 1));
+        assert_eq!(harmonics(Waveform::Saw, 8).len(), 8);
+        let tri = harmonics(Waveform::Triangle, 8);
+        assert!((tri[1].1 - 1.0 / 9.0).abs() < 1e-6);
     }
 
     #[test]

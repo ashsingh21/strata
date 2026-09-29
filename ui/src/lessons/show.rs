@@ -120,6 +120,8 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 b(move |s| s.synth.filter.cutoff_hz = 300.0),
                 b(move |s| s.synth.filter.resonance = 0.8),
                 b(move |s| s.synth.filter.cutoff_hz = 4000.0),
+                b(move |s| s.synth.filter.filter_type = FilterType::Lp12),
+                b(move |s| s.synth.filter.filter_type = FilterType::Bp),
                 b(move |s| s.synth.filter.filter_type = FilterType::Hp),
                 b(move |s| s.synth.filter.filter_type = FilterType::Lp24),
             ]

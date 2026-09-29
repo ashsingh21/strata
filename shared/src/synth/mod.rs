@@ -12,7 +12,7 @@ pub use bridge::{
     SynthBridge, SynthParams, SynthTelemetry, NOTE_EVENT_CAPACITY, SYNTH_PARAMS_CAPACITY, SYNTH_TELEMETRY_CAPACITY,
 };
 pub use params::SynthParam;
-pub use curves::{envelope_points, filter_response_points, shape_label, waveform_points};
+pub use curves::{db_height, envelope_points, filter_gain, filter_response_points, harmonics, shape_label, waveform_points};
 pub use model::{
     cutoff_mod_depth, deep_rave_bass, lfo_mod_depth, seed_synth, soft_pad, Envelope, Filter, FilterType, Fx, Lfo, LfoTarget, Mix,
     Oscillator, Output, SynthState, Unison, VoiceMode, Waveform, LFO_CUTOFF_MAX_OCT, LFO_PITCH_MAX_CENTS,
