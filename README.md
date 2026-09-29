@@ -4,16 +4,27 @@ A small DAW written in Rust, built to teach people how to make music. It has a
 subtractive synth, a drum kit, audio recording, and 66 hands-on lessons that
 run inside the app.
 
-![Shor, Studio theme: the House demo with Carve open](docs/screenshots/house-studio.png)
-![Shor, Daylight theme](docs/screenshots/house-daylight.png)
+![Shor, Studio theme: the House demo with Carve open, its filter drawn over the sound's harmonics](docs/screenshots/house-studio.png)
+![A lesson running in the sidebar: each step checks itself, then explains why it sounds the way it does](docs/screenshots/lesson-daylight.png)
+![Daylight theme: the Bhairav rave demo with the drum step sequencer open](docs/screenshots/bhairav-daylight.png)
 
 ## What's in it
 
 - **Arrangement:** audio and MIDI tracks, looping and linked clips,
-  automation, markers, split and duplicate, full undo.
+  markers, split and duplicate, full undo. Every track's fader has a level
+  meter built in.
+- **Automation:** the A button on a track lists every knob it can move (the
+  last one you turned first); right-clicking any knob works too.
 - **Carve:** a subtractive synth with two oscillators, sub, noise, filter,
-  envelopes, two LFOs, unison, chorus and reverb, plus presets.
-- **Drum Kit:** a step grid, and a piano roll that shows the song's key.
+  envelopes, two LFOs, unison, chorus and reverb, plus presets. The
+  displays show what each control does: the wave bends as you turn Shape,
+  and the filter curve is drawn over the sound's own harmonics.
+- **Drum Kit:** a step sequencer - paint and erase steps with one drag,
+  accents and ghost notes, swing, Humanize, 1/32 and triplet rolls - with
+  per-pad mute, level and tuning.
+- **Piano roll:** shows the song's key (scale notes, sargam or intervals),
+  one-click chords, and moves notes by scale step or octave from the
+  keyboard.
 - **Effects:** a compressor and a four-band EQ (low cut, shelves, bell) on
   every track and on the master bus.
 - **Recording:** record from any audio input, like a guitar interface or a mic.
@@ -21,8 +32,15 @@ run inside the app.
   collections, and a *Fits key* filter that hides samples that would clash
   with your song's key.
 - **Spectrum analyzer** and **WAV export**.
-- **Learn:** interactive lessons that check your work as you go.
-  - Beats, bass and chords, then velocity, note length and timing in the piano roll.
+- **Learn:** 66 interactive lessons that run in the sidebar beside the
+  controls they point at. Each step checks itself, glows the control to use,
+  can be shown to you ("Show me"), then pauses to explain why it sounds the
+  way it does, with Before / After to hear the difference. "More" opens the
+  deeper story behind ideas like decibels, harmonics or resonance.
+  - Beats, bass and chords.
+  - Sound basics: loudness and decibels, pitch and frequency, harmonics and tone.
+  - Piano roll and step sequencer: accents and ghost notes, note length and
+    timing, painting beats, swing, hi-hat rolls.
   - Theory: octaves, scales, keys, major and minor, intervals by ear, triads,
     progressions, melody over chords, 7th chords, raag basics (with sargam
     note names).
@@ -30,7 +48,7 @@ run inside the app.
   - Carve from waves to sound recipes (flute, tanpura, lo-fi keys...).
   - Mixing: levels, EQ, compression, and finishing a mix.
   - How house and raag-based tracks are arranged.
-  - Full projects: a house track, a lo-fi beat, Bollywood lo-fi.
+  - Full projects: a house track, a lo-fi beat, Bollywood lo-fi, desi trap.
   - *Sound match*: read a sound's spectrum, then rebuild it.
 - **Two demo songs:** a two-minute house track and a Raag Bhairav rave.
 

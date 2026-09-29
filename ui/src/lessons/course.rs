@@ -354,7 +354,7 @@ pub const LESSONS: &[Lesson] = &[
                 |_| Some(Target::OscWave(1)),
             ),
             recipe(
-                "And the saw, the third button.",
+                "And the saw, the jagged ramp button.",
                 "Every harmonic, odd and even, all strong: the brightest, buzziest wave. That's why most synth sounds start from a saw - there's the most there to shape.",
                 "The third wave button.",
                 |s| carve(s).is_some_and(|p| p.osc1.waveform == Waveform::Saw),
