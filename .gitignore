@@ -24,3 +24,6 @@ assets/drums/micro_*.wav
 # project content - see RecordingCoordinator's `rec_{track}_{take}.wav`
 # naming in ui/src/recorder.rs.
 assets/rec_*.wav
+
+# Presets saved from Carve, when run from the repo.
+/Presets/

@@ -34,6 +34,7 @@ mod status;
 mod synth;
 mod timeline;
 mod tokens;
+mod user_presets;
 mod transport;
 
 use std::time::{Duration, Instant};
@@ -232,6 +233,7 @@ fn main() -> Result<(), ApplicationError> {
         let synth_meter_r = synth_model.meter_r;
         let synth_help_open = synth_model.help_open;
         let synth_lfo_drag = synth_model.lfo_drag;
+        let synth_user_presets = synth_model.user_presets;
         let synth_patches = synth_model.patches;
         synth_model.build(cx);
 
@@ -600,6 +602,7 @@ fn main() -> Result<(), ApplicationError> {
                                     meter_r: synth_meter_r,
                                     help_open: synth_help_open,
                                     lfo_drag: synth_lfo_drag,
+                                    user_presets: synth_user_presets,
                                     open_clip: piano_roll_open_clip,
                                     edit_mode: piano_roll_mode,
                                     label_mode: piano_roll_label_mode,
@@ -655,7 +658,7 @@ fn main() -> Result<(), ApplicationError> {
             // The key menu's one dropdown, over everything (see key_menu).
             key_menu::host(cx, interval_key, interval_scale_mask, interval_open);
             timeline::snap_menu_host(cx, tl_snap);
-            synth::preset_menu_host(cx, synth_state);
+            synth::preset_menu_host(cx, synth_state, synth_user_presets);
             app::restyle_anchor(cx);
             // Selecting clips drops the Effects Board's node selection, so
             // Delete removes what was picked last (see TimelineState::fx_selected).

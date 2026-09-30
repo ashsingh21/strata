@@ -47,6 +47,7 @@ pub struct DeviceAreaProps {
     pub meter_r: Signal<f32>,
     pub help_open: Signal<bool>,
     pub lfo_drag: Signal<Option<usize>>,
+    pub user_presets: Signal<Vec<&'static str>>,
     // Piano roll.
     pub open_clip: Signal<Option<ClipId>>,
     pub edit_mode: Signal<EditMode>,
@@ -145,6 +146,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                     p.meter_r,
                     p.help_open,
                     p.lfo_drag,
+                    p.user_presets,
                     color,
                 );
             }),

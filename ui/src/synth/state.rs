@@ -66,6 +66,11 @@ pub enum SynthEvent {
     ToggleHelp,
     /// Replaces the whole patch with a preset (keeping held keys held).
     LoadPreset(fn() -> SynthState),
+    /// A preset you saved (by name) - see `user_presets`.
+    LoadUserPreset(&'static str),
+    /// Saves the patch on screen as a preset of this name.
+    SaveUserPreset(String),
+    DeleteUserPreset(&'static str),
     /// An LFO pill was pressed: the start of dragging it onto a knob.
     BeginLfoDrag(usize),
     /// An LFO pill was released over a routable knob: patch LFO `.0` there.
@@ -140,6 +145,8 @@ pub struct SynthModel {
     track_db: HashMap<TrackId, (f32, f32)>,
     bus_peaks: Signal<[(f32, f32); shared::playback::MAX_BUS_TRACKS]>,
     pub help_open: Signal<bool>,
+    /// The presets you've saved, alphabetical.
+    pub user_presets: Signal<Vec<&'static str>>,
     /// The LFO pill being dragged, if any (drop targets light up).
     pub lfo_drag: Signal<Option<usize>>,
     /// The selected track. `state` is its Carve patch, if it has one.
@@ -210,6 +217,7 @@ impl SynthModel {
             track_db: HashMap::new(),
             bus_peaks,
             help_open: Signal::new(false),
+            user_presets: Signal::new(crate::user_presets::list()),
             lfo_drag: Signal::new(None),
             params_tx,
             note_tx,
@@ -220,6 +228,25 @@ impl SynthModel {
             step_record_pitches: HashSet::new(),
             rest_held: false,
         }
+    }
+
+    /// Only into a Carve that's actually on screen - never into some other
+    /// track's patch.
+    fn carve_on_screen(&self) -> bool {
+        let selected = self.selected_track.get();
+        selected.is_some() && selected == self.state_track && selected.is_some_and(|t| self.has_instrument(t))
+    }
+
+    /// Replaces the whole patch (keeping held keys held).
+    fn load_preset(&mut self, preset: SynthState) {
+        if !self.carve_on_screen() {
+            return;
+        }
+        self.state.update(|s| {
+            let held = std::mem::take(&mut s.held_notes);
+            *s = preset;
+            s.held_notes = held;
+        });
     }
 
     /// The engine slot playing `track`'s Carve, if it has one.
@@ -446,19 +473,28 @@ impl Model for SynthModel {
                 }
             }
             SynthEvent::ToggleHelp => self.help_open.update(|v| *v = !*v),
-            SynthEvent::LoadPreset(build) => {
-                // Only into a Carve that's actually on screen - never into
-                // some other track's patch.
-                let selected = self.selected_track.get();
-                if selected.is_none() || selected != self.state_track || !selected.is_some_and(|t| self.has_instrument(t)) {
-                    return;
+            SynthEvent::LoadPreset(build) => self.load_preset(build()),
+            SynthEvent::LoadUserPreset(name) => match crate::user_presets::load(name) {
+                Some(preset) => self.load_preset(preset),
+                None => {
+                    eprintln!("presets: couldn't read the saved preset \u{201c}{name}\u{201d}");
+                    self.user_presets.set(crate::user_presets::list());
                 }
-                let preset = build();
-                self.state.update(|s| {
-                    let held = std::mem::take(&mut s.held_notes);
-                    *s = preset.clone();
-                    s.held_notes = held;
-                });
+            },
+            SynthEvent::SaveUserPreset(name) => {
+                if self.carve_on_screen() {
+                    match crate::user_presets::save(name, &self.state.get()) {
+                        Ok(saved) => {
+                            self.state.update(|s| s.name = saved);
+                            self.user_presets.set(crate::user_presets::list());
+                        }
+                        Err(e) => eprintln!("presets: couldn't save \u{201c}{name}\u{201d}: {e}"),
+                    }
+                }
+            }
+            SynthEvent::DeleteUserPreset(name) => {
+                crate::user_presets::delete(name);
+                self.user_presets.set(crate::user_presets::list());
             }
             SynthEvent::BeginLfoDrag(lfo) => self.lfo_drag.set(Some(*lfo)),
             SynthEvent::RouteLfo(lfo, target) => {

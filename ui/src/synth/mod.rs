@@ -192,15 +192,31 @@ fn knob(
 thread_local! {
     /// The preset list, mounted at the window root (see `preset_menu_host`).
     static PRESET_MENU: Cell<Option<crate::menu::Anchored>> = const { Cell::new(None) };
+    /// The name typed into the list's Save box.
+    static PRESET_DRAFT: Cell<Option<Signal<String>>> = const { Cell::new(None) };
 }
 
 /// Mounts Carve's preset list; call last in the root view. At the root so
 /// the lower panel (a scroll view) doesn't clip it, and a dropdown so a
 /// click anywhere else, or Escape, closes it.
-pub fn preset_menu_host(cx: &mut Context, state: Signal<SynthState>) {
+pub fn preset_menu_host(cx: &mut Context, state: Signal<SynthState>, user_presets: Signal<Vec<&'static str>>) {
+    use crate::user_presets::{clean_name, is_builtin};
     use shared::synth::PRESETS;
     // A grid a few rows high rather than a tall column.
     const COLUMNS: usize = 4;
+    let draft = Signal::new(String::new());
+    PRESET_DRAFT.set(Some(draft));
+    // Something worth saving: a name that isn't blank or a built-in's.
+    let usable = draft.map(|d| {
+        let name = clean_name(d);
+        !name.is_empty() && !is_builtin(&name)
+    });
+    let save = move |cx: &mut EventContext| {
+        if usable.get() {
+            cx.emit(SynthEvent::SaveUserPreset(draft.get()));
+            crate::menu::close(cx);
+        }
+    };
     PRESET_MENU.set(Some(crate::menu::Anchored::build(cx, Placement::BottomStart, move |cx| {
         VStack::new(cx, move |cx| {
             for row in PRESETS.chunks(COLUMNS) {
@@ -232,9 +248,86 @@ pub fn preset_menu_host(cx: &mut Context, state: Signal<SynthState>) {
                 .width(Stretch(1.0))
                 .height(Auto);
             }
+
+            // What you've saved, each with a small x to delete it.
+            Binding::new(cx, user_presets, move |cx| {
+                let names = user_presets.get();
+                if names.is_empty() {
+                    return;
+                }
+                hrule(cx);
+                Label::new(cx, "Yours").class("label").padding_left(Pixels(tokens::SPACE_2));
+                for row in names.chunks(COLUMNS) {
+                    HStack::new(cx, move |cx| {
+                        for &name in row {
+                            HStack::new(cx, move |cx| {
+                                Button::new(cx, move |cx| {
+                                    Label::new(cx, name).class("body").hoverable(false).text_wrap(false).text_overflow(TextOverflow::Ellipsis)
+                                })
+                                .class("menu-item")
+                                .toggle_class("is-on", state.map(move |s| s.name == name))
+                                .width(Stretch(1.0))
+                                .on_press(move |cx| {
+                                    cx.emit(SynthEvent::LoadUserPreset(name));
+                                    crate::menu::close(cx);
+                                });
+                                Button::new(cx, |cx| Label::new(cx, "\u{d7}").hoverable(false))
+                                    .class("btn")
+                                    .class("quiet")
+                                    .class("sm")
+                                    .tooltip(|cx| {
+                                        Tooltip::new(cx, |cx| {
+                                            Label::new(cx, "Delete this preset");
+                                        })
+                                        .arrow(false)
+                                    })
+                                    .on_press(move |cx| cx.emit(SynthEvent::DeleteUserPreset(name)));
+                            })
+                            .width(Stretch(1.0))
+                            .height(Auto)
+                            .alignment(Alignment::Left);
+                        }
+                        for _ in row.len()..COLUMNS {
+                            Element::new(cx).width(Stretch(1.0));
+                        }
+                    })
+                    .width(Stretch(1.0))
+                    .height(Auto);
+                }
+            });
+
+            hrule(cx);
+            HStack::new(cx, move |cx| {
+                Textbox::new(cx, draft)
+                    .placeholder("Name this patch to keep it")
+                    .class("search")
+                    .on_edit(move |_cx, text| draft.set(text))
+                    .on_submit(move |cx, _text, _from_key| save(cx))
+                    .width(Stretch(1.0));
+                Button::new(cx, |cx| Label::new(cx, "Save").hoverable(false))
+                    .class("btn")
+                    .class("sm")
+                    .disabled(usable.map(|u| !*u))
+                    .on_press(move |cx| save(cx));
+            })
+            .gap(Pixels(tokens::SPACE_2))
+            .alignment(Alignment::Left)
+            .padding_left(Pixels(tokens::SPACE_2))
+            .padding_right(Pixels(tokens::SPACE_2))
+            .width(Stretch(1.0))
+            .height(Auto);
+            Label::new(cx, "Saved presets live in your Shor data folder, in Presets.")
+                .class("value")
+                .padding_left(Pixels(tokens::SPACE_2))
+                .display(draft.map(|d| if is_builtin(&clean_name(d)) { Display::None } else { Display::Flex }));
+            Label::new(cx, "That name belongs to a built-in preset - pick another.")
+                .class("value")
+                .padding_left(Pixels(tokens::SPACE_2))
+                .display(draft.map(|d| if is_builtin(&clean_name(d)) { Display::Flex } else { Display::None }));
         })
         .class("panel")
         .class("context-menu")
+        .gap(Pixels(tokens::SPACE_2))
         .width(Pixels(520.0))
         .height(Auto);
     })));
@@ -242,18 +335,22 @@ pub fn preset_menu_host(cx: &mut Context, state: Signal<SynthState>) {
 
 /// Carve's presets, where they belong - on the instrument: arrows to
 /// step through them, the name to open the full list.
-fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
+fn preset_selector(cx: &mut Context, state: Memo<SynthState>, user_presets: Signal<Vec<&'static str>>) {
     use shared::synth::PRESETS;
-    // Where the current patch sits in the list (a patch not from the list
-    // steps from the start).
-    let index = move || PRESETS.iter().position(|(n, _)| *n == state.get().name);
+    // The built-ins, then yours - the order the arrows step through.
+    let names = move || -> Vec<&'static str> { PRESETS.iter().map(|(n, _)| *n).chain(user_presets.get()).collect() };
     let step = move |cx: &mut EventContext, delta: isize| {
-        let len = PRESETS.len() as isize;
-        let next = match index() {
+        let names = names();
+        let len = names.len() as isize;
+        // A patch not from the list steps from the start.
+        let next = match names.iter().position(|n| *n == state.get().name) {
             Some(i) => (i as isize + delta).rem_euclid(len),
             None => if delta > 0 { 0 } else { len - 1 },
-        };
-        cx.emit(SynthEvent::LoadPreset(PRESETS[next as usize].1));
+        } as usize;
+        match PRESETS.get(next) {
+            Some(&(_, build)) => cx.emit(SynthEvent::LoadPreset(build)),
+            None => cx.emit(SynthEvent::LoadUserPreset(names[next])),
+        }
     };
     HStack::new(cx, move |cx| {
         Button::new(cx, |cx| Label::new(cx, "\u{2039}"))
@@ -267,7 +364,19 @@ fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
             .class("sm")
             .min_width(Pixels(120.0))
             .lesson_target_if(|t| matches!(t, Some(crate::lessons::Target::Preset(_))))
-            .on_press(|cx| {
+            .tooltip(|cx| {
+                Tooltip::new(cx, |cx| {
+                    Label::new(cx, "Presets - and save your own patch");
+                })
+                .arrow(false)
+            })
+            .on_press(move |cx| {
+                // The Save box starts on the name of a preset of yours
+                // that's loaded, so saving again replaces it.
+                if let Some(draft) = PRESET_DRAFT.get() {
+                    let current = state.get().name;
+                    draft.set(if user_presets.get().contains(&current) { current.to_string() } else { String::new() });
+                }
                 if let Some(menu) = PRESET_MENU.get() {
                     menu.open_from(cx);
                 }
@@ -652,6 +761,7 @@ pub fn synth_view(
     meter_r: Signal<f32>,
     help_open: Signal<bool>,
     lfo_drag: Signal<Option<usize>>,
+    user_presets: Signal<Vec<&'static str>>,
     track_color: ClipColor,
 ) {
     LFO_DRAG.set(Some(lfo_drag));
@@ -682,7 +792,7 @@ pub fn synth_view(
         HStack::new(cx, move |cx| {
             Element::new(cx).class("swatch").background_color(crate::timeline::header::clip_color_to_rgb(track_color));
             Label::new(cx, "Carve").class("heading");
-            preset_selector(cx, state);
+            preset_selector(cx, state, user_presets);
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
             Button::new(cx, |cx| Label::new(cx, "Guide"))
                 .class("btn")
