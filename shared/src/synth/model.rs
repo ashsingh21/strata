@@ -278,7 +278,10 @@ pub fn seed_synth() -> SynthState {
 
 /// Carve's factory presets, as listed in the browser: (name, builder).
 /// From "Deep Bass" on they are the lessons' sounds (see `super::recipes`).
-pub const PRESETS: [(&str, fn() -> SynthState); 11] = [
+/// "Init" comes first: the blank starting point (one plain saw, filter
+/// open, nothing moving) for building a sound from scratch.
+pub const PRESETS: [(&str, fn() -> SynthState); 12] = [
+    ("Init", crate::lessons::init_patch),
     ("Warm Bass", seed_synth),
     ("Deep Rave Bass", deep_rave_bass),
     ("Soft Pad", soft_pad),

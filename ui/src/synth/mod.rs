@@ -189,11 +189,61 @@ fn knob(
     }
 }
 
+thread_local! {
+    /// The preset list, mounted at the window root (see `preset_menu_host`).
+    static PRESET_MENU: Cell<Option<crate::menu::Anchored>> = const { Cell::new(None) };
+}
+
+/// Mounts Carve's preset list; call last in the root view. At the root so
+/// the lower panel (a scroll view) doesn't clip it, and a dropdown so a
+/// click anywhere else, or Escape, closes it.
+pub fn preset_menu_host(cx: &mut Context, state: Signal<SynthState>) {
+    use shared::synth::PRESETS;
+    // A grid a few rows high rather than a tall column.
+    const COLUMNS: usize = 4;
+    PRESET_MENU.set(Some(crate::menu::Anchored::build(cx, Placement::BottomStart, move |cx| {
+        VStack::new(cx, move |cx| {
+            for row in PRESETS.chunks(COLUMNS) {
+                HStack::new(cx, move |cx| {
+                    for &(preset, build) in row {
+                        let item = Button::new(cx, move |cx| Label::new(cx, preset).class("body").hoverable(false))
+                            .class("menu-item")
+                            .toggle_class("is-on", state.map(move |s| s.name == preset))
+                            .lesson_target(crate::lessons::Target::Preset(preset))
+                            .width(Stretch(1.0))
+                            .on_press(move |cx| {
+                                cx.emit(SynthEvent::LoadPreset(build));
+                                crate::menu::close(cx);
+                            });
+                        if preset == "Init" {
+                            item.tooltip(|cx| {
+                                Tooltip::new(cx, |cx| {
+                                    Label::new(cx, "A blank patch - one plain saw, filter open, nothing moving. Start from scratch.");
+                                })
+                                .arrow(false)
+                            });
+                        }
+                    }
+                    // A short last row keeps to the columns above.
+                    for _ in row.len()..COLUMNS {
+                        Element::new(cx).width(Stretch(1.0));
+                    }
+                })
+                .width(Stretch(1.0))
+                .height(Auto);
+            }
+        })
+        .class("panel")
+        .class("context-menu")
+        .width(Pixels(520.0))
+        .height(Auto);
+    })));
+}
+
 /// Carve's presets, where they belong - on the instrument: arrows to
 /// step through them, the name to open the full list.
 fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
     use shared::synth::PRESETS;
-    let open = Signal::new(false);
     // Where the current patch sits in the list (a patch not from the list
     // steps from the start).
     let index = move || PRESETS.iter().position(|(n, _)| *n == state.get().name);
@@ -217,47 +267,17 @@ fn preset_selector(cx: &mut Context, state: Memo<SynthState>) {
             .class("sm")
             .min_width(Pixels(120.0))
             .lesson_target_if(|t| matches!(t, Some(crate::lessons::Target::Preset(_))))
-            .on_press(move |_| open.update(|o| *o = !*o));
+            .on_press(|cx| {
+                if let Some(menu) = PRESET_MENU.get() {
+                    menu.open_from(cx);
+                }
+            });
         Button::new(cx, |cx| Label::new(cx, "\u{203a}"))
             .class("btn")
             .class("quiet")
             .class("sm")
             .on_press(move |cx| step(cx, 1));
 
-        // The list, dropping down under the name: a grid a few rows high
-        // rather than a tall column, which the lower panel cut off.
-        const COLUMNS: usize = 4;
-        VStack::new(cx, move |cx| {
-            for row in PRESETS.chunks(COLUMNS) {
-                HStack::new(cx, move |cx| {
-                    for &(preset, build) in row {
-                        Button::new(cx, move |cx| Label::new(cx, preset).class("body").hoverable(false))
-                            .class("menu-item")
-                            .toggle_class("is-on", state.map(move |s| s.name == preset))
-                            .lesson_target(crate::lessons::Target::Preset(preset))
-                            .width(Stretch(1.0))
-                            .on_press(move |cx| {
-                                cx.emit(SynthEvent::LoadPreset(build));
-                                open.set(false);
-                            });
-                    }
-                    // A short last row keeps to the columns above.
-                    for _ in row.len()..COLUMNS {
-                        Element::new(cx).width(Stretch(1.0));
-                    }
-                })
-                .width(Stretch(1.0))
-                .height(Auto);
-            }
-        })
-        .class("panel")
-        .class("context-menu")
-        .toggle_class("hidden", open.map(|o| !*o))
-        .position_type(PositionType::Absolute)
-        .top(Pixels(tokens::SIZE_CONTROL + 4.0))
-        .left(Pixels(0.0))
-        .width(Pixels(520.0))
-        .height(Auto);
     })
     .gap(Pixels(2.0))
     .alignment(Alignment::Left)
