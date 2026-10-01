@@ -795,6 +795,34 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 move_note(s, 5 * PPQ, 69, 68);
             }),
         ],
+        THEORY_BHAIRAV => {
+            let phrase = |notes: &'static [(u8, i64)]| {
+                b(move |s| {
+                    for &(p, beat) in notes {
+                        add_notes(s, p, &[beat * PPQ]);
+                    }
+                })
+            };
+            vec![
+                b(play),
+                b(open_theory_clip),
+                phrase(&[(64, 0), (65, 1), (68, 2), (67, 3)]),
+                phrase(&[(64, 4), (65, 5), (61, 6), (60, 7)]),
+                phrase(&[(71, 8), (72, 9), (68, 10), (67, 11)]),
+                // Pa dha Pa ma Ga re Sa, in eighths.
+                b(|s| {
+                    for (i, p) in [67, 68, 67, 65, 64, 61, 60].into_iter().enumerate() {
+                        add_notes(s, p, &[3 * BAR + i as i64 * PPQ / 2]);
+                    }
+                }),
+                b(|s| {
+                    let clip = clip_on_track(s, "Keys");
+                    let start = 3 * BAR + 3 * PPQ;
+                    Command::RemoveMidiNote { clip, start, pitch: 60 }.apply(&mut s.arrangement);
+                    Command::AddMidiNote { clip, note: MidiNote { start, length: PPQ, pitch: 60, velocity: 100 } }.apply(&mut s.arrangement);
+                }),
+            ]
+        }
         MELODY_STEPS => vec![
             b(play),
             b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),

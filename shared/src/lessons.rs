@@ -133,6 +133,8 @@ pub const THEORY_PROGRESSIONS: &str = "theory-progressions";
 pub const THEORY_MELODY: &str = "theory-melody";
 pub const THEORY_SEVENTHS: &str = "theory-sevenths";
 pub const THEORY_RAAG: &str = "theory-raag";
+/// Raag Bhairav's phrases: its pakad, where they rest, and building your own.
+pub const THEORY_BHAIRAV: &str = "theory-bhairav";
 /// I-V-vi-IV in C, one chord a bar, voiced close together: C (C4), G
 /// (G3), Am (A3), F (F3) - what the progressions lesson writes, and what
 /// the melody lesson starts with.
@@ -333,7 +335,7 @@ fn theory_lesson(lesson: &str) -> Project {
     arr.tempo_map = TempoMap::constant(THEORY_BPM, TimeSignature::FOUR_FOUR);
     let mut instruments = Vec::new();
     // Raag: the tanpura's drone comes first, the Keys to write on last.
-    if lesson == THEORY_RAAG {
+    if lesson == THEORY_RAAG || lesson == THEORY_BHAIRAV {
         let drone = add_track(&mut arr, "Tanpura", ClipColor::Amber, Instrument::Carve, -10.0);
         add_loop(&mut arr, drone, "Drone", steps(&RAAG_TANPURA), 1, 16);
         instruments.push((drone, crate::synth::recipes::tanpura()));
@@ -352,6 +354,7 @@ fn theory_lesson(lesson: &str) -> Project {
             ("Chords", steps(&chords), 4, 8)
         }
         THEORY_RAAG => ("Aroha", Vec::new(), 2, 2),
+        THEORY_BHAIRAV => ("Phrases", Vec::new(), 4, 4),
         THEORY_KEYS => ("Tune", steps(&HOME_TUNE), 2, 4),
         THEORY_MAJOR_MINOR => ("Tune", steps(&MAJOR_TUNE), 1, 4),
         THEORY_INTERVALS => ("Examples", steps(&INTERVAL_EXAMPLES), 2, 2),
@@ -566,7 +569,7 @@ pub fn lesson_key(lesson: &str) -> Option<(u8, &'static str)> {
         ARRANGE_HOUSE => crate::demo::DemoSong::House.key(),
         ARRANGE_BHAIRAV => crate::demo::DemoSong::Bhairav.key(),
         RECIPE_HARP => (9, "Raga Malkauns"),
-        RECIPE_REED => (0, "Raga Bhairav"),
+        RECIPE_REED | THEORY_BHAIRAV => (0, "Raga Bhairav"),
         RECIPE_TANPURA => return None,
         // Every semitone a row: this lesson counts them.
         THEORY_SCALES => (0, "Chromatic"),
@@ -1015,7 +1018,7 @@ mod tests {
 
     #[test]
     fn every_lesson_key_is_a_real_scale() {
-        for id in LOFI_PARTS.iter().chain(&HOUSE_PARTS).chain(&[RECIPE_HARP, RECIPE_REED, RECIPE_KEYS, FIRST_BEAT, ARRANGE_HOUSE, ARRANGE_BHAIRAV]) {
+        for id in LOFI_PARTS.iter().chain(&HOUSE_PARTS).chain(&[RECIPE_HARP, RECIPE_REED, RECIPE_KEYS, FIRST_BEAT, ARRANGE_HOUSE, ARRANGE_BHAIRAV, THEORY_BHAIRAV]) {
             if let Some((root, scale)) = lesson_key(id) {
                 assert!(root < 12, "{id}");
                 assert!(crate::theory::SCALE_PRESETS.iter().any(|p| p.name == scale), "{id}: no scale {scale}");

@@ -11,7 +11,7 @@ use shared::lessons::{
     RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
-    THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
+    THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, THEORY_BHAIRAV, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
     MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, SOUND_PITCH_NOTE,
     TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE, TRAP_KICKS, TRAP_SNARE, TRAP_PHRASE, TRAP_GAP_BAR, MELODY_CALL, MELODY_MOTIF,
 };
@@ -1081,6 +1081,89 @@ pub const LESSONS: &[Lesson] = &[
                 "A raag is more than its notes: it has phrases it returns to (its pakad), notes it dwells on, a way up \
                  (aroha) and down (avaroha), and a time of day - Bhairav belongs to dawn. Hear it at work in the Bhairav \
                  rave demo and the Reed recipe.",
+            ),
+        ],
+    },
+    Lesson {
+        id: THEORY_BHAIRAV,
+        group: THEORY,
+        title: "Raag Bhairav: phrases",
+        steps: &[
+            act(
+                "Press Space: the tanpura on Sa (C). This lesson is about Raag Bhairav, the raag of dawn.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            info(
+                "Bhairav's notes are Sa re Ga ma Pa dha Ni: C D\u{266d} E F G A\u{266d} B. Its re and dha are komal \
+                 (lowered), and they carry its mood: dha is its vadi, the most important note, and re the second. The \
+                 rows outside the raag are shaded; click the grid's top-left heading until it says Sargam to see the names.",
+            ),
+            act(
+                "Open the Phrases clip: double-click it (in the Keys lane).",
+                "Two quick clicks on the empty clip under the drone.",
+                |s| theory_open(s),
+                |s| theory_lane(s),
+            ),
+            recipe(
+                "Bar 1, one note a beat: Ga ma dha Pa (E4 F4 A\u{266d}4 G4).",
+                "Komal dha sits a half step above Pa and leans on it. Dha falling to Pa is the sound of Bhairav.",
+                "Dha is the row just above Pa (G4); the piano roll may call it G#4.",
+                |s| theory_beats(s, &BHAIRAV_CALL),
+                |s| theory_first_missing(s, &BHAIRAV_CALL),
+            ),
+            recipe(
+                "Bar 2: Ga ma re Sa (E4 F4 D\u{266d}4 C4).",
+                "The same lean in the lower half: re falls to Sa as dha fell to Pa. Bars 1 and 2 together are Bhairav's \
+                 pakad, the phrase that tells a listener which raag this is.",
+                "Re is the row just above Sa (C4).",
+                |s| theory_beats(s, &BHAIRAV_ANSWER),
+                |s| theory_first_missing(s, &BHAIRAV_ANSWER),
+            ),
+            quiz(
+                "Play it: the same phrase on different notes. Is it still Bhairav?",
+                "No. Re and dha were the natural ones (D and A): the same shape, but the dawn gravity is gone and it's \
+                 plain C major. The komal notes are the raag.",
+                &[(0, 64, 3), (4, 65, 3), (8, 69, 3), (12, 67, 4), (16, 64, 3), (20, 65, 3), (24, 62, 3), (28, 60, 8)],
+                &["Still Bhairav", "Not Bhairav"],
+                1,
+            ),
+            quiz(
+                "This phrase stops early. Which note does it want next?",
+                "Pa. A held dha hangs over Pa, a half step below, and in Bhairav it almost always falls there.",
+                &[(0, 64, 3), (4, 65, 3), (8, 68, 12)],
+                &["Pa (G)", "Sa (C)", "Ni (B)"],
+                0,
+            ),
+            recipe(
+                "Bar 3: bar 2's shape in the upper half: Ni Sa dha Pa (B4 C5 A\u{266d}4 G4).",
+                "Sa re Ga ma and Pa dha Ni Sa have the same steps: half, wide, half. So a phrase from one half works in \
+                 the other, and that's how Bhairav's phrases answer each other across the octave.",
+                "Ni is B4, the row below the top Sa (C5).",
+                |s| theory_beats(s, &BHAIRAV_MIRROR),
+                |s| theory_first_missing(s, &BHAIRAV_MIRROR),
+            ),
+            recipe(
+                "Bar 4 is yours: three or more of Bhairav's notes, with dha falling to Pa or re falling to Sa somewhere, \
+                 ending on Sa.",
+                "Lean on a komal note, fall a half step, come home. Those are the moves Bhairav's phrases are made from.",
+                "Try Pa dha Pa ma Ga re Sa, two notes a beat (Snap 1/8). Stay off the shaded rows.",
+                |s| own_bhairav_phrase(s),
+                |s| theory_row(s, 60),
+            ),
+            recipe(
+                "Rest on that last Sa: drag its right end out until it lasts at least a beat.",
+                "A raag's phrases come to rest on a few notes (in Bhairav, Sa, ma and Pa) and stay there. That held \
+                 note, the nyas, is the full stop.",
+                "Grab the note's right edge and drag right. Or redraw it with Snap at 1/4.",
+                |s| own_bhairav_phrase(s) && theory_bar(s, 3).last().is_some_and(|n| n.length >= PPQ),
+                |s| theory_row(s, 60),
+            ),
+            info(
+                "To build a Bhairav phrase: start from Sa, ma or Pa; lean on dha or re and let it fall; answer a phrase \
+                 from the other half; end on a held Sa, ma or Pa. Sung, re and dha get andolan, a slow sway: try Carve's \
+                 pitch LFO, slow and shallow. Hear it all in the Bhairav rave demo.",
             ),
         ],
     },
@@ -3621,7 +3704,7 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 /// top of it, a first look at sound, then a whole track; the rest after.
 pub const PATH: &[&str] = &[
     FIRST_BEAT, BASSLINE, CHORDS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
-    THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, MELODY_STEPS, MELODY_CALL,
+    THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, THEORY_BHAIRAV, MELODY_STEPS, MELODY_CALL,
     MELODY_MOTIF, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
     ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
@@ -3681,6 +3764,10 @@ pub const GLOSSARY: &[(&str, &str)] = &[
     ("sargam", "the Indian note names: Sa Re Ga ma Pa Dha Ni"),
     ("komal", "lowered, in Indian music: re, ga, dha and ni are the komal notes"),
     ("aroha", "a raag's way up; avaroha is its way down"),
+    ("pakad", "a raag's catch phrase: the few notes that say which raag it is"),
+    ("vadi", "a raag's most important note; its samvadi is the next most"),
+    ("nyas", "a note a raag's phrases come to rest on and hold"),
+    ("andolan", "a slow sway around a note's pitch, as a singer does on Bhairav's re and dha"),
     ("oscillator", "the part of a synth that makes the raw tone"),
     ("sync", "oscillator 2 restarts whenever oscillator 1 does, for a hard, tearing tone"),
     ("fm", "one oscillator bending another's pitch very fast, which makes new, metallic overtones"),
@@ -4201,6 +4288,30 @@ fn row_or_clip(s: &Snapshot, instrument: Instrument, pitch: u8) -> Option<Target
         return Some(Target::PianoRollRow(pitch));
     }
     clips_on(s, instrument).next().map(|c| Target::Lane(c.track))
+}
+
+/// Raag Bhairav's phrases in the Bhairav lesson: (pitch, beat).
+const BHAIRAV_CALL: [(u8, i64); 4] = [(64, 0), (65, 1), (68, 2), (67, 3)];
+const BHAIRAV_ANSWER: [(u8, i64); 4] = [(64, 4), (65, 5), (61, 6), (60, 7)];
+const BHAIRAV_MIRROR: [(u8, i64); 4] = [(71, 8), (72, 9), (68, 10), (67, 11)];
+
+/// The Keys clip's notes in bar `bar` (0-based), in order.
+fn theory_bar(s: &Snapshot, bar: i64) -> Vec<shared::arrangement::MidiNote> {
+    let Some(ClipContent::Midi { notes, .. }) = theory_clip(s).map(|c| &c.content) else { return Vec::new() };
+    let mut notes: Vec<_> = notes.iter().filter(|n| n.start / BAR == bar).copied().collect();
+    notes.sort_by_key(|n| (n.start, n.pitch));
+    notes
+}
+
+/// Bar 4 of the Bhairav lesson: only the raag's notes, a komal note
+/// falling a half step (dha to Pa or re to Sa), ending on Sa.
+fn own_bhairav_phrase(s: &Snapshot) -> bool {
+    let mask = scale_mask("Raga Bhairav");
+    let bar = theory_bar(s, 3);
+    bar.len() >= 3
+        && bar.iter().all(|n| mask & (1 << (n.pitch % 12)) != 0)
+        && bar.last().is_some_and(|n| n.pitch % 12 == 0)
+        && bar.windows(2).any(|w| matches!(w[0].pitch % 12, 1 | 8) && w[1].pitch + 1 == w[0].pitch)
 }
 
 /// The theory lessons' Keys track's clip.
