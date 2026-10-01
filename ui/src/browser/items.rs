@@ -15,6 +15,7 @@ use super::icon::IconKind;
 pub enum EffectKind {
     Compressor,
     Eq,
+    Guitar(shared::guitar::GuitarKind),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,6 +156,16 @@ pub fn library() -> Vec<Item> {
     }
     for (kind, id, name, meta) in [(EffectKind::Compressor, "fx:compressor", "Compressor", "Dynamics"), (EffectKind::Eq, "fx:eq", "EQ", "Tone")] {
         items.push(Item { id: id.into(), kind: Kind::Effect(kind), name: name.into(), meta: meta.into(), bpm: None, group: "Effects".into() });
+    }
+    for kind in shared::guitar::GuitarKind::ALL {
+        items.push(Item {
+            id: format!("fx:guitar:{kind:?}").to_lowercase(),
+            kind: Kind::Effect(EffectKind::Guitar(kind)),
+            name: kind.name().into(),
+            meta: kind.blurb().into(),
+            bpm: None,
+            group: "Guitar".into(),
+        });
     }
     for (i, (name, _)) in shared::synth::PRESETS.iter().enumerate() {
         items.push(Item {

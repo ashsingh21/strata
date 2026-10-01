@@ -28,6 +28,9 @@ pub struct Compressor {
     hold_left: u32,
     hold_samples: u32,
     sample_rate: f32,
+    /// The detector's high-pass: its one-pole coefficient and per-channel memory.
+    hp_coeff: f32,
+    hp_state: [f32; 2],
 }
 
 impl Compressor {
@@ -40,6 +43,8 @@ impl Compressor {
             hold_left: 0,
             hold_samples: (HOLD_MS * 0.001 * sample_rate) as u32,
             sample_rate,
+            hp_coeff: 0.0,
+            hp_state: [0.0; 2],
         };
         c.set_state(CompressorState::bypass());
         c
@@ -52,6 +57,11 @@ impl Compressor {
         self.attack = time_coeff(state.attack_ms, self.sample_rate);
         self.release = time_coeff(state.release_ms, self.sample_rate);
         self.makeup = db_to_gain(state.makeup_db);
+        self.hp_coeff = if state.detector_hp_hz > 1.0 {
+            (-std::f32::consts::TAU * state.detector_hp_hz / self.sample_rate).exp()
+        } else {
+            0.0
+        };
     }
 
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
@@ -59,7 +69,15 @@ impl Compressor {
         let target = if ratio <= 1.0 {
             0.0
         } else {
-            let now = l.abs().max(r.abs());
+            let now = if self.hp_coeff > 0.0 {
+                // What it listens to, minus the lows (a one-pole low-pass subtracted).
+                let a = self.hp_coeff;
+                self.hp_state[0] = a * self.hp_state[0] + (1.0 - a) * l;
+                self.hp_state[1] = a * self.hp_state[1] + (1.0 - a) * r;
+                (l - self.hp_state[0]).abs().max((r - self.hp_state[1]).abs())
+            } else {
+                l.abs().max(r.abs())
+            };
             if now >= self.held_peak || self.hold_left == 0 {
                 self.held_peak = now;
                 self.hold_left = self.hold_samples;
@@ -78,7 +96,8 @@ impl Compressor {
         let coeff = if target > self.reduction_db { self.attack } else { self.release };
         self.reduction_db += (target - self.reduction_db) * coeff;
         let gain = if self.reduction_db < 1.0e-4 { self.makeup } else { self.makeup * db_to_gain(-self.reduction_db) };
-        (l * gain, r * gain)
+        let dry = self.state.dry.clamp(0.0, 1.0);
+        (l * (gain + (1.0 - gain) * dry), r * (gain + (1.0 - gain) * dry))
     }
 }
 
@@ -123,12 +142,45 @@ mod tests {
     #[test]
     fn reduces_gain_above_threshold() {
         let mut c = Compressor::new(48_000.0);
-        c.set_state(CompressorState { threshold_db: -12.0, ratio: 4.0, attack_ms: 1.0, release_ms: 50.0, makeup_db: 0.0 });
+        c.set_state(CompressorState { threshold_db: -12.0, ratio: 4.0, attack_ms: 1.0, release_ms: 50.0, makeup_db: 0.0, ..CompressorState::default() });
         let mut out = (0.0, 0.0);
         for _ in 0..48_000 {
             out = c.process(0.9, 0.9);
         }
         assert!(out.0 < 0.9, "expected gain reduction once the envelope settles, got {}", out.0);
+    }
+
+    fn settled(state: CompressorState, freq: f32) -> f32 {
+        let sr = 48_000.0;
+        let mut c = Compressor::new(sr);
+        c.set_state(state);
+        let mut peak = 0.0f32;
+        for i in 0..sr as usize {
+            let x = 0.9 * (std::f32::consts::TAU * freq * i as f32 / sr).sin();
+            let y = c.process(x, x).0;
+            if i > 40_000 {
+                peak = peak.max(y.abs());
+            }
+        }
+        peak
+    }
+
+    #[test]
+    fn dry_mixes_the_untouched_signal_back_in() {
+        let hard = CompressorState { threshold_db: -30.0, ratio: 10.0, attack_ms: 1.0, release_ms: 50.0, ..CompressorState::default() };
+        let squashed = settled(hard, 1000.0);
+        let half = settled(CompressorState { dry: 0.5, ..hard }, 1000.0);
+        let full = settled(CompressorState { dry: 1.0, ..hard }, 1000.0);
+        assert!(squashed < half && half < full, "{squashed} {half} {full}");
+        assert!((full - 0.9).abs() < 0.01, "{full}");
+    }
+
+    #[test]
+    fn the_detector_high_pass_lets_a_low_note_through_uncompressed() {
+        let hard = CompressorState { threshold_db: -30.0, ratio: 10.0, attack_ms: 1.0, release_ms: 50.0, ..CompressorState::default() };
+        let plain = settled(hard, 60.0);
+        let filtered = settled(CompressorState { detector_hp_hz: 300.0, ..hard }, 60.0);
+        assert!(filtered > plain * 2.0, "{plain} vs {filtered}");
     }
 
     #[test]
@@ -149,7 +201,7 @@ mod tests {
     fn a_steady_bass_note_is_not_distorted() {
         let sr = 48_000.0;
         let mut c = Compressor::new(sr);
-        c.set_state(CompressorState { threshold_db: -24.0, ratio: 8.0, attack_ms: 1.0, release_ms: 30.0, makeup_db: 0.0 });
+        c.set_state(CompressorState { threshold_db: -24.0, ratio: 8.0, attack_ms: 1.0, release_ms: 30.0, makeup_db: 0.0, ..CompressorState::default() });
         let freq = 50.0;
         let n = sr as usize;
         let out: Vec<f32> =

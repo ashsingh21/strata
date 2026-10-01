@@ -360,6 +360,7 @@ impl BrowserModel {
                     cx.emit(match e {
                         items::EffectKind::Compressor => TimelineEvent::AddCompressorEffect(track),
                         items::EffectKind::Eq => TimelineEvent::AddEqEffect(track),
+                        items::EffectKind::Guitar(kind) => TimelineEvent::AddGuitarEffect(track, *kind),
                     });
                 }
             }
@@ -402,6 +403,7 @@ impl BrowserModel {
                     cx.emit(match e {
                         items::EffectKind::Compressor => TimelineEvent::AddCompressorEffect(t),
                         items::EffectKind::Eq => TimelineEvent::AddEqEffect(t),
+                        items::EffectKind::Guitar(kind) => TimelineEvent::AddGuitarEffect(t, *kind),
                     });
                 }
             }
@@ -623,7 +625,7 @@ mod tests {
         let presets = results(&all, &filter(Section::Presets, &keys));
         assert!(presets.iter().all(|i| matches!(i.kind, Kind::Preset(_))));
         let effects = results(&all, &Filter { chip: Chip::Effects, ..filter(Section::Browse, &keys) });
-        assert_eq!(effects.len(), 2);
+        assert_eq!(effects.len(), 2 + shared::guitar::GuitarKind::ALL.len());
         let searched = results(&all, &Filter { query: "piano", ..filter(Section::Samples, &keys) });
         assert!(!searched.is_empty() && searched.iter().all(|i| i.matches("piano")));
         let favs = vec!["inst:carve".to_string()];

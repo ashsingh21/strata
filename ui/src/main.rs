@@ -210,6 +210,7 @@ fn main() -> Result<(), ApplicationError> {
         let recording_preview = recorder_model.preview;
         let input_level = recorder_model.input_level;
         let input_gain_pos = recorder_model.input_gain_pos;
+        let monitoring = recorder_model.monitoring;
         let live_peaks = recorder_model.live_peaks;
         let selected_input_device = recorder_model.selected_input_device;
         let available_input_devices = recorder_model.available_input_devices;
@@ -524,6 +525,7 @@ fn main() -> Result<(), ApplicationError> {
                     scale_mask: interval_scale_mask,
                     input_level,
                     input_gain_pos,
+                    monitoring,
                     selected_input_device,
                     available_input_devices,
                     cpu_load,

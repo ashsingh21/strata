@@ -169,7 +169,7 @@ mod tests {
         assert!(ordered[0].enabled, "an effect that was already on should stay on after migrating");
         match ordered[0].effect {
             Effect::Compressor(c) => assert_eq!(c.threshold_db, -12.0),
-            Effect::Eq(_) => panic!("expected a migrated Compressor, got an EQ"),
+            _ => panic!("expected a migrated Compressor"),
         }
     }
 }

@@ -561,6 +561,11 @@ pub enum TimelineEvent {
     AddTrack(TrackKind),
     /// "+ Drums": a MIDI track with a Drum Kit, named "Drums".
     AddDrumTrack,
+    /// "+ Guitar": an armed audio track with the starter amp chain, ready
+    /// to play through.
+    AddGuitarTrack,
+    /// One guitar effect on an audio track, in its place in the chain.
+    AddGuitarEffect(TrackId, shared::guitar::GuitarKind),
     /// Imports a drum sample (a `.wav` under `assets/drums/`, named
     /// relative to the assets dir, e.g. `"drums/kick.wav"`) as a new
     /// track - one clip, sized to the sample's own length, at tick 0.
@@ -674,6 +679,12 @@ impl TimelineState {
     /// A new track at the bottom, named for what it plays, and selected
     /// (it's where the user is about to work).
     fn add_track(&mut self, cx: &mut EventContext, kind: TrackKind, instrument: Option<Instrument>) {
+        self.add_track_with(cx, kind, instrument, |_, _| {});
+    }
+
+    /// `setup` shapes the new track (name, arm, effects) before it's
+    /// inserted, so the whole thing is one undo step.
+    fn add_track_with(&mut self, cx: &mut EventContext, kind: TrackKind, instrument: Option<Instrument>, setup: impl FnOnce(&Arrangement, &mut Track)) {
         const COLORS: [ClipColor; 6] =
             [ClipColor::Coral, ClipColor::Amber, ClipColor::Teal, ClipColor::Blue, ClipColor::Violet, ClipColor::Pink];
         let mut new_track = None;
@@ -702,6 +713,8 @@ impl TimelineState {
                 fx: shared::arrangement::EffectGraph::new(),
                 drum_pads: Default::default(),
             };
+            let mut track = track;
+            setup(arr, &mut track);
             stack.do_command(Command::InsertTrack { track: Box::new(track), index, clips: vec![], automation: vec![] }, arr);
         });
         if let Some(id) = new_track {
@@ -1241,6 +1254,11 @@ impl Model for TimelineState {
                 self.do_command(Command::RemoveEffectNode { track: *track, node: *node });
             }
             TimelineEvent::AddEffectNodeToBoard(track, effect, position) => {
+                // Guitar effects run on an audio track's own chain (and the live monitor); elsewhere they'd have nothing to run on.
+                let audio_track = track.is_some_and(|t| self.arrangement.get().track(t).is_some_and(|t| t.kind == TrackKind::Audio));
+                if matches!(effect, Effect::Guitar(_)) && !audio_track {
+                    return;
+                }
                 self.do_command(Command::AddEffectNode { track: *track, effect: *effect, position: *position });
             }
             TimelineEvent::SetEffectNodePosition(track, node, position) => {
@@ -1395,6 +1413,24 @@ impl Model for TimelineState {
             }
             TimelineEvent::AddTrack(kind) => self.add_track(cx, *kind, Instrument::default_for(*kind)),
             TimelineEvent::AddDrumTrack => self.add_track(cx, TrackKind::Midi, Some(Instrument::Drums)),
+            TimelineEvent::AddGuitarTrack => self.add_track_with(cx, TrackKind::Audio, None, |arr, track| {
+                track.name = arr.next_named("Guitar");
+                track.arm = true;
+                for fx in shared::guitar::starter_chain() {
+                    track.fx.push_at_end(Effect::Guitar(fx));
+                }
+            }),
+            TimelineEvent::AddGuitarEffect(track, kind) => {
+                let arr = self.arrangement.get();
+                if let Some(t) = arr.track(*track).filter(|t| t.kind == TrackKind::Audio) {
+                    let before = t.fx.guitar_slot(*kind);
+                    self.do_command(Command::InsertEffectNode {
+                        track: Some(*track),
+                        effect: Effect::Guitar(shared::guitar::GuitarFx::new(*kind)),
+                        before,
+                    });
+                }
+            }
             TimelineEvent::AddDrumSample(source) => self.add_sample(cx, source.clone(), None, 0),
             TimelineEvent::AddSampleAt { source, track, start } => self.add_sample(cx, source.clone(), *track, *start),
             TimelineEvent::AddTrackWith(instrument) => self.add_track(cx, TrackKind::Midi, *instrument),

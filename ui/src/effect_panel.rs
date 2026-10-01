@@ -189,6 +189,7 @@ fn param_knob(
     let default_effect = match kind {
         Effect::Compressor(_) => Effect::Compressor(Default::default()),
         Effect::Eq(_) => Effect::Eq(Default::default()),
+        Effect::Guitar(g) => Effect::Guitar(shared::guitar::GuitarFx::new(g.kind)),
     };
     let default_pos = param.norm(&default_effect).unwrap_or(0.0);
     let pos = shown.map(move |e| param.norm(e).unwrap_or(0.0));

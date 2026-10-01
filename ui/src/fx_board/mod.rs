@@ -214,6 +214,13 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                 palette_row(cx, "Compressor", Effect::Compressor(shared::arrangement::CompressorState::default()), p, palette_drag, palette_query);
                 Label::new(cx, "EQ and filter").class("side-head");
                 palette_row(cx, "EQ", Effect::Eq(shared::arrangement::EqState::default()), p, palette_drag, palette_query);
+                let guitar_ok = p.track.is_some_and(|t| p.arrangement.get().track(t).is_some_and(|t| t.kind == shared::arrangement::TrackKind::Audio));
+                if guitar_ok {
+                    Label::new(cx, "Guitar").class("side-head");
+                    for kind in shared::guitar::GuitarKind::ALL {
+                        palette_row(cx, kind.name(), Effect::Guitar(shared::guitar::GuitarFx::new(kind)), p, palette_drag, palette_query);
+                    }
+                }
             })
             .class("panel")
             .gap(Pixels(tokens::SPACE_1))
@@ -337,6 +344,11 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                     let state_signal = Memo::new(move |_| state);
                                     crate::compressor_curve::CompressorCurve::new(cx, state_signal, p.theme).class("device").width(Stretch(1.0)).height(Stretch(1.0));
                                     Label::new(cx, format!("{:.0}:1 \u{b7} {:+.1} dB", state.ratio, state.threshold_db)).class("meta");
+                                }
+                                Effect::Guitar(fx) => {
+                                    Label::new(cx, fx.kind.blurb()).class("meta").width(Stretch(1.0)).height(Stretch(1.0));
+                                    let first = fx.kind.specs().first().map(|s| format!("{} {}", s.name, fx.format(0))).unwrap_or_default();
+                                    Label::new(cx, first).class("meta");
                                 }
                             }
                         })

@@ -6,25 +6,29 @@
 use crate::dsp::Smoother;
 
 /// A delay line read at a fractional position (linear interpolation).
-struct DelayLine {
+pub(crate) struct DelayLine {
     buf: Vec<f32>,
     write: usize,
 }
 
 impl DelayLine {
-    fn new(len: usize) -> Self {
+    pub(crate) fn new(len: usize) -> Self {
         Self { buf: vec![0.0; len.max(2)], write: 0 }
     }
 
+    pub(crate) fn clear(&mut self) {
+        self.buf.fill(0.0);
+    }
+
     #[inline]
-    fn push(&mut self, x: f32) {
+    pub(crate) fn push(&mut self, x: f32) {
         self.buf[self.write] = x;
         self.write = (self.write + 1) % self.buf.len();
     }
 
     /// The sample written `delay` samples ago (fractional, >= 1).
     #[inline]
-    fn read(&self, delay: f32) -> f32 {
+    pub(crate) fn read(&self, delay: f32) -> f32 {
         let len = self.buf.len();
         let delay = delay.clamp(1.0, (len - 2) as f32);
         let pos = self.write as f32 - delay + len as f32;
@@ -94,6 +98,10 @@ impl Taps {
         Self { buf: vec![0.0; len.max(2)], write: 0 }
     }
 
+    fn clear(&mut self) {
+        self.buf.fill(0.0);
+    }
+
     #[inline]
     fn push(&mut self, x: f32) {
         self.buf[self.write] = x;
@@ -120,18 +128,22 @@ impl Taps {
 
 /// A Schroeder allpass of `len` samples (fractional, so the tank's can
 /// be modulated), gain `g`.
-struct Diffuser {
+pub(crate) struct Diffuser {
     line: Taps,
     len: f32,
 }
 
 impl Diffuser {
-    fn new(len: f32, extra: usize) -> Self {
+    pub(crate) fn new(len: f32, extra: usize) -> Self {
         Self { line: Taps::new(len as usize + extra + 4), len }
     }
 
+    pub(crate) fn clear(&mut self) {
+        self.line.clear();
+    }
+
     #[inline]
-    fn process(&mut self, x: f32, g: f32, delay: f32) -> f32 {
+    pub(crate) fn process(&mut self, x: f32, g: f32, delay: f32) -> f32 {
         let delayed = self.line.tap_frac(delay);
         let v = x - g * delayed;
         self.line.push(v);
@@ -202,6 +214,22 @@ impl Reverb {
             lfo_step: MOD_RATE_HZ / sample_rate,
             mix: Smoother::new(0.0, 20.0, sample_rate),
             size: Smoother::new(0.5, 50.0, sample_rate),
+        }
+    }
+
+    /// Forgets the tail: a recycled reverb must not ring with what it last heard.
+    pub(crate) fn clear(&mut self) {
+        self.input_lp = 0.0;
+        self.damp_a = 0.0;
+        self.damp_b = 0.0;
+        for d in &mut self.input {
+            d.clear();
+        }
+        for d in [&mut self.mod_a, &mut self.ap_a, &mut self.mod_b, &mut self.ap_b] {
+            d.clear();
+        }
+        for t in [&mut self.delay_a, &mut self.delay_a2, &mut self.delay_b, &mut self.delay_b2] {
+            t.clear();
         }
     }
 

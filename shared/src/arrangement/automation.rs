@@ -62,6 +62,9 @@ pub fn gain_db_to_fader_pos(db: f32) -> f32 {
     }
 }
 
+/// The compressor's Detector HP knob runs 0 (off) to this many Hz.
+pub const DETECTOR_HP_MAX: f32 = 400.0;
+
 /// The EQ's frequency knobs' ranges (Hz): each band's useful span.
 pub const LOW_CUT: (f32, f32) = (20.0, 1000.0);
 pub const LOW_SHELF: (f32, f32) = (30.0, 1000.0);
@@ -95,7 +98,10 @@ impl EffectParam {
             | EffectParam::CompressorRatio
             | EffectParam::CompressorAttack
             | EffectParam::CompressorRelease
-            | EffectParam::CompressorMakeup => "Compressor",
+            | EffectParam::CompressorMakeup
+            | EffectParam::CompressorDry
+            | EffectParam::CompressorDetectorHp => "Compressor",
+            EffectParam::Guitar(kind, _) => kind.name(),
             EffectParam::EqFreq
             | EffectParam::EqGain
             | EffectParam::EqQ
@@ -116,6 +122,9 @@ impl EffectParam {
             (EffectParam::CompressorAttack, Effect::Compressor(c)) => lin_norm(0.1, 100.0, c.attack_ms),
             (EffectParam::CompressorRelease, Effect::Compressor(c)) => lin_norm(10.0, 1000.0, c.release_ms),
             (EffectParam::CompressorMakeup, Effect::Compressor(c)) => lin_norm(0.0, 24.0, c.makeup_db),
+            (EffectParam::CompressorDry, Effect::Compressor(c)) => lin_norm(0.0, 1.0, c.dry),
+            (EffectParam::CompressorDetectorHp, Effect::Compressor(c)) => lin_norm(0.0, DETECTOR_HP_MAX, c.detector_hp_hz),
+            (EffectParam::Guitar(kind, i), Effect::Guitar(g)) if g.kind == kind => return g.norm(i as usize),
             (EffectParam::EqFreq, Effect::Eq(e)) => log_norm(20.0, 20_000.0, e.bands[EQ_BELL].freq_hz),
             (EffectParam::EqGain, Effect::Eq(e)) => lin_norm(-18.0, 18.0, e.bands[EQ_BELL].gain_db),
             (EffectParam::EqQ, Effect::Eq(e)) => lin_norm(0.1, 10.0, e.bands[EQ_BELL].q),
@@ -137,6 +146,9 @@ impl EffectParam {
             (EffectParam::CompressorAttack, Effect::Compressor(c)) => c.attack_ms = lin_value(0.1, 100.0, norm),
             (EffectParam::CompressorRelease, Effect::Compressor(c)) => c.release_ms = lin_value(10.0, 1000.0, norm),
             (EffectParam::CompressorMakeup, Effect::Compressor(c)) => c.makeup_db = lin_value(0.0, 24.0, norm),
+            (EffectParam::CompressorDry, Effect::Compressor(c)) => c.dry = lin_value(0.0, 1.0, norm),
+            (EffectParam::CompressorDetectorHp, Effect::Compressor(c)) => c.detector_hp_hz = lin_value(0.0, DETECTOR_HP_MAX, norm),
+            (EffectParam::Guitar(kind, i), Effect::Guitar(g)) if g.kind == kind => g.set_norm(i as usize, norm),
             (EffectParam::EqFreq, Effect::Eq(e)) => e.bands[EQ_BELL].freq_hz = log_value(20.0, 20_000.0, norm),
             (EffectParam::EqGain, Effect::Eq(e)) => e.bands[EQ_BELL].gain_db = lin_value(-18.0, 18.0, norm),
             (EffectParam::EqQ, Effect::Eq(e)) => e.bands[EQ_BELL].q = lin_value(0.1, 10.0, norm),
@@ -163,6 +175,11 @@ impl EffectParam {
             (EffectParam::CompressorAttack, Effect::Compressor(c)) => format!("{:.1} ms", c.attack_ms),
             (EffectParam::CompressorRelease, Effect::Compressor(c)) => format!("{:.0} ms", c.release_ms),
             (EffectParam::CompressorMakeup, Effect::Compressor(c)) => format!("{:+.1} dB", c.makeup_db),
+            (EffectParam::CompressorDry, Effect::Compressor(c)) => format!("{:.0}%", c.dry * 100.0),
+            (EffectParam::CompressorDetectorHp, Effect::Compressor(c)) => {
+                if c.detector_hp_hz < 1.0 { "Off".to_string() } else { hz(c.detector_hp_hz) }
+            }
+            (EffectParam::Guitar(kind, i), Effect::Guitar(g)) if g.kind == kind => g.format(i as usize),
             (EffectParam::EqFreq, Effect::Eq(e)) => hz(e.bands[EQ_BELL].freq_hz),
             (EffectParam::EqGain, Effect::Eq(e)) => format!("{:+.1} dB", e.bands[EQ_BELL].gain_db),
             (EffectParam::EqQ, Effect::Eq(e)) => format!("{:.2}", e.bands[EQ_BELL].q),

@@ -321,7 +321,7 @@ pub fn house_demo() -> Project {
     add_effect(
         &mut b.arr,
         Some(bass),
-        Effect::Compressor(CompressorState { threshold_db: -20.0, ratio: 4.0, attack_ms: 5.0, release_ms: 120.0, makeup_db: 3.0 }),
+        Effect::Compressor(CompressorState { threshold_db: -20.0, ratio: 4.0, attack_ms: 5.0, release_ms: 120.0, makeup_db: 3.0, ..CompressorState::default() }),
     );
     // The pad's EQ is a resonant peak that the breakdown sweeps upward.
     let pad_eq = add_effect(&mut b.arr, Some(pad), Effect::Eq(EqState::bell(400.0, 8.0, 2.0)));
@@ -329,7 +329,7 @@ pub fn house_demo() -> Project {
     add_effect(
         &mut b.arr,
         None,
-        Effect::Compressor(CompressorState { threshold_db: -12.0, ratio: 2.0, attack_ms: 20.0, release_ms: 200.0, makeup_db: 0.0 }),
+        Effect::Compressor(CompressorState { threshold_db: -12.0, ratio: 2.0, attack_ms: 20.0, release_ms: 200.0, makeup_db: 0.0, ..CompressorState::default() }),
     );
 
     // -- Automation. ---------------------------------------------------
@@ -554,7 +554,7 @@ pub fn bhairav_demo() -> Project {
     add_effect(
         &mut b.arr,
         None,
-        Effect::Compressor(CompressorState { threshold_db: -12.0, ratio: 2.0, attack_ms: 20.0, release_ms: 200.0, makeup_db: 0.0 }),
+        Effect::Compressor(CompressorState { threshold_db: -12.0, ratio: 2.0, attack_ms: 20.0, release_ms: 200.0, makeup_db: 0.0, ..CompressorState::default() }),
     );
 
     // -- Automation ---------------------------------------------------

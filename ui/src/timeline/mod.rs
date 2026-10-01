@@ -137,6 +137,26 @@ pub fn timeline_view(
                 .padding_left(Pixels(tokens::SPACE_3))
                 .height(Pixels(tokens::SIZE_CONTROL + tokens::SPACE_3))
                 .width(Pixels(HEAD_WIDTH));
+
+                // Its own row: the first group fills the header's width.
+                HStack::new(cx, move |cx| {
+                    use crate::browser::icon::IconKind;
+                    HStack::new(cx, move |cx| {
+                        add_track_button(cx, theme, IconKind::Effect, "Guitar")
+                            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "An armed audio track with a gate, amp and cabinet. Plug in, press Monitor, and play (headphones recommended)"); }).arrow(false))
+                            .on_press(|cx| {
+                                cx.emit(TimelineEvent::AddGuitarTrack);
+                                cx.emit(crate::recorder::RecorderModelEvent::SetMonitoring(true));
+                            });
+                    })
+                    .class("synth-seg")
+                    .width(Auto)
+                    .height(Pixels(tokens::SIZE_CONTROL + 2.0));
+                })
+                .alignment(Alignment::Left)
+                .padding_left(Pixels(tokens::SPACE_3 + 29.0))
+                .height(Pixels(tokens::SIZE_CONTROL + tokens::SPACE_3))
+                .width(Pixels(HEAD_WIDTH));
             })
             .class("tl-heads")
             .width(Pixels(HEAD_WIDTH))

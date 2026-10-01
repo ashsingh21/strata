@@ -38,6 +38,9 @@ pub enum Command {
     /// node's coming from an explicit drop point (dragged from the
     /// palette), not a generic "+Effect" add.
     AddEffectNode { track: Option<TrackId>, effect: Effect, position: Option<(f32, f32)> },
+    /// Adds a new effect node just before `before` (`EffectGraph::OUTPUT`
+    /// for the end) - how a guitar effect lands in its place in the chain.
+    InsertEffectNode { track: Option<TrackId>, effect: Effect, before: EffectNodeId },
     /// Removes an effect node, reconnecting its neighbours - inverse
     /// carries the exact removed node and its two edges so undo restores
     /// precisely where it was, not just "a node with this effect".
@@ -332,6 +335,13 @@ impl Command {
                 if let Some(pos) = position {
                     fx.set_position(node, pos);
                 }
+                Command::RemoveEffectNode { track, node }
+            }
+
+            Command::InsertEffectNode { track, effect, before } => {
+                let fx = arr.fx_mut(track).expect("InsertEffectNode: unknown track");
+                let node = fx.push_at_end(effect);
+                fx.move_before(node, before);
                 Command::RemoveEffectNode { track, node }
             }
 
@@ -1003,5 +1013,25 @@ mod tests {
         assert_eq!(velocity(&arr), 40);
         undo.apply(&mut arr);
         assert_eq!(velocity(&arr), DEFAULT_VELOCITY);
+    }
+
+    #[test]
+    fn guitar_effects_land_in_rank_order_and_undo() {
+        use crate::arrangement::{Effect, EffectGraph};
+        use crate::guitar::{GuitarFx, GuitarKind};
+        let mut arr = test_arrangement();
+        for kind in [GuitarKind::Echo, GuitarKind::Gate, GuitarKind::Cabinet, GuitarKind::Amp] {
+            let before = arr.track(1).unwrap().fx.guitar_slot(kind);
+            Command::InsertEffectNode { track: Some(1), effect: Effect::Guitar(GuitarFx::new(kind)), before }.apply(&mut arr);
+        }
+        let kinds = |arr: &Arrangement| {
+            arr.track(1).unwrap().fx.ordered().iter().filter_map(|n| match n.effect { Effect::Guitar(g) => Some(g.kind), _ => None }).collect::<Vec<_>>()
+        };
+        assert_eq!(kinds(&arr), [GuitarKind::Gate, GuitarKind::Amp, GuitarKind::Cabinet, GuitarKind::Echo]);
+        let inverse = Command::InsertEffectNode { track: Some(1), effect: Effect::Guitar(GuitarFx::new(GuitarKind::Chorus)), before: arr.track(1).unwrap().fx.guitar_slot(GuitarKind::Chorus) }.apply(&mut arr);
+        assert_eq!(kinds(&arr), [GuitarKind::Gate, GuitarKind::Amp, GuitarKind::Cabinet, GuitarKind::Chorus, GuitarKind::Echo]);
+        inverse.apply(&mut arr);
+        assert_eq!(kinds(&arr).len(), 4);
+        assert_eq!(arr.track(1).unwrap().fx.guitar_slot(GuitarKind::Spring), EffectGraph::OUTPUT);
     }
 }

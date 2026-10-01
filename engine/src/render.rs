@@ -79,6 +79,7 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
     let mut bus_fx: Vec<EffectChain> = (0..MAX_BUS_TRACKS).map(|_| EffectChain::new(srf)).collect();
     let mut bus_smooth = [SmoothedGain::new(srf); MAX_BUS_TRACKS];
     let mut master_fx = EffectChain::new(srf);
+    let mut guitar_pool = crate::guitar::GuitarPool::new(srf);
     let mut master_limiter = crate::fx::Limiter::new(srf);
     // The limiter delays everything by its lookahead: render that much
     // further and drop that much from the start, so a hit on beat 1 of the
@@ -106,7 +107,7 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
         for (i, &track) in slots.iter().enumerate() {
             if let Some(p) = instrument_params(arr, &automated, track, i as u8, job.patches.get(&track), tick) {
                 slot_gain[i] = db_to_gain(p.gain_db);
-                slot_fx[i].set_state(p.effect_count, &p.effects);
+                slot_fx[i].set_state(p.effect_count, &p.effects, &mut guitar_pool);
                 is_drums[i] = p.drums;
                 drums[i].set_pads(p.drum_pads);
                 synths[i].set_params(p);
@@ -116,10 +117,10 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
             plan = PlaybackPlan::from_arrangement(&automated, sr);
             for clip in &plan.clips {
                 if let Some(chain) = bus_fx.get_mut(clip.bus_slot as usize) {
-                    chain.set_state(clip.effect_count, &clip.effects);
+                    chain.set_state(clip.effect_count, &clip.effects, &mut guitar_pool);
                 }
             }
-            master_fx.set_state(plan.master_effect_count, &plan.master_effects);
+            master_fx.set_state(plan.master_effect_count, &plan.master_effects, &mut guitar_pool);
         }
         // Start every gain at its real level: gliding up from unity made
         // the song's first hits louder than the rest.

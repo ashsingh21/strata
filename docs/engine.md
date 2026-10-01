@@ -128,5 +128,34 @@ The input device has its own callback. It sends each block's samples to
 a writer thread that appends them to a WAV file (so the audio callback
 never touches the disk), and its level to the input meter. When the take
 stops, the file is decoded like any other source and becomes a clip.
-There's no input monitoring yet: you don't hear yourself through the
-track's effects while recording (see `docs/guitar-track.md`).
+The take is recorded dry: the effects are never printed into the file,
+so a guitar track's tone (its gate, amp, cabinet...) can still be changed
+after the take, and the clip plays through the same chain as any other.
+
+### Live monitoring
+
+With Monitor on, the input is also heard now, through the armed audio
+track's effects:
+
+```mermaid
+flowchart LR
+    IN["input callback<br/>(only while Monitor is on,<br/>and the input runs at the output's rate)"] -- "mono samples, lock-free ring" --> MR["monitor ring"]
+    MR --> MFX["monitor effect chain<br/>(its own copy of the armed track's chain)"] --> MF["that track's fader"] --> SUM(("+"))
+    SUM --> MASTER["master effects, limiter"]
+```
+
+- The chain is a separate copy, not the track's bus chain: the amp and
+  the echo hold state, and a guitar clip playing on the same track must
+  not share it with the live signal. `PlaybackPlan.monitor` names the
+  first armed, unmuted audio track and carries its chain; it follows the
+  armed track as the plan is re-pushed.
+- Guitar effects come from a pool allocated up front (`engine::guitar::GuitarPool`)
+  and handed out when a chain is swapped in, so the audio thread never
+  allocates. If a pool runs dry the effect passes the signal through.
+- Latency is the device's buffer plus one block of the monitor ring; the
+  ring is primed at one block, re-primed after an underrun, and trimmed
+  back if it ever grows past four blocks. It isn't measured here.
+- If the input device runs at a different rate than the output, monitoring
+  is switched off (and logged) rather than resampled.
+- Through speakers, a microphone will feed back: Monitor starts off, and
+  "+ Guitar" turns it on for a direct-in guitar.

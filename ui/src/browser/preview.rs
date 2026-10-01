@@ -229,6 +229,7 @@ fn render(item: &Item, bpm: f64, root: u8, mask: u16, sync: bool, sample_rate: u
             let effect = match e {
                 EffectKind::Compressor => shared::arrangement::Effect::Compressor(Default::default()),
                 EffectKind::Eq => shared::arrangement::Effect::Eq(Default::default()),
+                EffectKind::Guitar(kind) => shared::arrangement::Effect::Guitar(shared::guitar::GuitarFx::new(*kind)),
             };
             Some(phrase(shared::synth::seed_synth(), Some(effect), bpm, root, mask, sample_rate))
         }

@@ -47,6 +47,7 @@ pub struct HeaderProps {
     pub scale_mask: Signal<u16>,
     pub input_level: Signal<f32>,
     pub input_gain_pos: Signal<f32>,
+    pub monitoring: Signal<bool>,
     /// The saved input device (`None` = OS default) and every device the
     /// host can currently see - see `recorder::RecorderModel`.
     pub selected_input_device: Signal<Option<std::sync::Arc<str>>>,
@@ -398,6 +399,15 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                 "Input gain",
             )
             .size(Pixels(22.0));
+
+            with_tip(
+                Button::new(cx, |cx| Label::new(cx, "Monitor"))
+                    .class("btn")
+                    .class("sm")
+                    .toggle_class("is-on", props.monitoring)
+                    .on_press(move |cx| cx.emit(RecorderModelEvent::SetMonitoring(!props.monitoring.get()))),
+                "Hear the input through the armed audio track's effects. Use headphones: speakers will feed back",
+            );
 
             // Which physical input actually gets opened - the OS's own
             // "default" is otherwise the only option, which silently

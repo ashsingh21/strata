@@ -9,7 +9,7 @@ use shared::arrangement::EqState;
 use shared::eq::{coefficients, is_active, Biquad};
 
 #[derive(Clone, Copy, Default)]
-struct BiquadState {
+pub(crate) struct BiquadState {
     x1: f32,
     x2: f32,
     y1: f32,
@@ -18,7 +18,7 @@ struct BiquadState {
 
 impl BiquadState {
     #[inline]
-    fn process(&mut self, x0: f32, c: &Biquad) -> f32 {
+    pub(crate) fn process(&mut self, x0: f32, c: &Biquad) -> f32 {
         let y0 = c.b0 * x0 + c.b1 * self.x1 + c.b2 * self.x2 - c.a1 * self.y1 - c.a2 * self.y2;
         self.x2 = self.x1;
         self.x1 = x0;

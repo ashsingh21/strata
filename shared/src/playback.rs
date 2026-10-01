@@ -52,6 +52,18 @@ pub struct PlaybackClip {
     pub bus_slot: u8,
 }
 
+/// What you hear of the track you're playing into: its input, live,
+/// through the track's own effects and fader. Only the armed audio track
+/// has one.
+#[derive(Clone, Copy, Debug)]
+pub struct MonitorPlan {
+    /// The track's bus slot, so its meter shows what you hear.
+    pub bus_slot: u8,
+    pub gain_db: f32,
+    pub effect_count: u8,
+    pub effects: [EffectUnitState; MAX_EFFECTS_PER_CHAIN],
+}
+
 /// A full snapshot of what should be audible, replacing whatever the
 /// engine had before. Rebuilt and pushed whenever the arrangement's clip
 /// layout changes.
@@ -70,6 +82,9 @@ pub struct PlaybackPlan {
     /// before the output meter. Same fixed-array shape as a track's.
     pub master_effect_count: u8,
     pub master_effects: [EffectUnitState; MAX_EFFECTS_PER_CHAIN],
+    /// The armed audio track's live input, if there is one (and it isn't
+    /// muted). Whether it's actually fed is `RecordParams::monitoring`.
+    pub monitor: Option<MonitorPlan>,
 }
 
 impl Default for PlaybackPlan {
@@ -78,6 +93,7 @@ impl Default for PlaybackPlan {
             clips: Vec::new(),
             master_effect_count: 0,
             master_effects: [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN],
+            monitor: None,
         }
     }
 }
@@ -101,6 +117,7 @@ pub fn build_effect_units(fx: &crate::arrangement::EffectGraph) -> (u8, [EffectU
                 EffectUnitState::Compressor(if node.enabled { c } else { CompressorState::bypass() })
             }
             Effect::Eq(e) => EffectUnitState::Eq(if node.enabled { e } else { crate::arrangement::EqState::bypass() }),
+            Effect::Guitar(g) => EffectUnitState::Guitar(if node.enabled { g } else { g.bypass() }),
         };
         count += 1;
     }
@@ -181,7 +198,17 @@ impl PlaybackPlan {
             })
             .collect();
         let (master_effect_count, master_effects) = build_effect_units(&arrangement.master_effects);
-        Self { clips, master_effect_count, master_effects }
+        let monitor = arrangement
+            .tracks
+            .iter()
+            .enumerate()
+            .find(|(_, t)| t.arm && t.kind == crate::arrangement::TrackKind::Audio)
+            .filter(|(_, t)| !t.mute && !(any_solo && !t.solo))
+            .map(|(i, t)| {
+                let (effect_count, effects) = build_effect_units(&t.fx);
+                MonitorPlan { bus_slot: i.min(MAX_BUS_TRACKS - 1) as u8, gain_db: t.gain_db, effect_count, effects }
+            });
+        Self { clips, master_effect_count, master_effects, monitor }
     }
 }
 

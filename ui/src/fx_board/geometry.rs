@@ -103,12 +103,12 @@ pub fn nearest_input_port(graph: &EffectGraph, x: f32, y: f32) -> Option<EffectN
 
 /// An effect's processing latency in milliseconds, at the engine's fixed
 /// 48kHz sample rate (matching `eq_curve.rs`'s own display-side constant).
-/// Both effect types today are zero-latency feedforward DSP - update this
+/// Every effect type today is zero-latency (the cabinet's FIR is direct, not block-delayed) - update this
 /// alongside `engine::EffectUnit` when a lookahead- or FIR-based effect
 /// type is added.
 pub fn effect_latency_ms(effect: &Effect) -> f32 {
     match effect {
-        Effect::Compressor(_) | Effect::Eq(_) => 0.0,
+        Effect::Compressor(_) | Effect::Eq(_) | Effect::Guitar(_) => 0.0,
     }
 }
 

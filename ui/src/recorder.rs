@@ -42,6 +42,9 @@ pub struct RecorderModel {
     pub input_level: Signal<f32>,
     /// 0..1 knob position; see `input_gain_pos_to_db`.
     pub input_gain_pos: Signal<f32>,
+    /// Whether the input is heard live through the armed track's effects.
+    /// Off at launch: with speakers, a live mic feeds back.
+    pub monitoring: Signal<bool>,
     /// Per-block abs-peak of the current take so far, in capture order -
     /// the same numbers the input meter already gets from `InputTelemetry`,
     /// just kept instead of discarded, so the in-progress clip can draw a
@@ -63,6 +66,7 @@ pub enum RecorderModelEvent {
     SetPreview(Option<RecordingPreview>),
     SetInputLevel(f32),
     SetInputGain(f32),
+    SetMonitoring(bool),
     SetLivePeaks(Arc<[f32]>),
     /// `None` reverts to "whatever the OS calls default".
     SetInputDevice(Option<Arc<str>>),
@@ -76,6 +80,7 @@ impl RecorderModel {
             preview: Signal::new(None),
             input_level: Signal::new(0.0),
             input_gain_pos: Signal::new(0.5),
+            monitoring: Signal::new(false),
             live_peaks: Signal::new(Arc::from([])),
             selected_input_device: Signal::new(crate::settings::load_input_device().map(Into::into)),
             available_input_devices: Signal::new(
@@ -94,6 +99,10 @@ impl Model for RecorderModel {
             RecorderModelEvent::SetInputGain(pos) => {
                 self.input_gain_pos.set(*pos);
                 self.record_params.set_input_gain_db(input_gain_pos_to_db(*pos));
+            }
+            RecorderModelEvent::SetMonitoring(on) => {
+                self.monitoring.set(*on);
+                self.record_params.set_monitoring(*on);
             }
             RecorderModelEvent::SetLivePeaks(peaks) => self.live_peaks.set(peaks.clone()),
             RecorderModelEvent::SetInputDevice(device) => {

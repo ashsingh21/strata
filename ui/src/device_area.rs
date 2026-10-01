@@ -360,6 +360,44 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
                 }
             });
 
+        // One chip per guitar effect, in chain order; rebuilt when the
+        // set changes. They're added from the browser or the Effects Board.
+        let guitar_nodes = Memo::new(move |_| {
+            p.selected_track
+                .get()
+                .and_then(|id| p.arrangement.get().track(id).cloned())
+                .map(|t| {
+                    t.fx.ordered()
+                        .iter()
+                        .filter_map(|n| match n.effect {
+                            Effect::Guitar(g) => Some((n.id, g.kind.name())),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+        Binding::new(cx, guitar_nodes, move |cx| {
+            for (node, name) in guitar_nodes.get() {
+                let showing = Memo::new(move |_| matches!(panel.get(), Panel::Effect(_, n) if n == node));
+                Button::new(cx, move |cx| Label::new(cx, name))
+                    .class("btn")
+                    .toggle_class("is-on", showing)
+                    .on_press(move |cx| {
+                        p.viewing_effect.set(Some(node));
+                        cx.emit(PianoRollEvent::Close);
+                    });
+                Button::new(cx, |cx| Label::new(cx, "\u{2715}")).class("btn").class("quiet").on_press(move |cx| {
+                    if let Some(track) = p.selected_track.get() {
+                        if p.viewing_effect.get() == Some(node) {
+                            p.viewing_effect.set(None);
+                        }
+                        cx.emit(TimelineEvent::RemoveEffectNodeFromBoard(Some(track), node));
+                    }
+                });
+            }
+        });
+
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
     })
     .gap(Pixels(tokens::SPACE_2))

@@ -22,6 +22,7 @@ pub const MAX_EFFECTS_PER_CHAIN: usize = 8;
 pub enum EffectUnitState {
     Compressor(CompressorState),
     Eq(EqState),
+    Guitar(crate::guitar::GuitarFx),
 }
 
 /// A DSP-relevant snapshot of `SynthState`: everything the audio thread

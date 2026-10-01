@@ -80,6 +80,7 @@ pub fn start(
     desired_sample_rate: u32,
     preferred_device: Option<&str>,
     capture_tx: SharedProducer<f32>,
+    monitor_tx: SharedProducer<f32>,
     telemetry: SharedProducer<InputTelemetry>,
     record_params: Arc<RecordParams>,
 ) -> Option<(cpal::Stream, u32)> {
@@ -126,19 +127,26 @@ pub fn start(
     let channels = config.channels() as usize;
     let sample_format = config.sample_format();
     let stream_config: StreamConfig = config.into();
+    // The monitor ring is read at the output's rate: an input that couldn't
+    // be opened at it would play back at the wrong pitch, so it isn't fed.
+    let can_monitor = sample_rate == desired_sample_rate;
+    if !can_monitor {
+        eprintln!("input: opened at {sample_rate} Hz, output runs at {desired_sample_rate} Hz; live monitoring unavailable");
+    }
+    let tx = InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, can_monitor };
 
     let stream = match sample_format {
         SampleFormat::F32 => {
-            build_input_stream::<f32>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+            build_input_stream::<f32>(&device, stream_config, channels, tx, record_params)
         }
         SampleFormat::I16 => {
-            build_input_stream::<i16>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+            build_input_stream::<i16>(&device, stream_config, channels, tx, record_params)
         }
         SampleFormat::U16 => {
-            build_input_stream::<u16>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+            build_input_stream::<u16>(&device, stream_config, channels, tx, record_params)
         }
         SampleFormat::U8 => {
-            build_input_stream::<u8>(&device, stream_config, channels, capture_tx, telemetry, record_params)
+            build_input_stream::<u8>(&device, stream_config, channels, tx, record_params)
         }
         other => {
             eprintln!("input: unsupported sample format {other}; recording disabled");
@@ -204,12 +212,19 @@ fn build_input_config(device: &cpal::Device, desired_sample_rate: u32) -> Option
     device.default_input_config().ok()
 }
 
+/// Where an input stream's samples go.
+struct InputTx {
+    capture: SharedProducer<f32>,
+    monitor: SharedProducer<f32>,
+    telemetry: SharedProducer<InputTelemetry>,
+    can_monitor: bool,
+}
+
 fn build_input_stream<T>(
     device: &cpal::Device,
     config: StreamConfig,
     channels: usize,
-    capture_tx: SharedProducer<f32>,
-    telemetry: SharedProducer<InputTelemetry>,
+    tx: InputTx,
     record_params: Arc<RecordParams>,
 ) -> Result<cpal::Stream, CpalError>
 where
@@ -218,6 +233,7 @@ where
 {
     let channels = channels.max(1);
     let err_fn = |err: CpalError| eprintln!("input stream error: {err}");
+    let InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, can_monitor } = tx;
 
     device.build_input_stream(
         config,
@@ -228,6 +244,8 @@ where
             // dropping one block is harmless.
             let (Ok(mut capture_tx), Ok(mut telemetry)) = (capture_tx.try_lock(), telemetry.try_lock()) else { return };
             let gain = db_to_gain(record_params.input_gain_db());
+            // Fed only while it's being listened to, so the ring never holds stale audio.
+            let mut monitor = if can_monitor && record_params.monitoring() { monitor_tx.try_lock().ok() } else { None };
             let mut peak = 0.0f32;
             for frame in data.chunks(channels) {
                 // The loudest channel this frame, not the average of all
@@ -243,6 +261,9 @@ where
                 let mono = loudest * gain;
                 peak = peak.max(mono.abs());
                 let _ = capture_tx.push(mono);
+                if let Some(monitor) = monitor.as_mut() {
+                    let _ = monitor.push(mono);
+                }
             }
             let _ = telemetry.push(InputTelemetry { peak });
         },

@@ -11,7 +11,7 @@
 //! rather than needing the engine to report it.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// UI -> engine input gain, applied in `input`'s capture callback before
 /// samples hit the ring buffer - plain atomics shared via `Arc`, same
@@ -19,11 +19,21 @@ use std::sync::atomic::{AtomicU32, Ordering};
 /// without going through a ring buffer.
 pub struct RecordParams {
     input_gain_db: AtomicU32,
+    monitoring: AtomicBool,
 }
 
 impl RecordParams {
     pub fn new() -> Self {
-        Self { input_gain_db: AtomicU32::new(0.0f32.to_bits()) }
+        Self { input_gain_db: AtomicU32::new(0.0f32.to_bits()), monitoring: AtomicBool::new(false) }
+    }
+
+    /// Whether the input is heard live, through the armed track's effects.
+    pub fn set_monitoring(&self, on: bool) {
+        self.monitoring.store(on, Ordering::Relaxed);
+    }
+
+    pub fn monitoring(&self) -> bool {
+        self.monitoring.load(Ordering::Relaxed)
     }
 
     pub fn set_input_gain_db(&self, db: f32) {

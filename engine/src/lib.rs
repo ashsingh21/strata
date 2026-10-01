@@ -16,6 +16,7 @@ mod dsp;
 mod effects;
 mod eq;
 mod fx;
+mod guitar;
 mod synth;
 
 use std::fmt;
@@ -29,6 +30,7 @@ use shared::synth::{NoteEvent, SynthParams, SynthTelemetry, MAX_INSTRUMENTS};
 use shared::{Params, Position, Telemetry};
 use drums::DrumEngine;
 use effects::EffectChain;
+use guitar::GuitarPool;
 use synth::SynthEngine;
 
 /// A gain that glides to its target instead of jumping. Track gain now
@@ -68,6 +70,9 @@ fn db_to_gain(db: f32) -> f32 {
 /// size at common sample rates, so a brief writer-thread stall (e.g. a
 /// slow disk) doesn't drop audio.
 const CAPTURE_CAPACITY: usize = 1 << 16;
+/// Live monitoring's ring: about 170 ms at 48 kHz - far more than the
+/// couple of blocks it normally holds, so it only fills if the output stalls.
+const MONITOR_CAPACITY: usize = 1 << 13;
 
 const BEATS_PER_BAR: u64 = 4;
 const SIXTEENTHS_PER_BEAT: u64 = 4;
@@ -93,6 +98,7 @@ pub struct EngineHandle {
 /// here so a new input device can be plugged into the same path.
 struct InputPath {
     capture: input::SharedProducer<f32>,
+    monitor: input::SharedProducer<f32>,
     telemetry: input::SharedProducer<shared::recorder::InputTelemetry>,
     record_params: Arc<shared::recorder::RecordParams>,
     rate: Arc<std::sync::atomic::AtomicU32>,
@@ -112,6 +118,7 @@ impl EngineHandle {
             self.sample_rate,
             device,
             self.input.capture.clone(),
+            self.input.monitor.clone(),
             self.input.telemetry.clone(),
             self.input.record_params.clone(),
         );
@@ -123,6 +130,51 @@ impl EngineHandle {
             }
             None => false,
         }
+    }
+}
+
+/// Your instrument heard live: the input's samples, through the armed
+/// track's own effects (a separate copy of the chain - an amp and an echo
+/// carry state, so they can't be shared with clip playback) and fader.
+struct Monitor {
+    rx: rtrb::Consumer<f32>,
+    chain: EffectChain,
+    gain: SmoothedGain,
+    /// Whether the ring holds enough to start playing from. Dropped when
+    /// it runs dry, so playback re-builds its cushion instead of stuttering.
+    primed: bool,
+}
+
+impl Monitor {
+    /// Called once per block, before its frames: decides whether this block
+    /// plays the input, and keeps the delay between playing and hearing
+    /// short by discarding what piled up if the output fell behind.
+    fn begin_block(&mut self, live: bool, frames: usize) {
+        if !live {
+            while self.rx.pop().is_ok() {}
+            self.primed = false;
+            return;
+        }
+        let queued = self.rx.slots();
+        if !self.primed && queued >= frames {
+            self.primed = true;
+        }
+        if queued > frames * 4 {
+            for _ in 0..queued - frames * 2 {
+                let _ = self.rx.pop();
+            }
+        }
+    }
+
+    #[inline]
+    fn next_sample(&mut self) -> f32 {
+        if !self.primed {
+            return 0.0;
+        }
+        self.rx.pop().unwrap_or_else(|_| {
+            self.primed = false;
+            0.0
+        })
     }
 }
 
@@ -183,6 +235,7 @@ pub fn start(
     let sample_format = config.sample_format();
     let stream_config: StreamConfig = config.into();
 
+    let (monitor_tx, monitor_rx) = rtrb::RingBuffer::<f32>::new(MONITOR_CAPACITY);
     let stream = match sample_format {
         SampleFormat::F32 => build_stream::<f32>(
             &device,
@@ -195,6 +248,8 @@ pub fn start(
             playback_plan,
             decoded_sources,
             preview,
+            monitor_rx,
+            record_params.clone(),
         )?,
         SampleFormat::I16 => build_stream::<i16>(
             &device,
@@ -207,6 +262,8 @@ pub fn start(
             playback_plan,
             decoded_sources,
             preview,
+            monitor_rx,
+            record_params.clone(),
         )?,
         SampleFormat::U16 => build_stream::<u16>(
             &device,
@@ -219,6 +276,8 @@ pub fn start(
             playback_plan,
             decoded_sources,
             preview,
+            monitor_rx,
+            record_params.clone(),
         )?,
         other => return Err(EngineError::UnsupportedSampleFormat(other)),
     };
@@ -228,6 +287,7 @@ pub fn start(
     let (capture_tx, capture_rx) = rtrb::RingBuffer::<f32>::new(CAPTURE_CAPACITY);
     let input = InputPath {
         capture: Arc::new(std::sync::Mutex::new(capture_tx)),
+        monitor: Arc::new(std::sync::Mutex::new(monitor_tx)),
         telemetry: Arc::new(std::sync::Mutex::new(input_telemetry)),
         record_params,
         rate: Arc::new(std::sync::atomic::AtomicU32::new(sample_rate)),
@@ -305,6 +365,8 @@ fn build_stream<T>(
     mut playback_plan: rtrb::Consumer<PlaybackPlan>,
     mut decoded_sources: rtrb::Consumer<DecodedSource>,
     mut preview: shared::playback::PreviewEnds,
+    monitor_rx: rtrb::Consumer<f32>,
+    record_params: Arc<shared::recorder::RecordParams>,
 ) -> Result<cpal::Stream, EngineError>
 where
     T: SizedSample + FromSample<f32>,
@@ -342,6 +404,11 @@ where
     // final mix, after every track's own chain/fader, before metering.
     let mut master_effects = EffectChain::new(sample_rate);
     let mut master_limiter = fx::Limiter::new(sample_rate);
+    // Every guitar effect there will ever be, built now so no chain has to
+    // allocate when one is added (see `guitar`).
+    let mut guitar_pool = GuitarPool::new(sample_rate);
+    let mut monitor =
+        Monitor { rx: monitor_rx, chain: EffectChain::new(sample_rate), gain: SmoothedGain::new(sample_rate), primed: false };
     let mut click_phase = 0.0f32;
     let mut click_env = 0.0f32;
     let mut click_hz = CLICK_HZ_BEAT;
@@ -365,7 +432,7 @@ where
                         *gain = db_to_gain(next.gain_db);
                     }
                     if let Some(chain) = slot_effects.get_mut(next.slot as usize) {
-                        chain.set_state(next.effect_count, &next.effects);
+                        chain.set_state(next.effect_count, &next.effects, &mut guitar_pool);
                     }
                     let slot = next.slot as usize;
                     if slot < MAX_INSTRUMENTS && slot_is_drums[slot] != next.drums {
@@ -399,12 +466,24 @@ where
                     current_plan = next;
                     // Config only - not per-sample - since it only needs
                     // to catch up whenever the plan itself changes.
+                    let mut in_plan = [false; MAX_BUS_TRACKS];
                     for clip in &current_plan.clips {
                         if let Some(chain) = bus_effects.get_mut(clip.bus_slot as usize) {
-                            chain.set_state(clip.effect_count, &clip.effects);
+                            chain.set_state(clip.effect_count, &clip.effects, &mut guitar_pool);
+                            in_plan[clip.bus_slot as usize] = true;
                         }
                     }
-                    master_effects.set_state(current_plan.master_effect_count, &current_plan.master_effects);
+                    // A track with no clips left gives its guitar units back.
+                    for (chain, used) in bus_effects.iter_mut().zip(in_plan) {
+                        if !used {
+                            chain.release(&mut guitar_pool);
+                        }
+                    }
+                    match &current_plan.monitor {
+                        Some(m) => monitor.chain.set_state(m.effect_count, &m.effects, &mut guitar_pool),
+                        None => monitor.chain.release(&mut guitar_pool),
+                    }
+                    master_effects.set_state(current_plan.master_effect_count, &current_plan.master_effects, &mut guitar_pool);
                 }
                 // Latest-wins: a new preview replaces the one playing (an
                 // empty one just stops it). Finished buffers go back to be
@@ -445,6 +524,8 @@ where
                     &mut bus_effects,
                     &mut master_effects,
                     &mut master_limiter,
+                    &mut monitor,
+                    record_params.monitoring(),
                     &mut synth_telemetry,
                     &mut click_phase,
                     &mut click_env,
@@ -487,6 +568,8 @@ fn write_block<T>(
     bus_effects: &mut [EffectChain],
     master_effects: &mut EffectChain,
     master_limiter: &mut fx::Limiter,
+    monitor: &mut Monitor,
+    monitoring: bool,
     synth_telemetry: &mut rtrb::Producer<SynthTelemetry>,
     click_phase: &mut f32,
     click_env: &mut f32,
@@ -518,6 +601,8 @@ fn write_block<T>(
     let mut synth_peaks = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
     let mut bus_peaks = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut frames = 0u64;
+    let live = monitoring && plan.monitor.is_some();
+    monitor.begin_block(live, output.len() / channels.max(1));
 
     for frame in output.chunks_mut(channels) {
 
@@ -560,7 +645,20 @@ fn write_block<T>(
         } else {
             (0.0, 0.0)
         };
-        let (out_l, out_r) = master_effects.process(synth_l + click + clip_l, synth_r + click + clip_r);
+        let (mon_l, mon_r) = match plan.monitor.as_ref().filter(|_| live) {
+            Some(m) => {
+                let input = monitor.next_sample();
+                let (fx_l, fx_r) = monitor.chain.process(input, input);
+                let gain = monitor.gain.next(db_to_gain(m.gain_db));
+                let (l, r) = (fx_l * gain, fx_r * gain);
+                let peak = &mut bus_peaks[m.bus_slot as usize];
+                peak.0 = peak.0.max(l.abs());
+                peak.1 = peak.1.max(r.abs());
+                (l, r)
+            }
+            None => (0.0, 0.0),
+        };
+        let (out_l, out_r) = master_effects.process(synth_l + click + clip_l + mon_l, synth_r + click + clip_r + mon_r);
         // The master's last stage: nothing reaches the device (or an
         // export) over -0.5 dBFS - a hot mix used to hard-clip there.
         let (mut out_l, mut out_r) = master_limiter.process(out_l, out_r);

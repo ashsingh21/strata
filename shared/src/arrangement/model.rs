@@ -192,6 +192,16 @@ impl EffectGraph {
         out
     }
 
+    /// Where a new guitar effect of `kind` goes: just before the first
+    /// guitar effect that ranks after it (the amp ahead of the echo), or
+    /// the end of the chain when none does.
+    pub fn guitar_slot(&self, kind: crate::guitar::GuitarKind) -> EffectNodeId {
+        self.ordered()
+            .into_iter()
+            .find(|n| matches!(n.effect, Effect::Guitar(g) if g.kind.rank() > kind.rank()))
+            .map_or(Self::OUTPUT, |n| n.id)
+    }
+
     pub fn node(&self, id: EffectNodeId) -> Option<&EffectNode> {
         self.nodes.iter().find(|n| n.id == id)
     }
@@ -437,6 +447,7 @@ impl Instrument {
 pub enum Effect {
     Compressor(CompressorState),
     Eq(EqState),
+    Guitar(crate::guitar::GuitarFx),
 }
 
 impl Effect {
@@ -444,6 +455,7 @@ impl Effect {
         match self {
             Effect::Compressor(_) => "Compressor",
             Effect::Eq(_) => "EQ",
+            Effect::Guitar(g) => g.kind.name(),
         }
     }
 }
@@ -461,11 +473,19 @@ pub struct CompressorState {
     pub release_ms: f32,
     /// Makeup gain, applied after gain reduction.
     pub makeup_db: f32,
+    /// How much of the untouched signal is mixed back in (0..1) - parallel
+    /// compression, which keeps a guitar's attack while evening out its tail.
+    #[serde(default)]
+    pub dry: f32,
+    /// A high-pass on what the compressor listens to (not on what you
+    /// hear), so low notes don't make it clamp down. 0 = off.
+    #[serde(default)]
+    pub detector_hp_hz: f32,
 }
 
 impl Default for CompressorState {
     fn default() -> Self {
-        Self { threshold_db: -18.0, ratio: 4.0, attack_ms: 10.0, release_ms: 150.0, makeup_db: 0.0 }
+        Self { threshold_db: -18.0, ratio: 4.0, attack_ms: 10.0, release_ms: 150.0, makeup_db: 0.0, dry: 0.0, detector_hp_hz: 0.0 }
     }
 }
 
@@ -937,6 +957,10 @@ pub enum EffectParam {
     CompressorAttack,
     CompressorRelease,
     CompressorMakeup,
+    CompressorDry,
+    CompressorDetectorHp,
+    /// One knob of a guitar effect: its kind, and its index in `GuitarKind::specs`.
+    Guitar(crate::guitar::GuitarKind, u8),
     /// The bell band (the EQ's only band once, hence the plain names -
     /// saved automation lanes still point at them).
     EqFreq,
@@ -949,6 +973,23 @@ pub enum EffectParam {
     EqHighGain,
 }
 
+/// A guitar effect's params as `EffectParam`s - a static table, since
+/// `for_effect` hands out a slice.
+fn guitar_params(kind: crate::guitar::GuitarKind) -> &'static [EffectParam] {
+    use crate::guitar::GuitarKind as K;
+    macro_rules! knobs {
+        ($kind:expr; $($i:expr),*) => { &[$(EffectParam::Guitar($kind, $i)),*] };
+    }
+    match kind {
+        K::Gate => knobs!(K::Gate; 0, 1),
+        K::Amp => knobs!(K::Amp; 0, 1, 2, 3, 4, 5),
+        K::Cabinet => knobs!(K::Cabinet; 0, 1),
+        K::Chorus => knobs!(K::Chorus; 0, 1, 2, 3),
+        K::Echo => knobs!(K::Echo; 0, 1, 2, 3, 4),
+        K::Spring => knobs!(K::Spring; 0, 1, 2, 3),
+    }
+}
+
 impl EffectParam {
     pub fn name(self) -> &'static str {
         match self {
@@ -957,6 +998,9 @@ impl EffectParam {
             EffectParam::CompressorAttack => "Attack",
             EffectParam::CompressorRelease => "Release",
             EffectParam::CompressorMakeup => "Makeup",
+            EffectParam::CompressorDry => "Dry",
+            EffectParam::CompressorDetectorHp => "Detector HP",
+            EffectParam::Guitar(kind, i) => kind.specs().get(i as usize).map(|s| s.name).unwrap_or(""),
             EffectParam::EqFreq => "Freq",
             EffectParam::EqGain => "Gain",
             EffectParam::EqQ => "Q",
@@ -978,7 +1022,10 @@ impl EffectParam {
                 EffectParam::CompressorAttack,
                 EffectParam::CompressorRelease,
                 EffectParam::CompressorMakeup,
+                EffectParam::CompressorDry,
+                EffectParam::CompressorDetectorHp,
             ],
+            Effect::Guitar(g) => guitar_params(g.kind),
             Effect::Eq(_) => &[
                 EffectParam::EqLowCut,
                 EffectParam::EqLowFreq,
@@ -1265,13 +1312,24 @@ mod effect_graph_tests {
     #[test]
     fn effect_param_for_effect_matches_each_effects_own_knobs() {
         let compressor_params = EffectParam::for_effect(compressor());
-        assert_eq!(compressor_params.len(), 5);
+        assert_eq!(compressor_params.len(), 7);
         assert!(compressor_params.contains(&EffectParam::CompressorThreshold));
+        assert!(compressor_params.contains(&EffectParam::CompressorDry));
 
         let eq_params = EffectParam::for_effect(Effect::Eq(EqState::default()));
         assert_eq!(eq_params.len(), 8, "four bands: cut, shelf freq+gain, bell freq+gain+Q, shelf freq+gain");
         assert!(eq_params.contains(&EffectParam::EqFreq));
         assert!(!eq_params.contains(&EffectParam::CompressorThreshold), "an EQ node shouldn't offer Compressor knobs");
+
+        for kind in crate::guitar::GuitarKind::ALL {
+            let fx = Effect::Guitar(crate::guitar::GuitarFx::new(kind));
+            let params = EffectParam::for_effect(fx);
+            assert_eq!(params.len(), kind.specs().len(), "{}", kind.name());
+            for &param in params {
+                assert!(param.norm(&fx).is_some(), "{} {}", kind.name(), param.name());
+                assert!(!param.format(&fx).is_empty());
+            }
+        }
     }
 }
 
