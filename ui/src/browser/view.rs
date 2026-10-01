@@ -649,7 +649,14 @@ fn result_row(cx: &mut Context, p: BrowserProps, item: Item) {
             .height(Pixels(15.0))
             .tooltip(move |cx| tip(cx, if fits { "In the project's key" } else { "Outside the project's key" }));
         }
-        Label::new(cx, row_item.meta.clone()).class("value").text_wrap(false).hoverable(false);
+        // Cut short before layout: a long description (a guitar effect's)
+        // squeezed the name out of the row, and a width cap didn't stop it.
+        let meta = if row_item.meta.chars().count() > 14 {
+            format!("{}\u{2026}", row_item.meta.chars().take(13).collect::<String>().trim_end())
+        } else {
+            row_item.meta.clone()
+        };
+        Label::new(cx, meta).class("value").text_wrap(false).hoverable(false);
         if row_item.previewable() {
             let pv_item = row_item.clone();
             Button::new(cx, move |cx| {
