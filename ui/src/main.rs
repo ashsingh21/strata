@@ -173,6 +173,7 @@ fn main() -> Result<(), ApplicationError> {
         let tl_fx_selected = timeline_state.fx_selected;
         let tl_renaming_marker = timeline_state.renaming_marker;
         let tl_renaming_track = timeline_state.renaming_track;
+        let tl_renaming_clip = timeline_state.renaming_clip;
 
         // A saved project (if any) replaces the empty starting arrangement
         // before anything downstream reads it - the peak/decode loaders in
@@ -683,6 +684,7 @@ fn main() -> Result<(), ApplicationError> {
             sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status);
 
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, synth_state);
+            timeline::clip_rename_view(cx, tl_arrangement, tl_renaming_clip);
             // A dragged browser result's name, following the pointer.
             browser::view::DragGhost::new(cx, browser_props);
             // The key menu's one dropdown, over everything (see key_menu).

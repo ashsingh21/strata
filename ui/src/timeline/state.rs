@@ -82,6 +82,9 @@ pub struct TimelineState {
     pub renaming_marker: Signal<Option<MarkerId>>,
     /// The track currently showing an inline rename textbox, if any.
     pub renaming_track: Signal<Option<TrackId>>,
+    /// The clip whose rename box is open, and where to show it (window
+    /// coordinates: the click that asked for it).
+    pub renaming_clip: Signal<Option<(ClipId, f32, f32)>>,
     /// Whether Copy/Cut has put anything aside - so a context menu on
     /// empty space knows whether to offer Paste.
     pub clipboard_nonempty: Signal<bool>,
@@ -228,6 +231,7 @@ impl TimelineState {
             context_menu: Signal::new(None),
             renaming_marker: Signal::new(None),
             renaming_track: Signal::new(None),
+            renaming_clip: Signal::new(None),
             clipboard_nonempty: Signal::new(false),
             missing_sources: Signal::new(HashSet::new()),
             fx_selected: Signal::new(None),
@@ -560,6 +564,10 @@ pub enum TimelineEvent {
     /// Commits the track rename textbox's current text.
     CommitRenameTrack(TrackId, String),
     CancelRenameTrack,
+    /// Opens the clip rename box at window position (`x`, `y`).
+    BeginRenameClip { clip: ClipId, x: f32, y: f32 },
+    CommitRenameClip(ClipId, String),
+    CancelRenameClip,
     AddTrack(TrackKind),
     /// "+ Drums": a MIDI track with a Drum Kit, named "Drums".
     AddDrumTrack,
@@ -1562,6 +1570,25 @@ impl Model for TimelineState {
             }
             TimelineEvent::CancelRenameTrack => {
                 self.renaming_track.set(None);
+            }
+            TimelineEvent::BeginRenameClip { clip, x, y } => {
+                self.renaming_clip.set(Some((*clip, *x, *y)));
+            }
+            TimelineEvent::CommitRenameClip(clip, name) => {
+                let name = name.trim();
+                let renamed = self
+                    .arrangement
+                    .get()
+                    .clip(*clip)
+                    .filter(|c| !name.is_empty() && c.name != name)
+                    .map(|c| Clip { name: name.to_string(), ..c.clone() });
+                if let Some(renamed) = renamed {
+                    self.do_command(Command::ReplaceClip { clip: Box::new(renamed) });
+                }
+                self.renaming_clip.set(None);
+            }
+            TimelineEvent::CancelRenameClip => {
+                self.renaming_clip.set(None);
             }
             TimelineEvent::LoadArrangement(arrangement) => {
                 self.arrangement.set(arrangement.clone());

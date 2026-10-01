@@ -216,6 +216,14 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             p.open_clip.get().and_then(|id| p.arrangement.get().clip(id).map(|c| c.name.clone())).unwrap_or_default()
         });
         Button::new(cx, move |cx| Label::new(cx, clip_name))
+            .on_press(move |cx| {
+                use crate::hidpi::Logical;
+                let b = cx.lbounds();
+                if let Some(clip) = p.open_clip.get() {
+                    cx.emit(crate::timeline::state::TimelineEvent::BeginRenameClip { clip, x: b.x, y: b.y });
+                }
+            })
+            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Rename this clip"); }).arrow(false))
             .class("btn")
             .class("is-on")
             .toggle_class("hidden", editing.map(|e| !*e));

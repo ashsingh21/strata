@@ -139,6 +139,8 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
             ContextMenuTarget::Clip(clip_id) => {
                 let is_midi = arr.clip(clip_id).map(|c| matches!(c.content, ClipContent::Midi { .. })).unwrap_or(false);
                 let is_linked = arr.clip(clip_id).is_some_and(|c| c.link().is_some());
+                item(cx, "Rename...", move |cx| cx.emit(TimelineEvent::BeginRenameClip { clip: clip_id, x: m.x, y: m.y }));
+                separator(cx);
                 item_with_shortcut(cx, "Cut", "Ctrl+X", |cx| cx.emit(TimelineEvent::Cut));
                 item_with_shortcut(cx, "Copy", "Ctrl+C", |cx| cx.emit(TimelineEvent::Copy));
                 item_with_shortcut(cx, "Duplicate", "Ctrl+D", |cx| cx.emit(TimelineEvent::DuplicateSelected));

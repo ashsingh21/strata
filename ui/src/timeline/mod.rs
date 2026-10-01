@@ -441,3 +441,29 @@ pub fn editor_snap_button(cx: &mut Context, snap: Signal<SnapGrid>) {
             }
         });
 }
+
+/// The clip rename box, floating where it was asked for (a clip's
+/// right-click, or the clip chip over the editor): clip names are drawn on
+/// canvases, which can't host a text field. Mounted at the window root.
+pub fn clip_rename_view(cx: &mut Context, arrangement: Signal<Arrangement>, renaming_clip: Signal<Option<(shared::arrangement::ClipId, f32, f32)>>) {
+    Binding::new(cx, renaming_clip, move |cx| {
+        let Some((clip_id, x, y)) = renaming_clip.get() else { return };
+        let Some(name) = arrangement.get().clip(clip_id).map(|c| c.name.clone()) else { return };
+        let draft: Signal<String> = Signal::new(name);
+        let field = Textbox::new(cx, draft)
+            .class("search")
+            .font_size(12.0)
+            .on_edit(move |_cx, text| draft.set(text))
+            .on_submit(move |cx, text, _from_key| cx.emit(TimelineEvent::CommitRenameClip(clip_id, text)))
+            .on_cancel(move |cx| cx.emit(TimelineEvent::CancelRenameClip))
+            .position_type(PositionType::Absolute)
+            .left(Pixels(x))
+            .top(Pixels(y))
+            .width(Pixels(160.0))
+            .height(Pixels(22.0))
+            .entity();
+        // Ready to type over the old name; Escape cancels.
+        cx.emit_to(field, TextEvent::StartEdit);
+        cx.emit_to(field, TextEvent::SelectAll);
+    });
+}
