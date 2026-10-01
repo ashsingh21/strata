@@ -21,14 +21,14 @@ pub fn lesson_panel(cx: &mut Context, p: LessonBarProps) {
         let l = &LESSONS[lesson];
         VStack::new(cx, move |cx| {
             HStack::new(cx, move |cx| {
-                title_and_dots(cx, lesson, step, step);
-                Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+                title_and_dots(cx, lesson, step, step, true);
                 Button::new(cx, |cx| Label::new(cx, "Exit"))
                     .class("btn")
                     .class("sm")
                     .class("quiet")
                     .on_press(|cx| cx.emit(LessonEvent::Exit));
             })
+            .gap(Pixels(tokens::SPACE_3))
             .alignment(Alignment::TopLeft)
             .width(Stretch(1.0))
             .height(Auto);
@@ -153,6 +153,23 @@ fn current_card(cx: &mut Context, p: LessonBarProps, lesson: usize, i: usize) {
     card(cx, move |cx| {
         Label::new(cx, format!("Step {} of {}", i + 1, l.steps.len())).class("label");
         text(cx, s.text.to_string(), "body").class("lesson-text");
+        // The step done, to hear before doing it, and yours to compare;
+        // and how many of its notes are in.
+        if matches!(s.kind, Kind::Action { .. }) {
+            buttons(cx, move |cx| {
+                preview_button(cx, p, Which::Example, "Hear it").class("is-on").toggle_class("hidden", p.has_example.map(|h| !*h));
+                preview_button(cx, p, Which::Yours, "Hear yours").toggle_class("hidden", p.has_example.map(|h| !*h));
+            });
+            text(
+                cx,
+                p.ghost_progress.map(|g| match g {
+                    Some((placed, all)) => format!("{placed} of {all} notes in \u{b7} the dashed outlines show where"),
+                    None => String::new(),
+                }),
+                "value",
+            )
+            .toggle_class("hidden", p.ghost_progress.map(|g| g.is_none()));
+        }
         let words = super::course::new_words(l, i);
         if !words.is_empty() {
             let line = words.iter().map(|(term, meaning)| format!("{term}: {meaning}")).collect::<Vec<_>>().join("\n");
@@ -183,23 +200,6 @@ fn current_card(cx: &mut Context, p: LessonBarProps, lesson: usize, i: usize) {
                 .toggle_class("hidden", p.shown_step.map(move |s| *s != Some(i - 1)))
                 .on_press(|cx| cx.emit(LessonEvent::TryYourself));
         }
-        // The step done, to hear before doing it, and yours to compare;
-        // and how many of its notes are in.
-        if matches!(s.kind, Kind::Action { .. }) {
-            buttons(cx, move |cx| {
-                preview_button(cx, p, Which::Example, "Hear it").class("is-on").toggle_class("hidden", p.has_example.map(|h| !*h));
-                preview_button(cx, p, Which::Yours, "Hear yours").toggle_class("hidden", p.has_example.map(|h| !*h));
-            });
-            text(
-                cx,
-                p.ghost_progress.map(|g| match g {
-                    Some((placed, all)) => format!("{placed} of {all} notes in \u{b7} the dashed outlines show where"),
-                    None => String::new(),
-                }),
-                "value",
-            )
-            .toggle_class("hidden", p.ghost_progress.map(|g| g.is_none()));
-        }
         let last = i + 1 == l.steps.len();
         match s.kind {
             Kind::Action { .. } => buttons(cx, move |cx| {
@@ -215,22 +215,43 @@ fn current_card(cx: &mut Context, p: LessonBarProps, lesson: usize, i: usize) {
                 Button::new(cx, |cx| Label::new(cx, "Skip")).class("btn").class("quiet").on_press(|cx| cx.emit(LessonEvent::Skip));
                 goal(cx, p, l);
             }),
-            Kind::Info if last => buttons(cx, move |cx| {
-                if lesson + 1 < LESSONS.len() {
-                    Button::new(cx, |cx| Label::new(cx, "Next lesson"))
-                        .class("btn")
-                        .class("is-on")
-                        .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson + 1)));
+            Kind::Info if last => {
+                // What you made, to hear again, and the lesson to take next
+                // (the first unfinished one on the path, not just the next
+                // in the list).
+                buttons(cx, move |cx| {
+                    preview_button(cx, p, Which::Yours, "Hear yours").class("is-on");
+                    goal(cx, p, l);
+                });
+                let next = super::course::next_lesson(&p.done.get()).filter(|&n| n != lesson);
+                if let Some(next) = next {
+                    let n = &LESSONS[next];
+                    VStack::new(cx, move |cx| {
+                        Label::new(cx, "Up next").class("label");
+                        Label::new(cx, n.title).class("title");
+                        Label::new(cx, format!("{} \u{b7} {} steps", n.group, n.steps.len())).class("value");
+                    })
+                    .gap(Pixels(2.0))
+                    .padding_top(Pixels(tokens::SPACE_2))
+                    .height(Auto);
                 }
-                Button::new(cx, |cx| Label::new(cx, "Done")).class("btn").on_press(|cx| cx.emit(LessonEvent::Continue));
-                // Back a lesson, within the same group (Carve, Theory...).
-                if lesson > 0 && LESSONS[lesson - 1].group == l.group {
-                    Button::new(cx, |cx| Label::new(cx, "Previous"))
-                        .class("btn")
-                        .class("quiet")
-                        .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson - 1)));
-                }
-            }),
+                buttons(cx, move |cx| {
+                    if let Some(next) = next {
+                        Button::new(cx, |cx| Label::new(cx, "Start"))
+                            .class("btn")
+                            .class("is-on")
+                            .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(next)));
+                    }
+                    Button::new(cx, |cx| Label::new(cx, "Done")).class("btn").on_press(|cx| cx.emit(LessonEvent::Continue));
+                    // Back a lesson, within the same group (Carve, Theory...).
+                    if lesson > 0 && LESSONS[lesson - 1].group == l.group {
+                        Button::new(cx, |cx| Label::new(cx, "Previous"))
+                            .class("btn")
+                            .class("quiet")
+                            .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(lesson - 1)));
+                    }
+                });
+            }
             Kind::Info => buttons(cx, move |cx| {
                 Button::new(cx, |cx| Label::new(cx, "Continue")).class("btn").class("is-on").on_press(|cx| cx.emit(LessonEvent::Continue));
                 goal(cx, p, l);

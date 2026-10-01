@@ -38,6 +38,7 @@ pub enum IconKind {
     Play,
     Stop,
     Close,
+    Check,
 }
 
 impl IconKind {
@@ -252,5 +253,6 @@ pub fn draw_icon(canvas: &Canvas, kind: IconKind, x: f32, y: f32, size: f32, col
         Play => poly(canvas, &[(3.0, 1.8), (3.0, 10.2), (10.0, 6.0)], true, &paint),
         Stop => rect(canvas, 2.5, 2.5, 7.0, 7.0, 1.0, &paint),
         Close => lines(canvas, &[((3.0, 3.0), (9.0, 9.0)), ((9.0, 3.0), (3.0, 9.0))], &paint),
+        Check => poly(canvas, &[(2.5, 6.5), (5.0, 9.0), (9.5, 3.5)], false, &paint),
     }
 }

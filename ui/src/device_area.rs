@@ -105,7 +105,12 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
     // The editor replaces the device while a clip is open - and only while
     // that clip still exists (after an undo removed it, a blank editor
     // stayed up whose controls did nothing).
-    let open_existing = Memo::new(move |_| p.open_clip.get().filter(|id| p.arrangement.get().clip(*id).is_some()));
+    // Selecting another track shows that track's device instead (the clip
+    // stays open, and comes back with its track).
+    let open_existing = Memo::new(move |_| {
+        let arr = p.arrangement.get();
+        p.open_clip.get().filter(|id| arr.clip(*id).is_some_and(|c| p.selected_track.get().is_none_or(|t| t == c.track)))
+    });
     Binding::new(cx, open_existing, move |cx| {
         if open_existing.get().is_some() {
             piano_roll::piano_roll_view(
@@ -174,7 +179,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                         cx.emit(TimelineEvent::SetInstrument { track, instrument: Some(Instrument::Drums) })
                     });
             }),
-            Panel::Audio => empty_state(cx, "Audio track \u{b7} no instrument", |_| {}),
+            Panel::Audio => empty_state(cx, "An audio track plays its clips; add effects with the buttons above", |_| {}),
             Panel::Nothing => empty_state(cx, "Select a track to see its instrument and effects", |_| {}),
         });
     });
@@ -211,7 +216,10 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
             .width(Pixels(1.0))
             .height(Pixels(16.0));
 
-        let editing = Memo::new(move |_| p.open_clip.get().is_some_and(|id| p.arrangement.get().clip(id).is_some()));
+        let editing = Memo::new(move |_| {
+            let arr = p.arrangement.get();
+            p.open_clip.get().is_some_and(|id| arr.clip(id).is_some_and(|c| p.selected_track.get().is_none_or(|t| t == c.track)))
+        });
         let clip_name = Memo::new(move |_| {
             p.open_clip.get().and_then(|id| p.arrangement.get().clip(id).map(|c| c.name.clone())).unwrap_or_default()
         });
@@ -418,12 +426,12 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
 /// A quiet, short panel standing in for a device the track doesn't have.
 fn empty_state(cx: &mut Context, message: &'static str, action: impl FnOnce(&mut Context)) {
     HStack::new(cx, move |cx| {
-        Label::new(cx, message).class("body");
+        Label::new(cx, message).class("body").class("empty-note");
         action(cx);
     })
-    .class("device")
+    // No frame: an empty box read as a panel that had failed to load.
     .gap(Pixels(tokens::SPACE_3))
     .alignment(Alignment::Center)
     .width(Stretch(1.0))
-    .height(Pixels(96.0));
+    .height(Pixels(120.0));
 }

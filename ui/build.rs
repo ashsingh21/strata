@@ -848,6 +848,13 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".side-row.is-lesson-target .body", vec![("color", c("signal"))]);
     rule(".lesson-bar", vec![("background-color", c("bg-raised"))]);
     rule(".lesson-dots", vec![("color", c("signal"))]);
+    // The lesson's progress: a segment a step.
+    rule(".lesson-seg", vec![("background-color", c("bg-300"))]);
+    rule(".lesson-seg.is-done", vec![("background-color", c("signal"))]);
+    rule(".lesson-seg.is-current", vec![("background-color", c("ink"))]);
+    rule(".lesson-done", vec![("color", c("signal"))]);
+    rule(".empty-note", vec![("color", c("ink-muted"))]);
+    rule(".learn-next:hover", vec![("background-color", c("bg-300"))]);
     // The lesson panel's current step.
     rule(".lesson-card", vec![("background-color", c("bg-000")), ("border-color", c("line"))]);
     rule(".lesson-step.is-done:hover", vec![("background-color", c("bg-300"))]);

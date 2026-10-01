@@ -79,8 +79,9 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
                 Label::new(
                     cx,
                     settings.map(|s| {
-                        let pitch = if s.pitch == 0.0 { String::new() } else { format!(" {:+.0}st", s.pitch) };
-                        format!("{:+.0}dB{pitch}", s.gain_db)
+                        let signed = |v: f32| format!("{v:+.0}").replace('-', "\u{2212}");
+                        let pitch = if s.pitch == 0.0 { String::new() } else { format!(" \u{b7} {} st", signed(s.pitch)) };
+                        format!("{} dB{pitch}", signed(s.gain_db))
                     }),
                 )
                 .class("value");

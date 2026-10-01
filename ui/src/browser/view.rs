@@ -731,7 +731,7 @@ fn learn_list(cx: &mut Context, p: BrowserProps) {
                 Icon::new(cx, IconKind::Lesson, 12.0, Signal::new(next), p.theme, |pal, next| if next { pal.signal } else { pal.ink_muted });
                 Label::new(cx, title.clone()).class("body").toggle_class("brw-next", next).text_wrap(false).text_overflow(TextOverflow::Ellipsis).width(Stretch(1.0)).hoverable(false);
                 if finished {
-                    Label::new(cx, "Done").class("value").hoverable(false);
+                    Icon::new(cx, IconKind::Check, 12.0, Signal::new(false), p.theme, |pal, _| pal.signal).hoverable(false);
                 }
             })
             .class("brw-row")
@@ -745,10 +745,24 @@ fn learn_list(cx: &mut Context, p: BrowserProps) {
             .cursor(CursorIcon::Hand)
             .on_press(move |cx| cx.emit(crate::project::ProjectEvent::StartLesson(i)));
         };
+        // Where to go on: a card with the lesson's group and length.
         if query.is_empty() {
             if let Some(next) = crate::lessons::course::next_lesson(&done) {
-                let label = if done.is_empty() { "Start here" } else { "Up next" };
-                lesson_row(cx, next, format!("{label}: {}", lessons[next].title), false, true);
+                let l = &lessons[next];
+                let heading = if done.is_empty() { "Start here" } else { "Up next" };
+                VStack::new(cx, move |cx| {
+                    Label::new(cx, heading).class("label").hoverable(false);
+                    Label::new(cx, l.title).class("title").hoverable(false);
+                    Label::new(cx, format!("{} \u{b7} {} steps", l.group, l.steps.len())).class("value").hoverable(false);
+                })
+                .class("lesson-card")
+                .class("learn-next")
+                .gap(Pixels(2.0))
+                .padding(Pixels(tokens::SPACE_2))
+                .width(Stretch(1.0))
+                .height(Auto)
+                .cursor(CursorIcon::Hand)
+                .on_press(move |cx| cx.emit(crate::project::ProjectEvent::StartLesson(next)));
             }
         }
         let mut group = "";
@@ -758,7 +772,18 @@ fn learn_list(cx: &mut Context, p: BrowserProps) {
             }
             if lesson.group != group {
                 group = lesson.group;
-                Label::new(cx, group).class("label").padding_left(Pixels(tokens::SPACE_2)).padding_top(Pixels(tokens::SPACE_3)).height(Auto);
+                let in_group = lessons.iter().filter(|l| l.group == group);
+                let total = in_group.clone().count();
+                let finished = in_group.filter(|l| done.iter().any(|d| d == l.id)).count();
+                HStack::new(cx, move |cx| {
+                    Label::new(cx, group).class("label").width(Stretch(1.0));
+                    Label::new(cx, format!("{finished} / {total}")).class("value").toggle_class("lesson-done", finished == total);
+                })
+                .padding_left(Pixels(tokens::SPACE_2))
+                .padding_right(Pixels(6.0))
+                .padding_top(Pixels(tokens::SPACE_3))
+                .width(Stretch(1.0))
+                .height(Auto);
             }
             lesson_row(cx, i, lesson.title.to_string(), done.iter().any(|d| d == lesson.id), false);
         }

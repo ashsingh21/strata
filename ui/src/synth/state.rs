@@ -401,6 +401,15 @@ impl SynthModel {
 
 impl Model for SynthModel {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        // A clip opened from anywhere (a menu, a lesson) brings its track
+        // with it: the editor shows only under its own track.
+        event.map(|event, _| {
+            if let crate::piano_roll::state::PianoRollEvent::Open(clip) = event {
+                if let Some(track) = self.arrangement.get().clip(*clip).map(|c| c.track) {
+                    cx.emit(SynthEvent::SelectTrack(track));
+                }
+            }
+        });
         event.map(|event, _| match event {
             SynthEvent::Update(f) => self.state.update(|s| f(s)),
             SynthEvent::SetOsc1Waveform(w) => self.state.update(|s| s.osc1.waveform = *w),

@@ -942,7 +942,7 @@ where
 
                 // Only iterate over glyphs within the actual text range
                 let glyph_end = line.end_index.min(text_len);
-                let estimated_chars = glyph_end - line.start_index;
+                let estimated_chars = glyph_end.saturating_sub(line.start_index);
                 let mut character_lengths: Vec<u8> = Vec::with_capacity(estimated_chars);
                 let mut character_positions: Vec<f32> = Vec::with_capacity(estimated_chars);
                 let mut character_widths: Vec<f32> = Vec::with_capacity(estimated_chars);

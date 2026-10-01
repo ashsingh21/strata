@@ -352,26 +352,37 @@ pub fn piano_roll_view(
             })
             .width(Auto)
             .height(Auto);
-            Label::new(cx, "Snap").class("label");
-            crate::timeline::editor_snap_button(cx, snap);
-            // What a new note's length is: one Snap step until you drag a
-            // note's right edge, then that length. A click goes back to Snap.
-            Label::new(cx, "New note").class("label").toggle_class("hidden", drums);
-            let length_text = Memo::new(move |_| match new_length.get() {
-                Some((grid, length)) if grid == snap.get() => length_name(length),
-                _ => "= Snap".to_string(),
-            });
-            Button::new(cx, move |cx| Label::new(cx, length_text))
-                .class("readout")
-                .class("snap")
-                .toggle_class("hidden", drums)
-                .tooltip(|cx| {
-                    Tooltip::new(cx, |cx| {
-                        Label::new(cx, "How long a new note is. Drag a note's right edge to change it - new notes copy that length. Click to follow Snap again.");
+            // Each label stays with its control when the bar wraps.
+            HStack::new(cx, move |cx| {
+                Label::new(cx, "Snap").class("label");
+                crate::timeline::editor_snap_button(cx, snap);
+            })
+            .gap(Pixels(tokens::SPACE_2))
+            .alignment(Alignment::Left)
+            .size(Auto);
+            HStack::new(cx, move |cx| {
+                // What a new note's length is: one Snap step until you drag a
+                // note's right edge, then that length. A click goes back to Snap.
+                Label::new(cx, "New note").class("label").toggle_class("hidden", drums);
+                let length_text = Memo::new(move |_| match new_length.get() {
+                    Some((grid, length)) if grid == snap.get() => length_name(length),
+                    _ => "= Snap".to_string(),
+                });
+                Button::new(cx, move |cx| Label::new(cx, length_text))
+                    .class("readout")
+                    .class("snap")
+                    .toggle_class("hidden", drums)
+                    .tooltip(|cx| {
+                        Tooltip::new(cx, |cx| {
+                            Label::new(cx, "How long a new note is. Drag a note's right edge to change it - new notes copy that length. Click to follow Snap again.");
+                        })
+                        .arrow(false)
                     })
-                    .arrow(false)
-                })
-                .on_press(move |_| new_length.set(None));
+                    .on_press(move |_| new_length.set(None));
+            })
+            .gap(Pixels(tokens::SPACE_2))
+            .alignment(Alignment::Left)
+            .size(Auto);
             Button::new(cx, |cx| Label::new(cx, "Close"))
                 .class("btn")
                 .class("quiet")
@@ -382,8 +393,14 @@ pub fn piano_roll_view(
         .alignment(Alignment::Left)
         .padding_left(Pixels(tokens::SPACE_3))
         .padding_right(Pixels(tokens::SPACE_3))
+        // On a narrow window the controls wrap onto a second line rather
+        // than running off the edge (Close went first).
+        .wrap(LayoutWrap::Wrap)
+        .padding_top(Pixels(6.0))
+        .padding_bottom(Pixels(6.0))
         .width(Stretch(1.0))
-        .height(Pixels(tokens::SIZE_TOOLBAR));
+        .height(Auto)
+        .min_height(Pixels(tokens::SIZE_TOOLBAR));
         Element::new(cx).class("hairline").width(Stretch(1.0)).height(Pixels(1.0));
 
         // The grid is exactly as tall as its rows: no dead space below.

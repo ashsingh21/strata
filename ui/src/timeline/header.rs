@@ -289,7 +289,7 @@ pub fn track_header<'a>(
                 // Automate: a lane for any of the track's knobs, the one
                 // turned last first. (Right-clicking a knob does it too,
                 // but nothing on screen says so.)
-                Button::new(cx, |cx| Label::new(cx, "A").class("meta"))
+                Button::new(cx, |cx| Label::new(cx, "Auto").class("meta"))
                     .class("btn")
                     .class("sm")
                     .class("quiet")
@@ -319,6 +319,7 @@ pub fn track_header<'a>(
                     .class("btn")
                     .class("sm")
                     .toggle_class("is-mute", mute)
+                    .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Mute"); }).arrow(false))
                     .lesson_target(crate::lessons::Target::Mute(track_id))
                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleMute(track_id)));
 
@@ -326,6 +327,7 @@ pub fn track_header<'a>(
                     .class("btn")
                     .class("sm")
                     .toggle_class("is-solo", solo)
+                    .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Solo: hear only this track"); }).arrow(false))
                     .lesson_target(crate::lessons::Target::Solo(track_id))
                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleSolo(track_id)));
 
@@ -333,6 +335,7 @@ pub fn track_header<'a>(
                     .class("btn")
                     .class("sm")
                     .toggle_class("is-rec", arm)
+                    .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Arm: record onto this track"); }).arrow(false))
                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleArm(track_id)));
 
                 Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
@@ -351,6 +354,8 @@ pub fn track_header<'a>(
                 Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
                     .class("btn")
                     .class("sm")
+                    .class("quiet")
+                    .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Remove track (Ctrl+Z brings it back)"); }).arrow(false))
                     .on_press(move |cx| cx.emit(TimelineEvent::RemoveTrack(track_id)));
             })
             .gap(Pixels(2.0))

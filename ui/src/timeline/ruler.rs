@@ -330,7 +330,8 @@ impl View for Ruler {
             }
 
             if bar % bar_stride == 0 {
-                canvas.draw_str((bar + 1).to_string(), vg::Point::new(x + 4.0, bounds.y + 15.0), &font, &text_paint);
+                // Kept in the top half: a marker's tab takes the bottom one.
+                canvas.draw_str((bar + 1).to_string(), vg::Point::new(x + 4.0, bounds.y + 12.0), &font, &text_paint);
             }
         }
 
@@ -362,17 +363,17 @@ impl View for Ruler {
 
         for marker in &arr.markers {
             let x = (bounds.x as f64 + transform.tick_to_x(marker.position)) as f32;
-            let width = 8.0 + marker.name.len() as f32 * 6.0;
+            let width = 8.0 + font.measure_str(&marker.name, None).0;
             let mut tab_paint = vg::Paint::default();
             tab_paint.set_color(palette.bg_300);
             tab_paint.set_anti_alias(true);
-            let rect = vg::Rect::new(x, bounds.y + bounds.h - 12.0, x + width, bounds.y + bounds.h);
+            let rect = vg::Rect::new(x, bounds.y + bounds.h - 11.0, x + width, bounds.y + bounds.h);
             canvas.draw_path(&vg::Path::rect(rect, None), &tab_paint);
 
             let mut marker_text = vg::Paint::default();
             marker_text.set_anti_alias(true);
             marker_text.set_color(palette.ink);
-            canvas.draw_str(&marker.name, vg::Point::new(x + 4.0, bounds.y + bounds.h - 2.0), &font, &marker_text);
+            canvas.draw_str(&marker.name, vg::Point::new(x + 4.0, bounds.y + bounds.h - 2.5), &font, &marker_text);
         }
 
         let playhead_x = (bounds.x as f64 + transform.tick_to_x(self.playhead.get())) as f32;
