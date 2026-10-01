@@ -22,18 +22,20 @@ use crate::synth::state::SynthEvent;
 pub struct MidiScheduler {
     last_tick: Cell<Ticks>,
     was_playing: Cell<bool>,
+    /// The engine's seek count as of the last frame.
+    seen_seeks: Cell<u32>,
     /// (track, pitch) -> how many overlapping notes hold it.
     held: RefCell<HashMap<(TrackId, u8), u32>>,
 }
 
 impl MidiScheduler {
     pub fn new() -> Self {
-        Self { last_tick: Cell::new(0), was_playing: Cell::new(false), held: RefCell::new(HashMap::new()) }
+        Self { last_tick: Cell::new(0), was_playing: Cell::new(false), seen_seeks: Cell::new(0), held: RefCell::new(HashMap::new()) }
     }
 
     /// Call once per frame with the current playhead tick and transport
     /// state.
-    pub fn advance(&self, cx: &mut EventContext, arrangement: &Arrangement, tick: Ticks, playing: bool) {
+    pub fn advance(&self, cx: &mut EventContext, arrangement: &Arrangement, tick: Ticks, playing: bool, seeks: u32) {
         if !playing {
             if self.was_playing.get() {
                 self.release_all(cx);
@@ -45,7 +47,9 @@ impl MidiScheduler {
 
         // Just started, or just looped/seeked backward: don't replay
         // history, just resume scheduling from here.
-        if !self.was_playing.get() || tick < self.last_tick.get() {
+        let jumped = seeks != self.seen_seeks.get();
+        self.seen_seeks.set(seeks);
+        if !self.was_playing.get() || jumped || tick < self.last_tick.get() {
             if self.was_playing.get() {
                 self.release_all(cx);
             }

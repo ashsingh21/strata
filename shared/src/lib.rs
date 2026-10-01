@@ -33,6 +33,12 @@ pub struct Params {
     /// Edge-triggered: the UI sets this on Stop; the engine clears it after
     /// resetting its sample counter.
     stop_requested: AtomicBool,
+    /// Where the UI asked playback to jump to, in samples; `NO_SEEK` when
+    /// there is no request. The engine takes it at the start of a block.
+    seek_to: AtomicU64,
+    /// How many seeks the UI has made, so what follows the playhead (the
+    /// MIDI scheduler) can tell a jump from time passing.
+    seeks: AtomicU32,
     /// Whether the metronome click should sound while playing.
     click_enabled: AtomicBool,
     /// Tempo in beats per minute, stored as f32 bits. Drives both the
@@ -51,6 +57,8 @@ pub struct Params {
     diag: diag::AudioDiag,
 }
 
+const NO_SEEK: u64 = u64::MAX;
+
 /// Default tempo, matching `shared::arrangement::seed::empty_arrangement`'s
 /// own default so a fresh session's engine and arrangement agree without
 /// any extra wiring.
@@ -61,6 +69,8 @@ impl Params {
         Self {
             playing: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
+            seek_to: AtomicU64::new(NO_SEEK),
+            seeks: AtomicU32::new(0),
             click_enabled: AtomicBool::new(false),
             bpm: AtomicU32::new((DEFAULT_BPM as f32).to_bits()),
             loop_enabled: AtomicBool::new(false),
@@ -85,6 +95,25 @@ impl Params {
     pub fn request_stop(&self) {
         self.playing.store(false, Ordering::Relaxed);
         self.stop_requested.store(true, Ordering::Relaxed);
+        self.seek_to.store(NO_SEEK, Ordering::Relaxed);
+    }
+
+    /// Move the transport to `samples` (playing or not).
+    pub fn request_seek(&self, samples: u64) {
+        self.seek_to.store(samples, Ordering::Relaxed);
+        self.seeks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Engine-side: consume the seek request, if any.
+    pub fn take_seek(&self) -> Option<u64> {
+        match self.seek_to.swap(NO_SEEK, Ordering::Relaxed) {
+            NO_SEEK => None,
+            samples => Some(samples),
+        }
+    }
+
+    pub fn seek_count(&self) -> u32 {
+        self.seeks.load(Ordering::Relaxed)
     }
 
     /// Engine-side: consume the stop request, if any.
@@ -177,4 +206,34 @@ pub fn bridge() -> (Arc<Params>, rtrb::Producer<Telemetry>, rtrb::Consumer<Telem
     let params = Arc::new(Params::new());
     let (producer, consumer) = rtrb::RingBuffer::new(TELEMETRY_CAPACITY);
     (params, producer, consumer)
+}
+
+#[cfg(test)]
+mod seek_tests {
+    use super::*;
+
+    #[test]
+    fn a_seek_is_taken_once_and_counted() {
+        let params = Params::new();
+        assert_eq!(params.take_seek(), None);
+        params.request_seek(48_000);
+        assert_eq!(params.seek_count(), 1);
+        assert_eq!(params.take_seek(), Some(48_000));
+        assert_eq!(params.take_seek(), None);
+    }
+
+    #[test]
+    fn seeking_to_the_very_start_is_a_seek_not_nothing() {
+        let params = Params::new();
+        params.request_seek(0);
+        assert_eq!(params.take_seek(), Some(0));
+    }
+
+    #[test]
+    fn stop_cancels_a_seek_that_hasnt_landed() {
+        let params = Params::new();
+        params.request_seek(1000);
+        params.request_stop();
+        assert_eq!(params.take_seek(), None);
+    }
 }

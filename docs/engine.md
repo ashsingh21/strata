@@ -59,6 +59,13 @@ precise as its ~16 ms timer:
 - **Automation**: evaluated at the playhead each frame and sent as new
   `SynthParams` / plans (track gain glides, so steps don't click).
 
+Moving the playhead by hand (a click or drag on a ruler, in the timeline
+or the piano roll) is a seek: the UI sets `Params::request_seek`, and the
+callback moves its sample counter there at the start of its next block,
+playing or not. Telemetry that still shows the old position is ignored
+until the new one arrives, and the MIDI scheduler lets go of held notes
+rather than playing everything between the two places.
+
 Moving both into the callback (sample-accurate) is the known next step
 if timing ever needs to be tighter.
 

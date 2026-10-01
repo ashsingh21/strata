@@ -16,9 +16,11 @@ mod fader;
 mod fx_board;
 mod glyph;
 mod hidpi;
+mod hints;
 mod interval_input;
 mod key_menu;
 mod menu;
+mod palette;
 mod paths;
 mod knob;
 mod lessons;
@@ -313,6 +315,7 @@ fn main() -> Result<(), ApplicationError> {
             project_path,
             browser::preview::BrowserPreview::new(preview_player.clone(), tl_arrangement, interval_key, interval_scale_mask),
         );
+        let browser_all = browser_model.all;
         let browser_props =
             browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, interval_open, lessons_active, lessons_done, zoom, lesson_bar_props);
         // Whether the lesson panel (the sidebar on Learn) is on screen.
@@ -321,6 +324,19 @@ fn main() -> Result<(), ApplicationError> {
         browser_model.build(cx);
         browser::view::DragTracker.build(cx);
         browser::start_key_analysis(cx);
+
+        // Ctrl/Cmd+K, and the tips that point to it.
+        let palette_model = palette::PaletteModel::new(browser_all);
+        let palette_props = palette::view::PaletteProps::of(&palette_model);
+        let palette_open = palette_model.open;
+        palette_model.build(cx);
+        let hint_model = hints::HintModel::new(
+            Memo::new(move |_| piano_roll_open_clip.get().is_some()),
+            Memo::new(move |_| lessons_active.get().is_some()),
+            palette_open,
+        );
+        let hint_shown = hint_model.shown;
+        hint_model.build(cx);
 
 
         // ~60 fps: drains engine telemetry, runs meter ballistics, advances
@@ -363,7 +379,7 @@ fn main() -> Result<(), ApplicationError> {
                 let ticks = tl_arrangement.get().tempo_map.samples_to_ticks(sample_counter.get() as i64, engine_sample_rate);
                 let is_playing = playing.get();
                 cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: is_playing });
-                midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing);
+                midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing, loop_params.seek_count());
                 cx.emit(SynthEvent::Tick(dt));
                 cx.emit(lessons::LessonEvent::Tick);
                 cx.emit(project::ProjectEvent::Tick);
@@ -403,6 +419,8 @@ fn main() -> Result<(), ApplicationError> {
 
 
         Keymap::from(vec![
+            (KeyChord::new(Modifiers::CTRL, Code::KeyK), KeymapEntry::new(38u8, |cx| cx.emit(palette::PaletteEvent::Toggle))),
+            (KeyChord::new(Modifiers::SUPER, Code::KeyK), KeymapEntry::new(39u8, |cx| cx.emit(palette::PaletteEvent::Toggle))),
             (
                 KeyChord::new(Modifiers::CTRL, Code::KeyT),
                 KeymapEntry::new(0u8, |cx| cx.emit(AppEvent::ToggleTheme)),
@@ -672,6 +690,8 @@ fn main() -> Result<(), ApplicationError> {
             timeline::snap_menu_host(cx, tl_snap);
             synth::preset_menu_host(cx, synth_state, synth_user_presets);
             app::restyle_anchor(cx);
+            hints::hint_card(cx, hint_shown);
+            palette::view::palette_overlay(cx, palette_props);
             // Selecting clips drops the Effects Board's node selection, so
             // Delete removes what was picked last (see TimelineState::fx_selected).
             Binding::new(cx, tl_selection, move |_cx| {
@@ -725,6 +745,7 @@ pub fn shortcut(label: &'static str) -> &'static str {
             "Ctrl+D" => "\u{2318}D",
             "Ctrl+Shift+D" => "\u{21e7}\u{2318}D",
             "Ctrl+F" => "\u{2318}F",
+            "Ctrl+K" => "\u{2318}K",
             other => other,
         };
     }

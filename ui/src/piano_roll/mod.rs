@@ -67,6 +67,27 @@ fn selection_text(arr: &Arrangement, clip: Option<ClipId>, selected: &std::colle
     )
 }
 
+/// A note length as a note value: 1/4, 1/8, 3/16... (in sixteenths, shown
+/// as the smallest fraction), or a bar count for whole bars.
+fn length_name(length: Ticks) -> String {
+    let sixteenth = PPQ / 4;
+    if length % (PPQ * 4) == 0 {
+        let bars = length / (PPQ * 4);
+        return if bars == 1 { "1 bar".to_string() } else { format!("{bars} bars") };
+    }
+    if length % sixteenth != 0 {
+        return format!("{length} ticks");
+    }
+    let n = length / sixteenth;
+    let mut den = 16;
+    let mut num = n;
+    while num % 2 == 0 && den > 1 {
+        num /= 2;
+        den /= 2;
+    }
+    if den == 1 { num.to_string() } else { format!("{num}/{den}") }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn piano_roll_view(
     cx: &mut Context,
@@ -83,6 +104,7 @@ pub fn piano_roll_view(
     octave: Signal<i32>,
     chord: Signal<ChordShape>,
 ) {
+    let new_length: Signal<Option<(SnapGrid, Ticks)>> = Signal::new(None);
     VStack::new(cx, move |cx| {
         // Header: the clip, then how it's labelled, then how you edit it.
         HStack::new(cx, move |cx| {
@@ -332,6 +354,24 @@ pub fn piano_roll_view(
             .height(Auto);
             Label::new(cx, "Snap").class("label");
             crate::timeline::editor_snap_button(cx, snap);
+            // What a new note's length is: one Snap step until you drag a
+            // note's right edge, then that length. A click goes back to Snap.
+            Label::new(cx, "New note").class("label").toggle_class("hidden", drums);
+            let length_text = Memo::new(move |_| match new_length.get() {
+                Some((grid, length)) if grid == snap.get() => length_name(length),
+                _ => "= Snap".to_string(),
+            });
+            Button::new(cx, move |cx| Label::new(cx, length_text))
+                .class("readout")
+                .class("snap")
+                .toggle_class("hidden", drums)
+                .tooltip(|cx| {
+                    Tooltip::new(cx, |cx| {
+                        Label::new(cx, "How long a new note is. Drag a note's right edge to change it - new notes copy that length. Click to follow Snap again.");
+                    })
+                    .arrow(false)
+                })
+                .on_press(move |_| new_length.set(None));
             Button::new(cx, |cx| Label::new(cx, "Close"))
                 .class("btn")
                 .class("quiet")
@@ -360,7 +400,7 @@ pub fn piano_roll_view(
             let drums = open_clip.get().is_some_and(|id| is_drum_clip(&arr, id));
             Pixels(grid_height(row_pitches(&notes, key.get(), scale_mask.get(), drums, octave.get()).len()))
         });
-        Grid::new(cx, arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord)
+        Grid::new(cx, arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, new_length)
             .width(Stretch(1.0))
             .height(height);
         Element::new(cx).class("hairline").width(Stretch(1.0)).height(Pixels(1.0));
@@ -389,4 +429,20 @@ pub fn piano_roll_view(
     .padding_right(Pixels(tokens::SPACE_2))
     .width(Stretch(1.0))
     .height(Auto);
+}
+
+#[cfg(test)]
+mod length_tests {
+    use super::*;
+
+    #[test]
+    fn lengths_read_as_note_values() {
+        assert_eq!(length_name(PPQ), "1/4");
+        assert_eq!(length_name(PPQ / 2), "1/8");
+        assert_eq!(length_name(PPQ / 4), "1/16");
+        assert_eq!(length_name(PPQ * 3 / 4), "3/16");
+        assert_eq!(length_name(PPQ * 2), "1/2");
+        assert_eq!(length_name(PPQ * 4), "1 bar");
+        assert_eq!(length_name(PPQ * 8), "2 bars");
+    }
 }

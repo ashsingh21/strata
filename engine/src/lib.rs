@@ -629,6 +629,9 @@ fn write_block<T>(
     if params.take_stop_request() {
         *sample_counter = 0;
     }
+    if let Some(samples) = params.take_seek() {
+        *sample_counter = samples;
+    }
     let playing = params.playing();
     let click_enabled = params.click_enabled();
     let bpm = params.bpm();

@@ -62,10 +62,15 @@ pub struct AppData {
     telemetry: rtrb::Consumer<Telemetry>,
     last_tick: Instant,
     engine: EngineHandle,
+    /// A seek the engine hasn't reached yet: telemetry still showing the
+    /// old position is ignored until it arrives (or half a second passes).
+    seeking: Option<(u64, Instant)>,
 }
 
 #[derive(Debug)]
 pub enum AppEvent {
+    /// Move the transport (and the playhead) to this tick, playing or not.
+    Seek(shared::arrangement::Ticks),
     ToggleTheme,
     /// One step bigger (+1) or smaller (-1); `ResetZoom` back to 100%.
     Zoom(i32),
@@ -136,6 +141,7 @@ impl AppData {
             telemetry,
             last_tick: Instant::now(),
             engine,
+            seeking: None,
         }
     }
 }
@@ -204,6 +210,15 @@ impl Model for AppData {
                 // playing, so without this the line stayed wherever it
                 // stopped while the readout said 1.1.1.
                 cx.emit(crate::timeline::state::TimelineEvent::ScrubPlayhead(0));
+            }
+            AppEvent::Seek(ticks) => {
+                let ticks = (*ticks).max(0);
+                let samples = (ticks as f64 / shared::arrangement::PPQ as f64 * 60.0 / self.params.bpm() * self.sample_rate as f64) as u64;
+                tracing::debug!(target: "action", "transport: seek to tick {ticks}");
+                cx.emit(crate::timeline::state::TimelineEvent::ScrubPlayhead(ticks));
+                self.params.request_seek(samples);
+                self.sample_counter.set(samples);
+                self.seeking = Some((samples, Instant::now()));
             }
             AppEvent::Rewind => {
                 tracing::debug!(target: "action", "transport: rewind");
@@ -280,6 +295,14 @@ impl AppData {
             peak_r = peak_r.max(r);
             for (peak, bus) in bus_peaks.iter_mut().zip(buses) {
                 *peak = (peak.0.max(bus.0), peak.1.max(bus.1));
+            }
+            if let Some((target, at)) = self.seeking {
+                let arrived = sample_counter.abs_diff(target) <= self.sample_rate as u64;
+                if arrived || at.elapsed() > std::time::Duration::from_millis(500) {
+                    self.seeking = None;
+                } else {
+                    continue;
+                }
             }
             latest_position = Some(position);
             latest_sample_counter = Some(sample_counter);

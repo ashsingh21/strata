@@ -22,7 +22,8 @@ use vizia::prelude::*;
 
 use shared::arrangement::{Arrangement, ClipColor, TrackId};
 
-use items::{Chip, Item, Kind};
+pub use items::{Item, Kind};
+use items::Chip;
 
 /// The panel's width range and default (logical px), and the rail's.
 pub const MIN_WIDTH: f32 = 200.0;

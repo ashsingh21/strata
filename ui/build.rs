@@ -459,6 +459,16 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 .context-menu-backdrop {{
   z-index: 170;
 }}
+.palette-backdrop {{
+  background-color: rgba(0, 0, 0, 0.45);
+  z-index: 400;
+}}
+.palette-card {{
+  z-index: 410;
+}}
+.hint-card {{
+  z-index: 150;
+}}
 .is-lesson-target {{
   border-width: 2px;
 }}

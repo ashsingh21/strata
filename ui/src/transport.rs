@@ -478,6 +478,25 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
 
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
 
+        // The palette: the way in for anyone who doesn't know where a
+        // thing lives.
+        with_tip(
+            Button::new(cx, |cx| {
+                HStack::new(cx, |cx| {
+                    Label::new(cx, "Search").hoverable(false);
+                    Label::new(cx, crate::shortcut("Ctrl+K")).class("value").hoverable(false);
+                })
+                .gap(Pixels(6.0))
+                .size(Auto)
+                .hoverable(false)
+            })
+            .class("btn")
+            .class("quiet")
+            .width(Auto),
+            "Find any command, sound or lesson",
+        )
+        .on_press(|cx| cx.emit(crate::palette::PaletteEvent::Toggle));
+
         // The live spectrum analyzer, beside the other output readouts.
         with_tip(
             Button::new(cx, |cx| Label::new(cx, "Spectrum"))

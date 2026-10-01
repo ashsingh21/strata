@@ -107,6 +107,19 @@ pub fn save_lesson_track(id: &str, path: &std::path::Path) {
     save_key("lesson_tracks", serde_json::Value::Object(tracks));
 }
 
+/// Ids of the tips already dismissed (see `crate::hints`).
+pub fn load_hints_dismissed() -> Vec<String> {
+    load_all()
+        .get("hints_dismissed")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+pub fn save_hints_dismissed(ids: &[String]) {
+    save_key("hints_dismissed", serde_json::json!(ids));
+}
+
 /// Whether the live spectrum analyzer was open.
 pub fn load_analyzer_open() -> bool {
     load_all().get("analyzer_open").and_then(|v| v.as_bool()).unwrap_or(false)

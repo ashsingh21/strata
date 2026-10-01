@@ -115,6 +115,54 @@ struct Paint {
     velocity: u8,
 }
 
+/// A note's right edge being dragged: the notes that move with it and
+/// their lengths so far (committed on release as one undo step).
+#[derive(Clone)]
+struct Resize {
+    grabbed: NoteKey,
+    group: Vec<NoteKey>,
+    lengths: Vec<(NoteKey, Ticks)>,
+}
+
+/// How close (px) to a note's right end a press grabs the edge.
+const EDGE_GRAB_PX: f32 = 6.0;
+
+/// The longest a note starting at `start` on `pitch` can be: up to the
+/// clip's end, or the next note on the same pitch.
+fn room(notes: &[MidiNote], start: Ticks, pitch: u8, clip_length: Ticks) -> Ticks {
+    let next = notes.iter().filter(|n| n.pitch == pitch && n.start > start).map(|n| n.start).min();
+    next.unwrap_or(clip_length).min(clip_length) - start
+}
+
+/// The lengths `group` takes when `grabbed`'s right edge is dragged to
+/// `edge_tick`: the grabbed note's end lands on the grid (or exactly, with
+/// no grid) and the others grow or shrink by the same amount - never below
+/// one grid step, never past the clip or the next note on their pitch.
+fn resized(
+    notes: &[MidiNote],
+    group: &[NoteKey],
+    grabbed: NoteKey,
+    edge_tick: Ticks,
+    step: Option<Ticks>,
+    clip_length: Ticks,
+) -> Vec<(NoteKey, Ticks)> {
+    let min_len = step.unwrap_or(1);
+    let Some(anchor) = notes.iter().find(|n| (n.start, n.pitch) == grabbed) else { return Vec::new() };
+    let end = match step {
+        Some(step) => (edge_tick as f64 / step as f64).round() as Ticks * step,
+        None => edge_tick,
+    };
+    let delta = (end - anchor.start).max(min_len) - anchor.length;
+    notes
+        .iter()
+        .filter(|n| group.contains(&(n.start, n.pitch)))
+        .map(|n| {
+            let longest = room(notes, n.start, n.pitch, clip_length).max(1);
+            ((n.start, n.pitch), (n.length + delta).max(min_len).min(longest))
+        })
+        .collect()
+}
+
 /// Shift-click writes an accent, Alt-click a ghost note (drum clips).
 const ACCENT_VELOCITY: u8 = 127;
 const GHOST_VELOCITY: u8 = 45;
@@ -134,6 +182,14 @@ pub struct Grid {
     octave: Signal<i32>,
     /// What a Draw click writes: one note or a chord.
     chord: Signal<ChordShape>,
+    /// The length of a new note once you've resized one, while Snap is the
+    /// grid it was set on (changing Snap goes back to one grid step).
+    new_length: Signal<Option<(SnapGrid, Ticks)>>,
+    /// A note's right edge being dragged.
+    resize: Option<Resize>,
+    /// The ruler being dragged: the playhead follows the pointer.
+    scrub: bool,
+    cursor: CursorIcon,
     /// A velocity stem being dragged: the note and its live (uncommitted)
     /// velocity. Committed as one undoable edit on release.
     vel_drag: Option<(NoteKey, u8)>,
@@ -166,8 +222,9 @@ impl Grid {
         theme: Signal<ThemeId>,
         octave: Signal<i32>,
         chord: Signal<ChordShape>,
+        new_length: Signal<Option<(SnapGrid, Ticks)>>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, vel_drag: None, paint: None, wheel: 0.0, wheel_at: None, wheel_moved: false }
+        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, new_length, resize: None, scrub: false, cursor: CursorIcon::Default, vel_drag: None, paint: None, wheel: 0.0, wheel_at: None, wheel_moved: false }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(open_clip, |mut h| h.needs_redraw())
@@ -241,6 +298,45 @@ impl Grid {
         }
     }
 
+    /// The note whose right edge sits under local `(lx, ly)` (relative to
+    /// the grid's top-left, past the label column and ruler) - not a drum
+    /// hit, which is a one-shot with no length to drag.
+    fn edge_note(notes: &[MidiNote], rows: &[u8], lx: f32, ly: f32, px_per_tick: f64) -> Option<MidiNote> {
+        let pitch = *rows.get((ly / ROW_H) as usize)?;
+        notes.iter().rev().filter(|n| n.pitch == pitch).copied().find(|n| {
+            let (start_x, end_x) = ((n.start as f64 * px_per_tick) as f32, ((n.start + n.length) as f64 * px_per_tick) as f32);
+            let grab = EDGE_GRAB_PX.min((end_x - start_x) * 0.4);
+            lx >= end_x - grab && lx < end_x
+        })
+    }
+
+    /// A new note's length: the last one you resized, else one grid step.
+    fn new_note_length(&self, step: Ticks) -> Ticks {
+        match self.new_length.get() {
+            Some((grid, length)) if grid == self.snap.get() => length,
+            _ => step,
+        }
+    }
+
+    fn set_cursor(&mut self, cx: &mut EventContext, icon: CursorIcon) {
+        if self.cursor != icon {
+            self.cursor = icon;
+            cx.emit(WindowEvent::SetCursor(icon));
+        }
+    }
+
+    /// The tick under the pointer's x, snapped to a grid square's start
+    /// (not with Alt), for the ruler to seek to.
+    fn seek_tick(&self, cx: &EventContext, x: f32, clip_length: Ticks) -> Ticks {
+        let bounds = cx.lbounds();
+        let px_per_tick = (bounds.w - LABEL_W) as f64 / clip_length as f64;
+        let raw = (((x - bounds.x - LABEL_W) as f64 / px_per_tick) as Ticks).clamp(0, clip_length);
+        match self.snap.get().ticks() {
+            Some(step) if !cx.modifiers().alt() => raw.div_euclid(step) * step,
+            _ => raw,
+        }
+    }
+
     fn velocity_at(lane_top: f32, y: f32) -> u8 {
         let t = 1.0 - ((y - lane_top - 6.0) / (VEL_H - 10.0)).clamp(0.0, 1.0);
         (1.0 + t * 126.0).round() as u8
@@ -290,7 +386,7 @@ impl View for Grid {
             WindowEvent::MouseDown(MouseButton::Left)
             | WindowEvent::MouseDoubleClick(MouseButton::Left)
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
-                let Some((clip_id, _clip_start, clip_length, notes)) = self.clip_info() else { return };
+                let Some((clip_id, clip_start, clip_length, notes)) = self.clip_info() else { return };
                 let bounds = cx.lbounds();
                 let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums(), self.octave.get());
                 if rows.is_empty() || clip_length <= 0 {
@@ -314,6 +410,14 @@ impl View for Grid {
                             cx.emit(TimelineEvent::ToggleDrumPadMute { track, pad });
                         }
                     }
+                    return;
+                }
+                // The ruler: click or drag to move the playhead there.
+                if lx >= 0.0 && ly < 0.0 {
+                    self.scrub = true;
+                    cx.capture();
+                    let tick = self.seek_tick(cx, cx.lmouse().0, clip_length);
+                    cx.emit(crate::app::AppEvent::Seek(clip_start + tick));
                     return;
                 }
                 if lx < 0.0 || ly < 0.0 {
@@ -342,6 +446,23 @@ impl View for Grid {
 
                 let pitch = rows[(ly / ROW_H) as usize];
                 let raw_tick = (lx as f64 / px_per_tick) as Ticks;
+
+                // A note's right edge: drag to change its length.
+                if !self.drums() {
+                    if let Some(note) = Self::edge_note(&notes, &rows, lx, ly, px_per_tick) {
+                        let grabbed = (note.start, note.pitch);
+                        let selected = self.selected.get();
+                        let group = if selected.contains(&grabbed) { selected.iter().copied().collect() } else { vec![grabbed] };
+                        let lengths = notes
+                            .iter()
+                            .filter(|n| group.contains(&(n.start, n.pitch)))
+                            .map(|n| ((n.start, n.pitch), n.length))
+                            .collect();
+                        self.resize = Some(Resize { grabbed, group, lengths });
+                        cx.capture();
+                        return;
+                    }
+                }
 
                 match self.mode.get() {
                     EditMode::Draw => {
@@ -393,13 +514,19 @@ impl View for Grid {
                             cx.emit(TimelineEvent::RemoveMidiNoteAt { clip: clip_id, start: hit.start, pitch: hit.pitch });
                         } else {
                             let step = self.snap.get().ticks().unwrap_or(PPQ / 4);
-                            let length = step.min(clip_length - snapped).max(1);
+                            let wanted = self.new_note_length(step);
                             let shape = if self.drums() { ChordShape::Note } else { self.chord.get() };
-                            let notes = shape
+                            let new_notes = shape
                                 .pitches(pitch, self.key.get(), self.scale_mask.get())
                                 .into_iter()
-                                .map(|pitch| MidiNote { start: snapped, length, pitch, velocity: DEFAULT_VELOCITY })
+                                .map(|pitch| MidiNote {
+                                    start: snapped,
+                                    length: wanted.min(room(&notes, snapped, pitch, clip_length)).max(1),
+                                    pitch,
+                                    velocity: DEFAULT_VELOCITY,
+                                })
                                 .collect();
+                            let notes = new_notes;
                             cx.emit(TimelineEvent::AddMidiNotesAt { clip: clip_id, notes });
                         }
                     }
@@ -425,6 +552,42 @@ impl View for Grid {
                 cx.emit(TimelineEvent::MoveSelectedNotes { octaves, steps, key: self.key.get(), mask: self.scale_mask.get() });
             }
             WindowEvent::MouseMove(x, y) => {
+                if self.scrub {
+                    let Some((_, clip_start, clip_length, _)) = self.clip_info() else { return };
+                    let tick = self.seek_tick(cx, crate::hidpi::l(cx, *x), clip_length);
+                    cx.emit(crate::app::AppEvent::Seek(clip_start + tick));
+                    return;
+                }
+                if let Some(mut resize) = self.resize.clone() {
+                    let Some((_, _, clip_length, notes)) = self.clip_info() else { return };
+                    let bounds = cx.lbounds();
+                    let px_per_tick = (bounds.w - LABEL_W) as f64 / clip_length as f64;
+                    let lx = crate::hidpi::l(cx, *x) - bounds.x - LABEL_W;
+                    let edge = (lx as f64 / px_per_tick) as Ticks;
+                    resize.lengths = resized(&notes, &resize.group, resize.grabbed, edge, self.snap.get().ticks(), clip_length);
+                    self.resize = Some(resize);
+                    cx.needs_redraw();
+                    return;
+                }
+                // Over a note's right edge the pointer says it can be dragged.
+                if self.paint.is_none() && self.vel_drag.is_none() && !self.drums() {
+                    if let Some((_, _, clip_length, notes)) = self.clip_info() {
+                        let bounds = cx.lbounds();
+                        let (lx, ly) = (crate::hidpi::l(cx, *x) - bounds.x - LABEL_W, crate::hidpi::l(cx, *y) - bounds.y - RULER_H);
+                        let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), false, self.octave.get());
+                        let px_per_tick = (bounds.w - LABEL_W) as f64 / clip_length.max(1) as f64;
+                        let over_edge = lx >= 0.0 && ly >= 0.0 && Self::edge_note(&notes, &rows, lx, ly, px_per_tick).is_some();
+                        let on_ruler = lx >= 0.0 && ly < 0.0;
+                        let icon = if over_edge {
+                            CursorIcon::EwResize
+                        } else if on_ruler {
+                            CursorIcon::Hand
+                        } else {
+                            CursorIcon::Default
+                        };
+                        self.set_cursor(cx, icon);
+                    }
+                }
                 // Painting: the step under the pointer, on the stroke's row.
                 if let Some(mut paint) = self.paint.clone() {
                     let Some((_, _, clip_length, notes)) = self.clip_info() else { return };
@@ -455,7 +618,31 @@ impl View for Grid {
                     cx.needs_redraw();
                 }
             }
+            WindowEvent::MouseLeave => self.set_cursor(cx, CursorIcon::Default),
             WindowEvent::MouseUp(MouseButton::Left) => {
+                if self.scrub {
+                    self.scrub = false;
+                    cx.release();
+                    return;
+                }
+                if let Some(resize) = self.resize.take() {
+                    cx.release();
+                    cx.needs_redraw();
+                    let (Some(clip), Some((_, _, _, notes))) = (self.open_clip.get(), self.clip_info()) else { return };
+                    let changed: Vec<(Ticks, u8, Ticks)> = resize
+                        .lengths
+                        .iter()
+                        .filter(|(key, length)| notes.iter().any(|n| (n.start, n.pitch) == *key && n.length != *length))
+                        .map(|((start, pitch), length)| (*start, *pitch, *length))
+                        .collect();
+                    if let Some((_, length)) = resize.lengths.iter().find(|(key, _)| *key == resize.grabbed) {
+                        self.new_length.set(Some((self.snap.get(), *length)));
+                    }
+                    if !changed.is_empty() {
+                        cx.emit(TimelineEvent::SetNoteLengths { clip, notes: changed });
+                    }
+                    return;
+                }
                 if let Some(paint) = self.paint.take() {
                     cx.release();
                     cx.needs_redraw();
@@ -490,9 +677,16 @@ impl View for Grid {
         let bounds = cx.lbounds();
         crate::hidpi::clip(canvas, bounds);
         let p: Palette = self.theme.get().palette();
-        let Some((_clip_id, clip_start, clip_length, notes)) = self.clip_info() else { return };
+        let Some((_clip_id, clip_start, clip_length, mut notes)) = self.clip_info() else { return };
         if clip_length <= 0 {
             return;
+        }
+        if let Some(resize) = &self.resize {
+            for note in notes.iter_mut() {
+                if let Some((_, length)) = resize.lengths.iter().find(|(key, _)| *key == (note.start, note.pitch)) {
+                    note.length = *length;
+                }
+            }
         }
         let key = self.key.get();
         let drums = self.drums();
@@ -695,6 +889,10 @@ impl View for Grid {
                 clip_color
             };
             fill(canvas, rect, color);
+            // The right edge, a darker lip: the handle that resizes.
+            if !drums && x1 - x0 > 12.0 {
+                fill(canvas, vg::Rect::new(x1 - 3.0, y0, x1, y1), Color::rgba(0, 0, 0, 55));
+            }
 
             let mut edge = vg::Paint::default();
             edge.set_style(vg::PaintStyle::Stroke);
@@ -807,5 +1005,48 @@ mod tests {
         assert_eq!(*down.last().unwrap(), 33, "A1 at the bottom");
         let with_low_note = row_pitches(&[note(45)], A, MINOR_PENTATONIC, false, 1);
         assert!(with_low_note.contains(&45) && with_low_note.contains(&93), "A2 note kept, A6 top kept");
+    }
+
+    fn at(start: Ticks, pitch: u8, length: Ticks) -> MidiNote {
+        MidiNote { start, length, pitch, velocity: 100 }
+    }
+
+    #[test]
+    fn dragging_an_edge_to_a_beat_makes_a_quarter_note_on_a_sixteenth_grid() {
+        let notes = [at(0, 60, PPQ / 4)];
+        let out = resized(&notes, &[(0, 60)], (0, 60), PPQ + 10, Some(PPQ / 4), PPQ * 4);
+        assert_eq!(out, vec![((0, 60), PPQ)]);
+    }
+
+    #[test]
+    fn a_note_never_shrinks_below_one_grid_step_or_grows_into_the_next_note() {
+        let notes = [at(0, 60, PPQ), at(PPQ * 2, 60, PPQ / 4)];
+        let tiny = resized(&notes, &[(0, 60)], (0, 60), 0, Some(PPQ / 4), PPQ * 4);
+        assert_eq!(tiny, vec![((0, 60), PPQ / 4)]);
+        let long = resized(&notes, &[(0, 60)], (0, 60), PPQ * 4, Some(PPQ / 4), PPQ * 4);
+        assert_eq!(long, vec![((0, 60), PPQ * 2)], "stops where the next note on the pitch starts");
+        let past = resized(&notes, &[(PPQ * 2, 60)], (PPQ * 2, 60), PPQ * 9, Some(PPQ / 4), PPQ * 4);
+        assert_eq!(past, vec![((PPQ * 2, 60), PPQ * 2)], "stops at the clip's end");
+    }
+
+    #[test]
+    fn a_selection_resizes_together_by_the_same_amount() {
+        let notes = [at(0, 60, PPQ / 4), at(PPQ, 64, PPQ / 2), at(PPQ * 2, 67, PPQ / 4)];
+        let group = [(0, 60), (PPQ, 64)];
+        let out = resized(&notes, &group, (0, 60), PPQ / 2, Some(PPQ / 4), PPQ * 4);
+        assert_eq!(out, vec![((0, 60), PPQ / 2), ((PPQ, 64), PPQ / 2 + PPQ / 4)]);
+    }
+
+    #[test]
+    fn only_the_last_pixels_of_a_note_are_its_edge() {
+        let rows = [64u8, 60];
+        let notes = [at(0, 60, PPQ)];
+        let ppt = 0.1;
+        let end = PPQ as f32 * 0.1;
+        let y = ROW_H * 1.5;
+        assert!(Grid::edge_note(&notes, &rows, end - 2.0, y, ppt).is_some());
+        assert!(Grid::edge_note(&notes, &rows, end - 20.0, y, ppt).is_none(), "the body isn't the edge");
+        assert!(Grid::edge_note(&notes, &rows, end + 1.0, y, ppt).is_none(), "past the end isn't either");
+        assert!(Grid::edge_note(&notes, &rows, end - 2.0, 5.0, ppt).is_none(), "another row");
     }
 }

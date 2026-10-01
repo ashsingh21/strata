@@ -544,6 +544,8 @@ pub enum TimelineEvent {
     /// A velocity-lane drag ended: its notes (a chord's, usually) to one
     /// velocity, as one undo step.
     SetNoteVelocities { clip: ClipId, notes: Vec<(Ticks, u8)>, velocity: u8 },
+    /// Notes (start, pitch) given new lengths, as one undo step.
+    SetNoteLengths { clip: ClipId, notes: Vec<(Ticks, u8, Ticks)> },
     /// The piano roll's selected notes moved `octaves` octaves, or
     /// `steps` notes along the scale (`key` + `mask`), as one undo step.
     /// Nothing moves if any would leave MIDI's range or land on a note.
@@ -1346,6 +1348,19 @@ impl Model for TimelineState {
                     .map(|&(start, pitch)| Command::SetNoteVelocity { clip: *clip, start, pitch, velocity: *velocity })
                     .collect();
                 self.do_command(Command::Batch(commands));
+            }
+            TimelineEvent::SetNoteLengths { clip, notes } => {
+                let arr = self.arrangement.get();
+                let Some(ClipContent::Midi { notes: existing, .. }) = arr.clip(*clip).map(|c| &c.content) else { return };
+                let mut commands = Vec::new();
+                for &(start, pitch, length) in notes {
+                    let Some(old) = existing.iter().find(|n| n.start == start && n.pitch == pitch) else { continue };
+                    commands.push(Command::RemoveMidiNote { clip: *clip, start, pitch });
+                    commands.push(Command::AddMidiNote { clip: *clip, note: MidiNote { length: length.max(1), ..*old } });
+                }
+                if !commands.is_empty() {
+                    self.do_command(Command::Batch(commands));
+                }
             }
             TimelineEvent::MoveSelectedNotes { octaves, steps, key, mask } => {
                 let (Some(clip), selected) = (self.piano_roll_open_clip.get(), self.piano_roll_selected.get()) else { return };

@@ -121,7 +121,7 @@ impl View for Ruler {
                     Some(_) | None => Drag::CreateLoop { anchor: tick.max(0) },
                 });
                 if matches!(self.drag, Some(Drag::CreateLoop { .. })) {
-                    cx.emit(TimelineEvent::ScrubPlayhead(tick.max(0)));
+                    cx.emit(crate::app::AppEvent::Seek(tick.max(0)));
                 }
                 if matches!(self.drag, Some(Drag::LoopMiddle { .. })) {
                     self.set_cursor(cx, CursorIcon::Grabbing);
