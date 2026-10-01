@@ -18,7 +18,9 @@ use shared::synth::{
     LFO_PULSE_WIDTH_MAX, LFO_RESONANCE_MAX, MAX_UNISON,
 };
 
-use crate::dsp::{poly_blamp, DcBlocker, DriveBank, Smoother};
+use wide::f32x4;
+
+use crate::dsp::{floor_fast, fract_fast, poly_blamp, tan_fast, DcBlocker, DriveBank, Smoother};
 use crate::fx::{Chorus, Limiter, Reverb};
 
 const MAX_VOICES: usize = 16;
@@ -111,6 +113,7 @@ impl Envelope {
 
 /// An envelope's per-sample approach coefficients - the same for every
 /// voice, so computed once per sample rather than once per voice.
+#[derive(Clone, Copy)]
 struct EnvCoeffs {
     attack: f32,
     decay: f32,
@@ -143,7 +146,7 @@ struct SvfCoeffs {
 
 impl SvfCoeffs {
     fn new(cutoff_hz: f32, q: f32, sample_rate: f32) -> Self {
-        let g = (std::f32::consts::PI * cutoff_hz / sample_rate).tan();
+        let g = tan_fast(std::f32::consts::PI * cutoff_hz / sample_rate);
         let k = 1.0 / q;
         let a1 = 1.0 / (1.0 + g * (g + k));
         let a2 = g * a1;
@@ -185,7 +188,7 @@ impl Filter {
 /// `fmod` - this runs several times per oscillator per sample.
 #[inline]
 fn wrap01(x: f32) -> f32 {
-    x - x.floor()
+    x - floor_fast(x)
 }
 
 fn xorshift32(state: &mut u32) -> f32 {
@@ -301,6 +304,75 @@ fn osc_sample(waveform: Waveform, t: f32, shape: f32, dt: f32, after_reset: bool
     }
 }
 
+// --- The oscillators again, four unison copies at a time. Every operation
+// mirrors the scalar function above it, in the same order, so a lane's
+// result is bit-for-bit the scalar's; `lane_oscillators_match_the_scalar_ones`
+// holds them to that. (No `after_reset`: hard sync keeps the scalar path.)
+
+#[inline(always)]
+fn splat(x: f32) -> f32x4 {
+    f32x4::splat(x)
+}
+
+#[inline(always)]
+fn floor_lanes(x: f32x4) -> f32x4 {
+    // SSE2 has no `roundps`, so `floor` is emulated slowly; phases are
+    // tiny, so truncate through an integer and step down where that rounded up.
+    let t = f32x4::from_i32x4(x.trunc_int());
+    t - t.simd_gt(x).select(splat(1.0), f32x4::ZERO)
+}
+
+#[inline(always)]
+fn wrap01_lanes(x: f32x4) -> f32x4 {
+    x - floor_lanes(x)
+}
+
+#[inline(always)]
+fn poly_blamp_lanes(t: f32x4, dt: f32x4) -> f32x4 {
+    let x = t / dt - splat(1.0);
+    let rising = (-x * x * x) / splat(3.0);
+    let y = (t - splat(1.0)) / dt + splat(1.0);
+    let falling = y * y * y / splat(3.0);
+    t.simd_lt(dt).select(rising, t.simd_gt(splat(1.0) - dt).select(falling, f32x4::ZERO))
+}
+
+fn osc_lanes(waveform: Waveform, t: f32x4, shape: f32, dt: f32x4) -> f32x4 {
+    match waveform {
+        Waveform::Sine => {
+            let (t, dt) = (t.to_array(), dt.to_array());
+            f32x4::from(std::array::from_fn(|i| osc_sample(waveform, t[i], shape, dt[i], false)))
+        }
+        Waveform::Square => {
+            let rise = (splat(2.0) * dt).min(splat(0.2));
+            let duty = splat(pulse_duty(shape)).max(rise * splat(2.0)).min(splat(1.0) - rise * splat(2.0));
+            let slope = splat(2.0) / rise * splat(0.5) * dt;
+            let corner = |at: f32x4| poly_blamp_lanes(wrap01_lanes(t - at), dt);
+            let mut trap = splat(-1.0);
+            trap = t.simd_lt(duty + rise).select(splat(1.0) - splat(2.0) * (t - duty) / rise, trap);
+            trap = t.simd_lt(duty).select(splat(1.0), trap);
+            trap = t.simd_lt(rise).select(splat(-1.0) + splat(2.0) * t / rise, trap);
+            trap + slope * corner(f32x4::ZERO) - slope * corner(rise) - slope * corner(duty) + slope * corner(duty + rise)
+        }
+        Waveform::Triangle | Waveform::Saw => {
+            let shape = shape.clamp(0.0, 1.0);
+            let duty = splat(match waveform {
+                Waveform::Triangle => 0.5 + shape * 0.48,
+                _ => 1.0 - shape * 0.5,
+            });
+            let margin = (splat(2.0) * dt).min(splat(0.5));
+            let duty = duty.max(margin).min(splat(1.0) - margin);
+            let rise = splat(2.0) / duty;
+            let fall = splat(-2.0) / (splat(1.0) - duty);
+            let at_start = (rise - fall) * splat(0.5) * dt;
+            let at_duty = (fall - rise) * splat(0.5) * dt;
+            let up = splat(-1.0) + splat(2.0) * (t / duty);
+            let down = splat(1.0) - splat(2.0) * ((t - duty) / (splat(1.0) - duty));
+            let ramp = t.simd_lt(duty).select(up, down);
+            ramp + at_start * poly_blamp_lanes(t, dt) + at_duty * poly_blamp_lanes(wrap01_lanes(t - duty), dt)
+        }
+    }
+}
+
 /// One unison copy's oscillator pair and its own analog-style drift.
 #[derive(Clone, Copy)]
 struct UnisonOsc {
@@ -341,6 +413,9 @@ struct Voice {
     filter_env: Envelope,
     dc: [DcBlocker; 2],
     filter: [Filter; 2],
+    /// The filter's coefficients for the last (cutoff exponent, Q): they
+    /// only move while the filter envelope, an LFO or the knobs do.
+    coeff_memo: Memo<(f32, f32), SvfCoeffs>,
 }
 
 impl Voice {
@@ -361,6 +436,7 @@ impl Voice {
             filter_env: Envelope::new(),
             dc: [DcBlocker::new(10.0, sample_rate); 2],
             filter: [Filter::default(); 2],
+            coeff_memo: Memo::EMPTY,
         }
     }
 }
@@ -414,6 +490,91 @@ impl Smoothed {
     }
 }
 
+/// The last result of a pure function of its inputs. Most of what a sample
+/// derives from the patch (dB to gain, envelope coefficients, pitch
+/// ratios) only changes when a knob does, so it's computed then, not
+/// 48 000 times a second.
+#[derive(Clone, Copy)]
+struct Memo<K: Copy + PartialEq, V: Copy>(Option<(K, V)>);
+
+impl<K: Copy + PartialEq, V: Copy> Memo<K, V> {
+    const EMPTY: Self = Self(None);
+
+    #[inline(always)]
+    fn get(&mut self, key: K, compute: impl FnOnce(K) -> V) -> V {
+        match self.0 {
+            Some((k, v)) if k == key => v,
+            _ => {
+                let v = compute(key);
+                self.0 = Some((key, v));
+                v
+            }
+        }
+    }
+}
+
+/// Unison copies' detune ratios, pans and level, for one (count, detune,
+/// width).
+#[derive(Clone, Copy)]
+struct UnisonLayout {
+    ratio: [f32; UNISON],
+    pan: [(f32, f32); UNISON],
+    norm: f32,
+}
+
+impl UnisonLayout {
+    fn new((copies, detune, width): (usize, f32, f32)) -> Self {
+        let mut ratio = [1.0f32; UNISON];
+        let mut pan = [(1.0f32, 1.0f32); UNISON];
+        for i in 0..copies {
+            let spread = if copies == 1 { 0.0 } else { -1.0 + 2.0 * i as f32 / (copies - 1) as f32 };
+            ratio[i] = 2f32.powf(spread * detune * 0.5 / 1200.0);
+            let angle = (spread * width + 1.0) * std::f32::consts::FRAC_PI_4;
+            pan[i] = (angle.cos() * std::f32::consts::SQRT_2, angle.sin() * std::f32::consts::SQRT_2);
+        }
+        Self { ratio, pan, norm: 1.0 / (copies as f32).sqrt() }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Derived {
+    g_osc1: Memo<f32, f32>,
+    g_osc2: Memo<f32, f32>,
+    g_sub: Memo<f32, f32>,
+    g_noise: Memo<f32, f32>,
+    drive: Memo<f32, f32>,
+    volume: Memo<f32, f32>,
+    cutoff_log2: Memo<f32, f32>,
+    glide: Memo<f32, f32>,
+    amp_env: Memo<[f32; 3], EnvCoeffs>,
+    filter_env: Memo<[f32; 3], EnvCoeffs>,
+    vibrato: Memo<f32, f32>,
+    osc1_ratio: Memo<(i8, f32), f32>,
+    osc2_ratio: Memo<(i8, f32), f32>,
+    sub_oct: Memo<i8, f32>,
+    unison: Memo<(usize, f32, f32), UnisonLayout>,
+}
+
+impl Derived {
+    const EMPTY: Self = Self {
+        g_osc1: Memo::EMPTY,
+        g_osc2: Memo::EMPTY,
+        g_sub: Memo::EMPTY,
+        g_noise: Memo::EMPTY,
+        drive: Memo::EMPTY,
+        volume: Memo::EMPTY,
+        cutoff_log2: Memo::EMPTY,
+        glide: Memo::EMPTY,
+        amp_env: Memo::EMPTY,
+        filter_env: Memo::EMPTY,
+        vibrato: Memo::EMPTY,
+        osc1_ratio: Memo::EMPTY,
+        osc2_ratio: Memo::EMPTY,
+        sub_oct: Memo::EMPTY,
+        unison: Memo::EMPTY,
+    };
+}
+
 pub struct SynthEngine {
     sample_rate: f32,
     voices: [Voice; MAX_VOICES],
@@ -425,6 +586,8 @@ pub struct SynthEngine {
     lfo2_phase: f32,
     params: SynthParams,
     smoothed: Smoothed,
+    derived: Derived,
+    drift_coeff: f32,
     chorus: Chorus,
     reverb: Reverb,
     limiter: Limiter,
@@ -450,6 +613,8 @@ impl SynthEngine {
             lfo1_phase: 0.0,
             lfo2_phase: 0.0,
             smoothed: Smoothed::new(&params, sample_rate),
+            derived: Derived::EMPTY,
+            drift_coeff: 1.0 - (-1.0 / (2.0 * sample_rate)).exp(),
             params,
             chorus: Chorus::new(sample_rate),
             reverb: Reverb::new(sample_rate),
@@ -570,6 +735,7 @@ impl SynthEngine {
         let sr = self.sample_rate;
         let p = self.params;
         let sm = &mut self.smoothed;
+        let d = &mut self.derived;
 
         // --- Smoothed parameters (advanced once per sample, shared). ---
         let osc1_tune = sm.osc1_tune.next(p.osc1.knob_a_cents);
@@ -578,24 +744,24 @@ impl SynthEngine {
         let osc2_detune = sm.osc2_detune.next(p.osc2.knob_a_cents);
         let mut osc2_shape = sm.osc2_shape.next(p.osc2.knob_b);
         let osc2_fm = sm.osc2_fm.next(p.osc2.knob_c);
-        let g_osc1 = sm.osc1_gain.next(db_to_gain(p.mix.osc1_db));
-        let g_osc2 = sm.osc2_gain.next(db_to_gain(p.mix.osc2_db));
-        let g_sub = sm.sub_gain.next(db_to_gain(p.mix.sub_db));
-        let g_noise = sm.noise_gain.next(db_to_gain(p.mix.noise_db));
-        let cutoff_log2 = sm.cutoff_log2.next(p.filter.cutoff_hz.max(1.0).log2());
+        let g_osc1 = sm.osc1_gain.next(d.g_osc1.get(p.mix.osc1_db, db_to_gain));
+        let g_osc2 = sm.osc2_gain.next(d.g_osc2.get(p.mix.osc2_db, db_to_gain));
+        let g_sub = sm.sub_gain.next(d.g_sub.get(p.mix.sub_db, db_to_gain));
+        let g_noise = sm.noise_gain.next(d.g_noise.get(p.mix.noise_db, db_to_gain));
+        let cutoff_log2 = sm.cutoff_log2.next(d.cutoff_log2.get(p.filter.cutoff_hz, |hz| hz.max(1.0).log2()));
         let mut resonance = sm.resonance.next(p.filter.resonance);
-        let drive_gain = sm.drive_gain.next(db_to_gain(p.filter.drive_db));
+        let drive_gain = sm.drive_gain.next(d.drive.get(p.filter.drive_db, db_to_gain));
         let env_amount = sm.env_amount.next(p.filter.env_amount_oct);
         let key_track = sm.key_track.next(p.filter.key_track);
-        let volume = sm.volume_gain.next(db_to_gain(p.volume_db));
+        let volume = sm.volume_gain.next(d.volume.get(p.volume_db, db_to_gain));
         let uni_detune = sm.unison_detune.next(p.unison.detune_cents);
         let uni_width = sm.unison_width.next(p.unison.width);
 
         // --- LFOs: each adds into whichever target it's patched to. ---
-        self.lfo1_phase = (self.lfo1_phase + p.lfo1_rate_hz / sr).fract();
-        self.lfo2_phase = (self.lfo2_phase + p.lfo2_rate_hz / sr).fract();
-        let lfo1 = (self.lfo1_phase * std::f32::consts::TAU).sin();
-        let lfo2 = (self.lfo2_phase * std::f32::consts::TAU).sin();
+        self.lfo1_phase = fract_fast(self.lfo1_phase + p.lfo1_rate_hz / sr);
+        self.lfo2_phase = fract_fast(self.lfo2_phase + p.lfo2_rate_hz / sr);
+        let lfo1 = if p.lfo1_depth == 0.0 { 0.0 } else { (self.lfo1_phase * std::f32::consts::TAU).sin() };
+        let lfo2 = if p.lfo2_depth == 0.0 { 0.0 } else { (self.lfo2_phase * std::f32::consts::TAU).sin() };
         let mut cutoff_lfo_oct = 0.0f32;
         let mut pitch_lfo_cents = 0.0f32;
         for (lfo, depth, target) in [(lfo1, p.lfo1_depth, p.lfo1_target), (lfo2, p.lfo2_depth, p.lfo2_target)] {
@@ -609,37 +775,27 @@ impl SynthEngine {
         }
         let osc2_shape = osc2_shape.clamp(0.0, 1.0);
         let resonance = resonance.clamp(0.0, 1.0);
-        let vibrato_ratio = 2f32.powf(pitch_lfo_cents / 1200.0);
+        let vibrato_ratio = d.vibrato.get(pitch_lfo_cents, |c| 2f32.powf(c / 1200.0));
         let q = 0.5 + resonance * resonance * 19.5;
 
-        let glide_coeff = 1.0 - (-1.0 / (p.glide_ms.max(0.5) * 0.001 * sr)).exp();
-        let amp_coeffs = EnvCoeffs::new(&p.amp_env, sr);
-        let filter_coeffs = EnvCoeffs::new(&p.filter_env, sr);
+        let glide_coeff = d.glide.get(p.glide_ms, |ms| 1.0 - (-1.0 / (ms.max(0.5) * 0.001 * sr)).exp());
+        let amp_coeffs = d.amp_env.get([p.amp_env.attack_ms, p.amp_env.decay_ms, p.amp_env.release_ms], |_| EnvCoeffs::new(&p.amp_env, sr));
+        let filter_coeffs =
+            d.filter_env.get([p.filter_env.attack_ms, p.filter_env.decay_ms, p.filter_env.release_ms], |_| EnvCoeffs::new(&p.filter_env, sr));
         // ~2 second time constant: slow enough to feel like wander, not vibrato.
-        let drift_coeff = 1.0 - (-1.0 / (2.0 * sr)).exp();
+        let drift_coeff = self.drift_coeff;
 
-        // --- Unison layout: detune offsets and equal-power pan gains. ---
+        // Unison layout: detune ratios and equal-power pan gains.
         let copies = (p.unison.voices as usize).clamp(1, UNISON);
-        let mut uni_cents = [0.0f32; UNISON];
-        let mut uni_pan = [(1.0f32, 1.0f32); UNISON];
-        for i in 0..copies {
-            let spread = if copies == 1 { 0.0 } else { -1.0 + 2.0 * i as f32 / (copies - 1) as f32 };
-            uni_cents[i] = spread * uni_detune * 0.5;
-            let angle = (spread * uni_width + 1.0) * std::f32::consts::FRAC_PI_4;
-            uni_pan[i] = (angle.cos() * std::f32::consts::SQRT_2, angle.sin() * std::f32::consts::SQRT_2);
-        }
-        let uni_norm = 1.0 / (copies as f32).sqrt();
+        let UnisonLayout { ratio: uni_ratio, pan: uni_pan, norm: uni_norm } =
+            d.unison.get((copies, uni_detune, uni_width), UnisonLayout::new);
         let inv_sr = 1.0 / sr;
 
-        // Pitch factors shared by every voice, computed once per sample.
-        let osc1_ratio = 2f32.powf(p.osc1.octave as f32 + osc1_tune / 1200.0);
-        let osc2_ratio = 2f32.powf(p.osc2.octave as f32 + osc2_detune / 1200.0);
-        let mut uni_ratio = [1.0f32; UNISON];
-        for i in 0..copies {
-            uni_ratio[i] = 2f32.powf(uni_cents[i] / 1200.0);
-        }
+        // Pitch factors shared by every voice.
+        let osc1_ratio = d.osc1_ratio.get((p.osc1.octave, osc1_tune), |(o, t)| 2f32.powf(o as f32 + t / 1200.0));
+        let osc2_ratio = d.osc2_ratio.get((p.osc2.octave, osc2_detune), |(o, t)| 2f32.powf(o as f32 + t / 1200.0));
         let drift_depth = osc1_drift * DRIFT_MAX_CENTS / 1200.0 * std::f32::consts::LN_2;
-        let sub_oct = 2f32.powf((p.osc1.octave - 1) as f32);
+        let sub_oct = d.sub_oct.get(p.osc1.octave, |o| 2f32.powf((o - 1) as f32));
 
         let mut sum_l = 0.0f32;
         let mut sum_r = 0.0f32;
@@ -673,67 +829,111 @@ impl SynthEngine {
             let mut dry_l = 0.0f32;
             let mut dry_r = 0.0f32;
 
-            for (i, u) in voice.unison.iter_mut().take(copies).enumerate() {
-                u.drift += (xorshift32(&mut u.drift_rng) - u.drift) * drift_coeff;
-
-                // Drift is at most 15 cents: 2^x's series to x^2 is exact to
-                // well under a tenth of a cent there, and far cheaper.
-                let d = u.drift * drift_depth;
-                let drift_ratio = 1.0 + d + 0.5 * d * d;
-                let base = base_hz * uni_ratio[i] * inv_sr;
-                let dt1 = base * osc1_ratio * drift_ratio;
-                let dt2_base = base * osc2_ratio;
-
-                let v1 = osc_sample(p.osc1.waveform, u.phase1, osc1_shape, dt1, false);
-
-                // FM: osc 1 pushes osc 2's frequency around. Through-zero
-                // is allowed; band-limiting uses the step's magnitude.
-                let dt2 = dt2_base * (1.0 + osc2_fm * 4.0 * v1);
-                let dt2_abs = dt2.abs().max(1.0e-7);
-                let mut v2 = osc_sample(p.osc2.waveform, u.phase2, osc2_shape, dt2_abs, u.synced) + u.sync_residual;
-                u.sync_residual = 0.0;
-                u.synced = false;
-
-                // Advance osc 1; if it wraps before the next sample and
-                // sync is on, osc 2 restarts at that sub-sample instant.
-                u.phase1 += dt1;
-                let mut next_phase2 = wrap01(u.phase2 + dt2);
-                if u.phase1 >= 1.0 {
-                    u.phase1 -= 1.0;
-                    if p.osc2.sync {
-                        // Fraction of a sample since the wrap, at the next sample.
-                        let x = (u.phase1 / dt1).clamp(0.0, 1.0);
-                        let phase_at_reset = wrap01(u.phase2 + dt2 * (1.0 - x));
-                        let before = naive(p.osc2.waveform, phase_at_reset, osc2_shape, dt2_abs);
-                        let after = naive(p.osc2.waveform, 0.0, osc2_shape, dt2_abs);
-                        let jump = after - before;
-                        // Two-sample BLEP: this sample gets the lead-in,
-                        // the next the lead-out.
-                        v2 += jump * 0.5 * x * x;
-                        u.sync_residual = -jump * 0.5 * (1.0 - x) * (1.0 - x);
-                        next_phase2 = wrap01(dt2 * x);
-                        u.synced = true;
-                    }
+            let lanes_ok = copies >= 2
+                && !p.osc2.sync
+                && voice.unison.iter().take(copies).all(|u| !u.synced && u.sync_residual == 0.0);
+            if lanes_ok {
+                let mut phase1 = [0.0f32; UNISON];
+                let mut phase2 = [0.0f32; UNISON];
+                let mut dt1 = [0.01f32; UNISON];
+                let mut dt2_base = [0.01f32; UNISON];
+                let mut drift = [0.0f32; UNISON];
+                for (i, u) in voice.unison.iter_mut().take(copies).enumerate() {
+                    u.drift += (xorshift32(&mut u.drift_rng) - u.drift) * drift_coeff;
+                    drift[i] = u.drift;
+                    phase1[i] = u.phase1;
+                    phase2[i] = u.phase2;
                 }
-                u.phase2 = next_phase2;
+                let d = f32x4::from(drift) * splat(drift_depth);
+                let drift_ratio = splat(1.0) + d + splat(0.5) * d * d;
+                for i in 0..copies {
+                    let base = base_hz * uni_ratio[i] * inv_sr;
+                    dt1[i] = base * osc1_ratio;
+                    dt2_base[i] = base * osc2_ratio;
+                }
+                let dt1 = f32x4::from(dt1) * drift_ratio;
+                let (phase1, phase2) = (f32x4::from(phase1), f32x4::from(phase2));
 
-                let s = (v1 * g_osc1 + v2 * g_osc2) * uni_norm;
-                dry_l += s * uni_pan[i].0;
-                dry_r += s * uni_pan[i].1;
+                let v1 = osc_lanes(p.osc1.waveform, phase1, osc1_shape, dt1);
+                let dt2 = f32x4::from(dt2_base) * (splat(1.0) + splat(osc2_fm * 4.0) * v1);
+                let dt2_abs = dt2.abs().max(splat(1.0e-7));
+                let v2 = osc_lanes(p.osc2.waveform, phase2, osc2_shape, dt2_abs);
+
+                let next1 = phase1 + dt1;
+                let next1 = next1.simd_ge(splat(1.0)).select(next1 - splat(1.0), next1).to_array();
+                let next2 = wrap01_lanes(phase2 + dt2).to_array();
+                let s = ((v1 * splat(g_osc1) + v2 * splat(g_osc2)) * splat(uni_norm)).to_array();
+                for (i, u) in voice.unison.iter_mut().take(copies).enumerate() {
+                    u.phase1 = next1[i];
+                    u.phase2 = next2[i];
+                    dry_l += s[i] * uni_pan[i].0;
+                    dry_r += s[i] * uni_pan[i].1;
+                }
+            } else {
+                for (i, u) in voice.unison.iter_mut().take(copies).enumerate() {
+                    u.drift += (xorshift32(&mut u.drift_rng) - u.drift) * drift_coeff;
+
+                    // Drift is at most 15 cents: 2^x's series to x^2 is exact to
+                    // well under a tenth of a cent there, and far cheaper.
+                    let d = u.drift * drift_depth;
+                    let drift_ratio = 1.0 + d + 0.5 * d * d;
+                    let base = base_hz * uni_ratio[i] * inv_sr;
+                    let dt1 = base * osc1_ratio * drift_ratio;
+                    let dt2_base = base * osc2_ratio;
+
+                    let v1 = osc_sample(p.osc1.waveform, u.phase1, osc1_shape, dt1, false);
+
+                    // FM: osc 1 pushes osc 2's frequency around. Through-zero
+                    // is allowed; band-limiting uses the step's magnitude.
+                    let dt2 = dt2_base * (1.0 + osc2_fm * 4.0 * v1);
+                    let dt2_abs = dt2.abs().max(1.0e-7);
+                    let mut v2 = osc_sample(p.osc2.waveform, u.phase2, osc2_shape, dt2_abs, u.synced) + u.sync_residual;
+                    u.sync_residual = 0.0;
+                    u.synced = false;
+
+                    // Advance osc 1; if it wraps before the next sample and
+                    // sync is on, osc 2 restarts at that sub-sample instant.
+                    u.phase1 += dt1;
+                    let mut next_phase2 = wrap01(u.phase2 + dt2);
+                    if u.phase1 >= 1.0 {
+                        u.phase1 -= 1.0;
+                        if p.osc2.sync {
+                            // Fraction of a sample since the wrap, at the next sample.
+                            let x = (u.phase1 / dt1).clamp(0.0, 1.0);
+                            let phase_at_reset = wrap01(u.phase2 + dt2 * (1.0 - x));
+                            let before = naive(p.osc2.waveform, phase_at_reset, osc2_shape, dt2_abs);
+                            let after = naive(p.osc2.waveform, 0.0, osc2_shape, dt2_abs);
+                            let jump = after - before;
+                            // Two-sample BLEP: this sample gets the lead-in,
+                            // the next the lead-out.
+                            v2 += jump * 0.5 * x * x;
+                            u.sync_residual = -jump * 0.5 * (1.0 - x) * (1.0 - x);
+                            next_phase2 = wrap01(dt2 * x);
+                            u.synced = true;
+                        }
+                    }
+                    u.phase2 = next_phase2;
+
+                    let s = (v1 * g_osc1 + v2 * g_osc2) * uni_norm;
+                    dry_l += s * uni_pan[i].0;
+                    dry_r += s * uni_pan[i].1;
+                }
             }
 
             // Sub and noise sit in the centre, once per voice.
-            let sub = (voice.sub_phase * std::f32::consts::TAU).sin() * g_sub;
-            voice.sub_phase = (voice.sub_phase + base_hz * sub_oct / sr).fract();
+            let sub = if g_sub == 0.0 { 0.0 } else { (voice.sub_phase * std::f32::consts::TAU).sin() * g_sub };
+            voice.sub_phase = fract_fast(voice.sub_phase + base_hz * sub_oct / sr);
             let noise = xorshift32(&mut voice.noise_state) * g_noise;
             dry_l += sub + noise;
             dry_r += sub + noise;
 
             let key_oct = key_track * ((voice.note as f32 - REF_NOTE) / 12.0);
             let env_oct = env_amount * filter_level;
-            let cutoff =
-                2f32.powf(cutoff_log2 + key_oct + env_oct + cutoff_lfo_oct).clamp(20.0, 20_000.0).min(sr * 0.45);
-            coeffs[vi] = SvfCoeffs::new(cutoff, q, sr);
+            let cutoff_arg = cutoff_log2 + key_oct + env_oct + cutoff_lfo_oct;
+            coeffs[vi] = voice.coeff_memo.get((cutoff_arg, q), |(arg, q)| {
+                let cutoff = 2f32.powf(arg).clamp(20.0, 20_000.0).min(sr * 0.45);
+                SvfCoeffs::new(cutoff, q, sr)
+            });
             level[vi] = amp_level * voice.velocity_gain;
             for (ch, dry) in [dry_l, dry_r].into_iter().enumerate() {
                 pre[vi][ch] = voice.dc[ch].process(dry) * drive_gain;
@@ -813,6 +1013,24 @@ mod tests {
 
     fn peak(engine: &mut SynthEngine, seconds: f32) -> f32 {
         (0..(SR * seconds) as usize).map(|_| engine.process().0.abs()).fold(0.0, f32::max)
+    }
+
+    #[test]
+    fn lane_oscillators_match_the_scalar_ones() {
+        let mut rng = 12_345u32;
+        for waveform in [Waveform::Sine, Waveform::Square, Waveform::Triangle, Waveform::Saw] {
+            for shape in [0.0, 0.2, 0.5, 0.97, 1.0] {
+                for _ in 0..2_000 {
+                    let t: [f32; 4] = std::array::from_fn(|_| xorshift32(&mut rng) * 0.5 + 0.5);
+                    let dt: [f32; 4] = std::array::from_fn(|_| (xorshift32(&mut rng) * 0.5 + 0.5) * 0.3 + 1.0e-5);
+                    let got = osc_lanes(waveform, f32x4::from(t), shape, f32x4::from(dt)).to_array();
+                    for i in 0..4 {
+                        let want = osc_sample(waveform, t[i], shape, dt[i], false);
+                        assert_eq!(got[i].to_bits(), want.to_bits(), "{waveform:?} shape {shape} t {} dt {}", t[i], dt[i]);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

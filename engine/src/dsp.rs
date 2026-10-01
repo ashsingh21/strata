@@ -22,6 +22,42 @@ pub fn poly_blamp(t: f32, dt: f32) -> f32 {
     }
 }
 
+/// `x.fract()` for a phase-sized `x` (well inside i32). `f32::fract` and
+/// `floor` are library calls on baseline x86-64; a round trip through an
+/// integer is a couple of instructions and gives the same value.
+#[inline(always)]
+pub fn fract_fast(x: f32) -> f32 {
+    x - (x as i32) as f32
+}
+
+/// `x.floor()`, likewise.
+#[inline(always)]
+pub fn floor_fast(x: f32) -> f32 {
+    let t = (x as i32) as f32;
+    if t > x {
+        t - 1.0
+    } else {
+        t
+    }
+}
+
+/// `tan(x)` for `x` in 0..1.5 (a filter's `pi * cutoff / sample_rate`),
+/// relative error about 1e-6: Cephes' polynomial up to pi/4, its cotangent
+/// beyond.
+#[inline(always)]
+pub fn tan_fast(x: f32) -> f32 {
+    fn poly(x: f32) -> f32 {
+        let z = x * x;
+        let p = ((((9.385_402e-3 * z + 3.119_922_3e-3) * z + 2.443_013_5e-2) * z + 5.341_128e-2) * z + 1.333_88e-1) * z + 3.333_315_7e-1;
+        x + x * z * p
+    }
+    if x > std::f32::consts::FRAC_PI_4 {
+        1.0 / poly(std::f32::consts::FRAC_PI_2 - x)
+    } else {
+        poly(x)
+    }
+}
+
 /// Makes this thread treat denormal floats (the tiny values a decaying
 /// reverb tail, filter or envelope passes through on its way to silence)
 /// as zero. x86 CPUs process denormals up to ~100x slower, so without this
@@ -442,5 +478,19 @@ mod tests {
         let out = bank.process([0.0; DRIVE_LANES]);
         assert_eq!(out[1], 0.0);
         assert_ne!(out[0], 0.0);
+    }
+
+    #[test]
+    fn the_scalar_fast_helpers_agree_with_libm() {
+        let mut tn = 0.0f32;
+        for i in 0..20_000 {
+            let a = 1.5 * i as f32 / 20_000.0;
+            tn = tn.max((tan_fast(a) / a.tan() - 1.0).abs().min((tan_fast(a) - a.tan()).abs()));
+        }
+        assert!(tn < 2.0e-6, "tan {tn}");
+        for x in [-3.7f32, -0.2, 0.0, 0.4, 5.9, 123.456, 1.0e-3, 0.999_999] {
+            assert_eq!(fract_fast(x), x.fract());
+            assert_eq!(floor_fast(x), x.floor());
+        }
     }
 }

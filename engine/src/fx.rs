@@ -3,7 +3,19 @@
 //! audio stream starts) and sized for the stream's sample rate, so
 //! `process` never allocates.
 
-use crate::dsp::Smoother;
+use crate::dsp::{fract_fast, Smoother};
+
+/// `i % len` for an `i` known to be under `2 * len`: a compare and a
+/// subtract where `%` would be an integer division (several per sample in
+/// the reverb alone, which added up).
+#[inline(always)]
+fn wrap(i: usize, len: usize) -> usize {
+    if i >= len {
+        i - len
+    } else {
+        i
+    }
+}
 
 /// A delay line read at a fractional position (linear interpolation).
 pub(crate) struct DelayLine {
@@ -23,7 +35,7 @@ impl DelayLine {
     #[inline]
     pub(crate) fn push(&mut self, x: f32) {
         self.buf[self.write] = x;
-        self.write = (self.write + 1) % self.buf.len();
+        self.write = wrap(self.write + 1, self.buf.len());
     }
 
     /// The sample written `delay` samples ago (fractional, >= 1).
@@ -32,9 +44,9 @@ impl DelayLine {
         let len = self.buf.len();
         let delay = delay.clamp(1.0, (len - 2) as f32);
         let pos = self.write as f32 - delay + len as f32;
-        let i0 = pos.floor() as usize % len;
-        let i1 = (i0 + 1) % len;
-        let frac = pos.fract();
+        let i0 = wrap(pos as usize, len);
+        let i1 = wrap(i0 + 1, len);
+        let frac = fract_fast(pos);
         self.buf[i0] + (self.buf[i1] - self.buf[i0]) * frac
     }
 }
@@ -72,7 +84,7 @@ impl Chorus {
         let depth = self.depth.next(depth);
         self.left.push(l);
         self.right.push(r);
-        self.phase = (self.phase + CHORUS_RATE_HZ / self.sample_rate).fract();
+        self.phase = fract_fast(self.phase + CHORUS_RATE_HZ / self.sample_rate);
         if mix < 1.0e-4 {
             return (l, r);
         }
@@ -105,14 +117,14 @@ impl Taps {
     #[inline]
     fn push(&mut self, x: f32) {
         self.buf[self.write] = x;
-        self.write = (self.write + 1) % self.buf.len();
+        self.write = wrap(self.write + 1, self.buf.len());
     }
 
     /// The sample written `n` samples ago (1 = the latest).
     #[inline]
     fn tap(&self, n: usize) -> f32 {
         let len = self.buf.len();
-        self.buf[(self.write + len - n.clamp(1, len)) % len]
+        self.buf[wrap(self.write + len - n.clamp(1, len), len)]
     }
 
     #[inline]
@@ -120,9 +132,9 @@ impl Taps {
         let len = self.buf.len();
         let delay = delay.clamp(1.0, (len - 2) as f32);
         let pos = self.write as f32 - delay + len as f32;
-        let i0 = pos.floor() as usize % len;
-        let i1 = (i0 + 1) % len;
-        self.buf[i0] + (self.buf[i1] - self.buf[i0]) * pos.fract()
+        let i0 = wrap(pos as usize, len);
+        let i1 = wrap(i0 + 1, len);
+        self.buf[i0] + (self.buf[i1] - self.buf[i0]) * fract_fast(pos)
     }
 }
 
@@ -172,6 +184,12 @@ pub struct Reverb {
     delay_b2: Taps,
     lens: [f32; 8],
     scale: f32,
+    /// Whole-sample tap positions, fixed by the sample rate: tank ends
+    /// (delay_a2, delay_b2, delay_a, delay_b), then the left and right output taps.
+    ends: [usize; 4],
+    out_l: [usize; 7],
+    out_r: [usize; 7],
+    decay_memo: (f32, f32),
     lfo: f32,
     lfo_step: f32,
     mix: Smoother,
@@ -208,6 +226,10 @@ impl Reverb {
             damp_b: 0.0,
             ap_b: Diffuser::new(lens[6], 0),
             delay_b2: Taps::new(lens[7] as usize + 1),
+            ends: [lens[3] as usize, lens[7] as usize, lens[1] as usize, lens[5] as usize],
+            out_l: [266.0, 2974.0, 1913.0, 1996.0, 1990.0, 187.0, 1066.0].map(|n| (n * scale) as usize),
+            out_r: [353.0, 3627.0, 1228.0, 2673.0, 2111.0, 335.0, 121.0].map(|n| (n * scale) as usize),
+            decay_memo: (f32::NAN, 0.0),
             lens,
             scale,
             lfo: 0.0,
@@ -233,12 +255,6 @@ impl Reverb {
         }
     }
 
-    /// A tap `n` paper-samples into a line, at this rate.
-    #[inline]
-    fn t(&self, n: f32) -> usize {
-        (n * self.scale) as usize
-    }
-
     pub fn process(&mut self, l: f32, r: f32, size: f32, mix: f32) -> (f32, f32) {
         let mix = self.mix.next(mix);
         let size = self.size.next(size);
@@ -248,7 +264,10 @@ impl Reverb {
         // Fitted so each size decays as long as the old Freeverb's did
         // (RT60 about 0.8 s at 0.2, 1.2 s at 0.5, 2.3 s at 0.8) - presets
         // keep their space.
-        let decay = (-1.9 + 1.69 * size.clamp(0.0, 1.0)).exp();
+        if size != self.decay_memo.0 {
+            self.decay_memo = (size, (-1.9 + 1.69 * size.clamp(0.0, 1.0)).exp());
+        }
+        let decay = self.decay_memo.1;
 
         // Input: mono, band-limited, diffused.
         self.input_lp += ((l + r) * 0.5 - self.input_lp) * REVERB_BANDWIDTH;
@@ -259,36 +278,36 @@ impl Reverb {
         }
 
         // The tank: each half is fed by the other's end.
-        self.lfo = (self.lfo + self.lfo_step).fract();
+        self.lfo = fract_fast(self.lfo + self.lfo_step);
         let wobble = (self.lfo * std::f32::consts::TAU).sin() * MOD_EXCURSION * self.scale;
-        let end_a = self.delay_a2.tap(self.lens[3] as usize);
-        let end_b = self.delay_b2.tap(self.lens[7] as usize);
+        let end_a = self.delay_a2.tap(self.ends[0]);
+        let end_b = self.delay_b2.tap(self.ends[1]);
 
         let a = self.mod_a.process(x + end_b * decay, -0.7, self.lens[0] + wobble);
         self.delay_a.push(a);
-        let a = self.delay_a.tap(self.lens[1] as usize);
+        let a = self.delay_a.tap(self.ends[2]);
         self.damp_a += (a - self.damp_a) * (1.0 - REVERB_DAMP);
         let a = self.ap_a.process(self.damp_a * decay, 0.5, self.lens[2]);
         self.delay_a2.push(a);
 
         let b = self.mod_b.process(x + end_a * decay, -0.7, self.lens[4] - wobble);
         self.delay_b.push(b);
-        let b = self.delay_b.tap(self.lens[5] as usize);
+        let b = self.delay_b.tap(self.ends[3]);
         self.damp_b += (b - self.damp_b) * (1.0 - REVERB_DAMP);
         let b = self.ap_b.process(self.damp_b * decay, 0.5, self.lens[6]);
         self.delay_b2.push(b);
 
         // Output taps (the paper's table).
-        let wet_l = self.delay_b.tap(self.t(266.0)) + self.delay_b.tap(self.t(2974.0)) - self.ap_b.line.tap(self.t(1913.0))
-            + self.delay_b2.tap(self.t(1996.0))
-            - self.delay_a.tap(self.t(1990.0))
-            - self.ap_a.line.tap(self.t(187.0))
-            - self.delay_a2.tap(self.t(1066.0));
-        let wet_r = self.delay_a.tap(self.t(353.0)) + self.delay_a.tap(self.t(3627.0)) - self.ap_a.line.tap(self.t(1228.0))
-            + self.delay_a2.tap(self.t(2673.0))
-            - self.delay_b.tap(self.t(2111.0))
-            - self.ap_b.line.tap(self.t(335.0))
-            - self.delay_b2.tap(self.t(121.0));
+        let o = &self.out_l;
+        let wet_l = self.delay_b.tap(o[0]) + self.delay_b.tap(o[1]) - self.ap_b.line.tap(o[2]) + self.delay_b2.tap(o[3])
+            - self.delay_a.tap(o[4])
+            - self.ap_a.line.tap(o[5])
+            - self.delay_a2.tap(o[6]);
+        let o = &self.out_r;
+        let wet_r = self.delay_a.tap(o[0]) + self.delay_a.tap(o[1]) - self.ap_a.line.tap(o[2]) + self.delay_a2.tap(o[3])
+            - self.delay_b.tap(o[4])
+            - self.ap_b.line.tap(o[5])
+            - self.delay_b2.tap(o[6]);
         (l + wet_l * REVERB_WET_GAIN * mix, r + wet_r * REVERB_WET_GAIN * mix)
     }
 }
