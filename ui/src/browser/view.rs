@@ -312,7 +312,26 @@ fn results_memo(p: BrowserProps) -> Memo<Vec<Item>> {
     })
 }
 
+/// The panel beside the rail: Learn's lesson pane while a lesson runs
+/// (it has its own header, scrolling and buttons), the browser otherwise.
 fn panel(cx: &mut Context, p: BrowserProps) {
+    let lesson_mode = Memo::new(move |_| p.section.get() == Section::Learn && p.lessons_active.get().is_some());
+    VStack::new(cx, move |cx| {
+        Binding::new(cx, lesson_mode, move |cx| {
+            if lesson_mode.get() {
+                crate::lessons::panel::lesson_panel(cx, p.lesson);
+            } else {
+                browser_panel(cx, p);
+            }
+        });
+    })
+    .class("brw-panel")
+    .toggle_class("hidden", p.open.map(|o| !*o))
+    .width(p.width.map(|w| Pixels(*w)))
+    .height(Stretch(1.0));
+}
+
+fn browser_panel(cx: &mut Context, p: BrowserProps) {
     let shown = results_memo(p);
     VStack::new(cx, move |cx| {
         // Header: the section and how many results.
@@ -470,11 +489,7 @@ fn panel(cx: &mut Context, p: BrowserProps) {
             Binding::new(cx, shown, move |cx| {
                 let items = shown.get();
                 if p.section.get() == Section::Learn {
-                    if running.get() {
-                        crate::lessons::panel::lesson_panel(cx, p.lesson);
-                    } else {
-                        learn_list(cx, p);
-                    }
+                    learn_list(cx, p);
                     return;
                 }
                 if items.is_empty() {
@@ -501,9 +516,7 @@ fn panel(cx: &mut Context, p: BrowserProps) {
         Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0)).toggle_class("hidden", p.pv_item.map(|i| i.is_none()));
         preview_dock(cx, p);
     })
-    .class("brw-panel")
-    .toggle_class("hidden", p.open.map(|o| !*o))
-    .width(p.width.map(|w| Pixels(*w)))
+    .width(Stretch(1.0))
     .height(Stretch(1.0));
 }
 

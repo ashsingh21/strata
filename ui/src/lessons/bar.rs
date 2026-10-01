@@ -29,6 +29,7 @@ pub struct LessonBarProps {
     pub has_example: Signal<bool>,
     pub ghost_progress: Signal<Option<(usize, usize)>>,
     pub done: Signal<Vec<String>>,
+    pub map_open: Signal<bool>,
 }
 
 impl LessonBarProps {
@@ -51,34 +52,40 @@ impl LessonBarProps {
             has_example: model.has_example,
             ghost_progress: model.ghost_progress,
             done: model.done,
+            map_open: model.map_open,
         }
     }
 }
 
-/// The lesson's title and progress: a segment per step - done ones in
-/// signal, the current (or reread) one in ink. `full` stretches the bar
-/// across its column; otherwise it's a fixed strip.
-pub(super) fn title_and_dots(cx: &mut Context, lesson: usize, marked: usize, current: usize, full: bool) {
+/// A segment per step: done ones in signal, the current (or reread) one
+/// in ink. `full` stretches it across its column; otherwise a fixed strip.
+pub(super) fn segments(cx: &mut Context, lesson: usize, marked: usize, current: usize, full: bool) {
+    let l = &LESSONS[lesson];
+    HStack::new(cx, move |cx| {
+        for i in 0..l.steps.len() {
+            Element::new(cx)
+                .class("lesson-seg")
+                .toggle_class("is-done", i < current && i != marked)
+                .toggle_class("is-current", i == marked)
+                .width(Stretch(1.0))
+                .height(Pixels(4.0))
+                .corner_radius(Pixels(2.0));
+        }
+    })
+    .gap(Pixels(3.0))
+    .width(if full { Stretch(1.0) } else { Pixels((l.steps.len() as f32 * 10.0).clamp(80.0, 160.0)) })
+    .height(Pixels(4.0));
+}
+
+/// The lesson's group and title over its progress.
+pub(super) fn title_and_dots(cx: &mut Context, lesson: usize, marked: usize, current: usize) {
     let l = &LESSONS[lesson];
     VStack::new(cx, move |cx| {
         Label::new(cx, format!("{} \u{b7} {}", l.group, l.title)).class("label").text_wrap(false).text_overflow(TextOverflow::Ellipsis);
-        HStack::new(cx, move |cx| {
-            for i in 0..l.steps.len() {
-                Element::new(cx)
-                    .class("lesson-seg")
-                    .toggle_class("is-done", i < current && i != marked)
-                    .toggle_class("is-current", i == marked)
-                    .width(Stretch(1.0))
-                    .height(Pixels(4.0))
-                    .corner_radius(Pixels(2.0));
-            }
-        })
-        .gap(Pixels(3.0))
-        .width(if full { Stretch(1.0) } else { Pixels((l.steps.len() as f32 * 10.0).clamp(80.0, 160.0)) })
-        .height(Pixels(4.0));
+        segments(cx, lesson, marked, current, false);
     })
     .gap(Pixels(6.0))
-    .width(if full { Stretch(1.0) } else { Auto })
+    .width(Auto)
     .height(Auto);
 }
 
@@ -99,7 +106,7 @@ pub fn lesson_bar(cx: &mut Context, p: LessonBarProps, panel_shown: Memo<bool>) 
         // can come back blank.
         if !panel_shown.get() {
         HStack::new(cx, move |cx| {
-            title_and_dots(cx, lesson, step, step, false);
+            title_and_dots(cx, lesson, step, step);
             Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(24.0));
             Label::new(cx, line.clone())
                 .class("body")

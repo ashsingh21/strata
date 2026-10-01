@@ -500,8 +500,8 @@ impl ProjectModel {
                 // finished songs to listen to.
                 let saves = lesson.group != crate::lessons::course::ARRANGEMENT;
                 self.current_path.set(saves.then(|| new_track_path(lesson.title)));
-                // Short: the header's name field is narrow (the bar shows the title).
-                self.display_name.set(format!("Lesson {}", n + 1));
+                // The lesson's own name, as its file in My tracks is called.
+                self.display_name.set(lesson.title.to_string());
                 // The key its steps name notes in, so they're the rows shown.
                 if let Some((root, scale)) = shared::lessons::lesson_key(lesson.id) {
                     set_key(cx, root, scale);

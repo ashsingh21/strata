@@ -30,7 +30,7 @@ pub const MIN_WIDTH: f32 = 200.0;
 pub const MAX_WIDTH: f32 = 360.0;
 pub const DEFAULT_WIDTH: f32 = 236.0;
 /// A running lesson's panel is at least this wide: its lines read better.
-pub const LESSON_WIDTH: f32 = 320.0;
+pub const LESSON_WIDTH: f32 = 380.0;
 pub const RAIL_WIDTH: f32 = 44.0;
 /// How many recently used items History keeps.
 const HISTORY_LEN: usize = 40;
@@ -421,7 +421,10 @@ impl Model for BrowserModel {
             BrowserEvent::Rail(section) => {
                 if self.open.get() && self.section.get() == *section {
                     cx.emit(crate::app::AppEvent::ToggleSidebar);
+                    cx.emit(crate::lessons::LessonEvent::ShowMap(false));
                 } else {
+                    // Learn opens the course map over the arrangement.
+                    cx.emit(crate::lessons::LessonEvent::ShowMap(*section == Section::Learn));
                     self.section.set(*section);
                     if !self.open.get() {
                         cx.emit(crate::app::AppEvent::ToggleSidebar);

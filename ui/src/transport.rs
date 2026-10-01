@@ -183,6 +183,9 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
                                 .font_size(14.0)
                                 .text_wrap(false)
                                 .text_overflow(TextOverflow::Ellipsis)
+                                // Inside the 120px column with its chevron:
+                                // a long name (a lesson's) ran into Key.
+                                .max_width(Pixels(100.0))
                                 .hoverable(false);
                             Label::new(cx, "\u{2304}").class("value").font_size(13.0).hoverable(false);
                         })

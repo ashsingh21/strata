@@ -212,6 +212,18 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   font-size: 15px;
   font-weight: 600;
 }}
+/* The course map's title. */
+.display-sm {{
+  font-size: 24px;
+  font-weight: 600;
+}}
+.map-card {{
+  border-width: 1px;
+  border-radius: {radius_md}px;
+}}
+.map-card.is-next {{
+  border-width: 2px;
+}}
 /* The Sound match score: the one big number on screen. */
 .match-score {{
   font-size: 28px;
@@ -268,6 +280,11 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 .btn.quiet {{
   border-width: 0px;
   padding: 0px 4px;
+}}
+.btn.lg {{
+  height: 34px;
+  font-size: 13px;
+  padding: 0px 14px;
 }}
 .readout {{
   height: {control}px;
@@ -853,6 +870,15 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".lesson-seg.is-done", vec![("background-color", c("signal"))]);
     rule(".lesson-seg.is-current", vec![("background-color", c("ink"))]);
     rule(".lesson-done", vec![("color", c("signal"))]);
+    rule(".lesson-progress", vec![("color", c("signal"))]);
+    rule(".display-sm", vec![("color", c("ink"))]);
+    rule(".course-map", vec![("background-color", c("bg-100"))]);
+    rule(".map-card", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
+    rule(".map-card:hover", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
+    rule(".map-card.is-next", vec![("border-color", c("ink"))]);
+    rule(".lesson-hint", vec![("color", c("ink-muted"))]);
+    rule(".lesson-step.is-current", vec![("background-color", c("bg-200"))]);
+    rule(".lesson-step.is-current .value", vec![("color", c("ink"))]);
     rule(".empty-note", vec![("color", c("ink-muted"))]);
     rule(".learn-next:hover", vec![("background-color", c("bg-300"))]);
     // The lesson panel's current step.

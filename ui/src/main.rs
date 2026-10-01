@@ -666,6 +666,9 @@ fn main() -> Result<(), ApplicationError> {
                     })
                     .width(Stretch(1.0))
                     .height(lower_panel_height.map(|h| Pixels(*h)));
+
+                    // The course map, over the arrangement while it's open.
+                    lessons::map::course_map(cx, lesson_bar_props);
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
