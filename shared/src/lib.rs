@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 pub mod analysis;
 pub mod arrangement;
 pub mod demo;
+pub mod diag;
 pub mod drums;
 pub mod eq;
 pub mod guitar;
@@ -46,6 +47,8 @@ pub struct Params {
     loop_enabled: AtomicBool,
     loop_start_sample: AtomicU64,
     loop_end_sample: AtomicU64,
+    /// The audio thread's health, for the log (see `diag`).
+    diag: diag::AudioDiag,
 }
 
 /// Default tempo, matching `shared::arrangement::seed::empty_arrangement`'s
@@ -63,7 +66,12 @@ impl Params {
             loop_enabled: AtomicBool::new(false),
             loop_start_sample: AtomicU64::new(0),
             loop_end_sample: AtomicU64::new(0),
+            diag: diag::AudioDiag::default(),
         }
+    }
+
+    pub fn diag(&self) -> &diag::AudioDiag {
+        &self.diag
     }
 
     pub fn set_playing(&self, value: bool) {

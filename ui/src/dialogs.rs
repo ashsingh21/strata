@@ -70,7 +70,7 @@ mod linux {
             Ok(out) if String::from_utf8_lossy(&out.stdout).trim() == "Don't Save" => DiscardChoice::DontSave,
             Ok(_) => DiscardChoice::Cancel,
             Err(e) => {
-                eprintln!("project: couldn't show the unsaved-changes dialog ({e}); continuing without saving");
+                tracing::warn!("project: couldn't show the unsaved-changes dialog ({e}); continuing without saving");
                 DiscardChoice::DontSave
             }
         }

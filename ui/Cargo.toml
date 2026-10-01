@@ -12,6 +12,9 @@ vizia = "0.4.0"
 rtrb = "0.4.0"
 hound = "3.5.1"
 serde_json = "1"
+tracing = "0.1"
+# Log lines with a target and level, filtered by RUST_LOG (see logging.rs).
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "registry"] }
 # Timestamps in the log and crash reports (see logging.rs).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 

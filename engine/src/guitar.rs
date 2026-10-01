@@ -677,17 +677,22 @@ impl GuitarUnit {
 /// allocates.
 pub struct GuitarPool {
     free: [Vec<Box<GuitarUnit>>; 6],
+    /// Times an effect was wanted and none of its kind was free.
+    pub dry: u32,
 }
 
 impl GuitarPool {
     pub fn new(sample_rate: f32) -> Self {
         let make = |kind: GuitarKind| (0..POOL_PER_KIND).map(|_| Box::new(GuitarUnit::new(kind, sample_rate))).collect::<Vec<_>>();
-        Self { free: GuitarKind::ALL.map(make) }
+        Self { free: GuitarKind::ALL.map(make), dry: 0 }
     }
 
     /// A silent unit of `kind`, or `None` when they're all in use.
     pub fn take(&mut self, kind: GuitarKind) -> Option<Box<GuitarUnit>> {
-        let mut unit = self.free[kind.rank() as usize].pop()?;
+        let Some(mut unit) = self.free[kind.rank() as usize].pop() else {
+            self.dry = self.dry.saturating_add(1);
+            return None;
+        };
         unit.reset();
         Some(unit)
     }
@@ -927,5 +932,63 @@ mod tests {
         again.set(&fx);
         let out: Vec<f32> = (0..24_000).map(|_| again.process(0.0, 0.0).0).collect();
         assert!(rms(&out) < 1.0e-6);
+    }
+}
+
+#[cfg(test)]
+mod fuzz {
+    use super::*;
+
+    const SR: f32 = 48_000.0;
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> f32 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 >> 40) as f32 / (1u64 << 24) as f32
+        }
+    }
+
+    #[test]
+    fn knob_jumps_never_make_a_unit_non_finite_or_runaway() {
+        let mut rng = Rng(0x9E3779B97F4A7C15);
+        for kind in GuitarKind::ALL {
+            let mut unit = GuitarUnit::new(kind, SR);
+            let mut fx = GuitarFx::new(kind);
+            let mut worst = 0.0f32;
+            for block in 0..4000 {
+                if block % 3 == 0 {
+                    for i in 0..kind.specs().len() {
+                        let r = rng.next();
+                        let n = if r < 0.25 { 0.0 } else if r > 0.75 { 1.0 } else { rng.next() };
+                        fx.set_norm(i, n);
+                    }
+                    fx.bypassed = rng.next() < 0.1;
+                }
+                unit.set(&fx);
+                let loud = rng.next() < 0.5;
+                for s in 0..128 {
+                    let x = (if loud { 1.0 } else { 0.1 }) * (rng.next() * 2.0 - 1.0) + 0.5 * (s as f32 * 0.1).sin();
+                    let (l, r) = unit.process(x, x);
+                    assert!(l.is_finite() && r.is_finite(), "{} went non-finite at block {block}", kind.name());
+                    worst = worst.max(l.abs()).max(r.abs());
+                }
+            }
+            assert!(worst < 40.0, "{} peaked at {worst}", kind.name());
+            // After the knobs settle, it must still pass sound.
+            let fx = GuitarFx::new(kind);
+            unit.set(&fx);
+            let mut energy = 0.0;
+            for i in 0..96_000 {
+                let x = 0.3 * (std::f32::consts::TAU * 220.0 * i as f32 / SR).sin();
+                let (l, _) = unit.process(x, x);
+                if i > 48_000 {
+                    energy += l * l;
+                }
+            }
+            assert!(energy > 1.0e-3, "{} is silent after the knobs settle", kind.name());
+        }
     }
 }

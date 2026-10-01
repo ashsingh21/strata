@@ -1,5 +1,6 @@
 mod analyzer;
 mod app;
+mod audio_watch;
 mod browser;
 mod preview_player;
 mod bpm_field;
@@ -85,7 +86,7 @@ fn main() -> Result<(), ApplicationError> {
         Ok(handle) => handle,
         Err(e) => {
             let message = format!("Shor couldn't start audio: {}.\n\nCheck that an output device is connected and not held exclusively by another program.", e.to_string().trim_end_matches('.'));
-            eprintln!("{message}");
+            tracing::error!("{message}");
             dialogs::error(&message);
             std::process::exit(1);
         }
@@ -331,10 +332,19 @@ fn main() -> Result<(), ApplicationError> {
         let loop_params = params.clone();
         let midi_scheduler = timeline::scheduler::MidiScheduler::new();
         let recording_coordinator = RecordingCoordinator::new();
+        let started = Instant::now();
+        let audio_watch = std::cell::RefCell::new(audio_watch::AudioWatch::new(loop_params.clone()));
         let render_timer = cx.add_timer(Duration::from_millis(16), None, move |cx, action| {
             if let TimerAction::Tick(_) = action {
                 let now = Instant::now();
-                let dt = (now - last_tick.get()).as_secs_f32().min(0.25);
+                let since_last = (now - last_tick.get()).as_secs_f32();
+                // The timer asks for 16 ms: far longer means the UI thread
+                // was busy (or starved), which is when buttons feel dead.
+                if since_last > 0.15 && started.elapsed().as_secs() > 5 {
+                    tracing::warn!(target: "ui", "the UI thread stalled for {:.0} ms", since_last * 1000.0);
+                }
+                audio_watch.borrow_mut().tick();
+                let dt = since_last.min(0.25);
                 last_tick.set(now);
 
                 cx.emit(AppEvent::Tick);

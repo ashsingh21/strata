@@ -597,7 +597,7 @@ impl TimelineState {
                 let assets_dir = crate::timeline::assets_dir();
                 let path = assets_dir.join(&*source);
                 let Some(duration_seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
-                    eprintln!("timeline: failed to read {}", path.display());
+                    tracing::warn!("timeline: failed to read {}", path.display());
                     return;
                 };
                 let name = std::path::Path::new(&*source)
@@ -1449,7 +1449,7 @@ impl Model for TimelineState {
                     }
                     let path = assets_dir.join(hit.sample);
                     let Some(seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
-                        eprintln!("timeline: failed to read {}", path.display());
+                        tracing::warn!("timeline: failed to read {}", path.display());
                         continue;
                     };
                     lengths.insert(hit.sample, self.arrangement.get().tempo_map.seconds_to_ticks(seconds).max(1));
@@ -1585,7 +1585,7 @@ impl Model for TimelineState {
                 let assets_dir = crate::timeline::assets_dir();
                 let path = assets_dir.join(pad.sample);
                 let Some(duration_seconds) = crate::timeline::peaks_loader::wav_duration_seconds(&path) else {
-                    eprintln!("timeline: failed to read {}", path.display());
+                    tracing::warn!("timeline: failed to read {}", path.display());
                     return;
                 };
                 let playhead = self.playhead_ticks.get();

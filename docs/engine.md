@@ -157,5 +157,6 @@ flowchart LR
   back if it ever grows past four blocks. It isn't measured here.
 - If the input device runs at a different rate than the output, monitoring
   is switched off (and logged) rather than resampled.
-- Through speakers, a microphone will feed back: Monitor starts off, and
-  "+ Guitar" turns it on for a direct-in guitar.
+- Through speakers, a microphone will feed back (a howl that Stop can't
+  silence, since it is live input, not playback), so Monitor is only ever
+  turned on by the Monitor button - not by "+ Guitar".

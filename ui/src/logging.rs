@@ -6,6 +6,10 @@
 //! - `Logs/shor.log` in the user's data folder (see `paths`): everything
 //!   the app prints (`eprintln!` all over the code), timestamped, still
 //!   shown in a terminal too. Rotated to `shor.old.log` past 1 MB.
+//! - Lines come from `tracing` (level, then a target: `audio` for the
+//!   device and the callback's health, `action` for what the user did,
+//!   `ui` for the rest). Warnings and up, plus those three targets at
+//!   debug, are kept; `RUST_LOG=ui=trace,audio=trace` changes that.
 //! - `Logs/crash-<time>.txt` if the app panics: the message, where, the
 //!   backtrace, the version and the OS - and the next launch says so.
 
@@ -39,7 +43,37 @@ pub fn init() {
         #[cfg(unix)]
         tee_stderr(file);
     }
+    install_tracing();
     install_crash_hook();
+    tracing::info!(
+        "{} - {} logical cores, {} build",
+        about(),
+        std::thread::available_parallelism().map_or(0, |n| n.get()),
+        if cfg!(debug_assertions) { "debug" } else { "release" }
+    );
+}
+
+/// What gets logged: this app's own targets at debug, everything else
+/// (the UI toolkit, the audio library) only when it is a warning.
+fn install_tracing() {
+    use std::str::FromStr;
+    use tracing::Level;
+    use tracing_subscriber::filter::Targets;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::Layer;
+
+    let default = Targets::new()
+        .with_default(Level::WARN)
+        .with_targets([("ui", Level::DEBUG), ("engine", Level::DEBUG), ("shared", Level::INFO), ("audio", Level::DEBUG), ("action", Level::DEBUG)]);
+    let filter = std::env::var("RUST_LOG").ok().and_then(|spec| Targets::from_str(&spec).ok()).unwrap_or(default);
+    // No timestamp here: the stderr copy above adds one.
+    let layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .without_time()
+        .with_filter(filter);
+    let _ = tracing_subscriber::registry().with(layer).try_init();
 }
 
 /// Everything written to stderr goes to the terminal as before *and* to

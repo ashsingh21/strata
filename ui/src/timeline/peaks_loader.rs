@@ -35,7 +35,7 @@ pub fn spawn_peak_loaders(cx: &Context, assets_dir: &Path, arrangement: &Arrange
             if let Some(pyramid) = load_and_build(&path) {
                 let _ = proxy.emit(TimelineEvent::PeaksLoaded { source, peaks: Arc::new(pyramid) });
             } else {
-                eprintln!("timeline: failed to load {}", path.display());
+                tracing::warn!("timeline: failed to load {}", path.display());
                 let _ = proxy.emit(TimelineEvent::SourceMissing(source));
             }
         });
@@ -54,7 +54,7 @@ pub fn spawn_peak_loader_for_source(cx: &mut EventContext, assets_dir: &Path, so
         if let Some(pyramid) = load_and_build(&path) {
             let _ = proxy.emit(TimelineEvent::PeaksLoaded { source, peaks: Arc::new(pyramid) });
         } else {
-            eprintln!("timeline: failed to load {}", path.display());
+            tracing::warn!("timeline: failed to load {}", path.display());
             let _ = proxy.emit(TimelineEvent::SourceMissing(source));
         }
     });
@@ -161,7 +161,7 @@ pub fn spawn_audio_decoder_worker(
                     .at_rate(sample_rate);
                     let _ = decode_tx.push(decoded);
                 }
-                None => eprintln!("playback: failed to decode {}", path.display()),
+                None => tracing::warn!("playback: failed to decode {}", path.display()),
             }
         }
     });

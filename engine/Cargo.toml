@@ -9,3 +9,4 @@ shared = { path = "../shared" }
 cpal = "0.18.2"
 rtrb = "0.4.0"
 hound = "3.5.1"
+tracing = "0.1"

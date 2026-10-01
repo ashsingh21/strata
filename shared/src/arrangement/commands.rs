@@ -517,12 +517,25 @@ pub struct CommandStack {
     redo: Vec<Command>,
 }
 
+/// One log line per edit, so a bad session can be read back. A drag makes
+/// a command per frame, so repeats of one kind are summarised.
+fn log_edit(what: &str, command: &Command) {
+    if !tracing::enabled!(target: "action", tracing::Level::DEBUG) {
+        return;
+    }
+    let name = crate::diag::variant_name(command);
+    if let Some(skipped) = crate::diag::throttle(&format!("{what} {name}"), std::time::Duration::from_millis(300)) {
+        tracing::debug!(target: "action", skipped, "{what}: {}", crate::diag::Brief(command, 160));
+    }
+}
+
 impl CommandStack {
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn do_command(&mut self, command: Command, arr: &mut Arrangement) {
+        log_edit("edit", &command);
         let inverse = command.apply(arr);
         self.undo.push(inverse);
         self.redo.clear();
@@ -531,6 +544,7 @@ impl CommandStack {
     pub fn undo(&mut self, arr: &mut Arrangement) -> bool {
         match self.undo.pop() {
             Some(command) => {
+                log_edit("undo", &command);
                 let inverse = command.apply(arr);
                 self.redo.push(inverse);
                 true
@@ -542,6 +556,7 @@ impl CommandStack {
     pub fn redo(&mut self, arr: &mut Arrangement) -> bool {
         match self.redo.pop() {
             Some(command) => {
+                log_edit("redo", &command);
                 let inverse = command.apply(arr);
                 self.undo.push(inverse);
                 true

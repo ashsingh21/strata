@@ -97,15 +97,20 @@ impl Model for RecorderModel {
             RecorderModelEvent::SetPreview(preview) => self.preview.set(*preview),
             RecorderModelEvent::SetInputLevel(level) => self.input_level.set(*level),
             RecorderModelEvent::SetInputGain(pos) => {
+                if let Some(skipped) = shared::diag::throttle("input-gain", std::time::Duration::from_millis(300)) {
+                    tracing::debug!(target: "action", skipped, "input gain: {:+.1} dB", input_gain_pos_to_db(*pos));
+                }
                 self.input_gain_pos.set(*pos);
                 self.record_params.set_input_gain_db(input_gain_pos_to_db(*pos));
             }
             RecorderModelEvent::SetMonitoring(on) => {
+                tracing::debug!(target: "action", "monitor: {}", if *on { "on" } else { "off" });
                 self.monitoring.set(*on);
                 self.record_params.set_monitoring(*on);
             }
             RecorderModelEvent::SetLivePeaks(peaks) => self.live_peaks.set(peaks.clone()),
             RecorderModelEvent::SetInputDevice(device) => {
+                tracing::debug!(target: "action", "input device: {}", device.as_deref().unwrap_or("system default"));
                 crate::settings::save_input_device(device.as_deref());
                 self.selected_input_device.set(device.clone());
                 cx.emit(crate::app::AppEvent::SwitchInputDevice(device.clone()));
@@ -222,6 +227,7 @@ impl RecordingCoordinator {
                 self.take_counter.set(take + 1);
                 let source: Arc<str> = format!("rec_{track}_{take}.wav").into();
                 let path = crate::paths::recordings_dir().join(&*source);
+                tracing::debug!(target: "action", "recording: start");
                 let _ = command_tx.borrow_mut().push(RecordCommand::Start { path });
                 self.active.set(Some(ActiveRecording { track, start: tick, last_tick: tick, source: take }));
                 self.live_peaks.borrow_mut().clear();
@@ -237,6 +243,7 @@ impl RecordingCoordinator {
                 })));
             }
             (Some(rec), false) => {
+                tracing::debug!(target: "action", "recording: stop");
                 let _ = command_tx.borrow_mut().push(RecordCommand::Stop);
                 self.active.set(None);
                 cx.emit(RecorderModelEvent::SetPreview(None));

@@ -330,7 +330,7 @@ impl ProjectModel {
             let project = project(&self.arrangement.get(), &self.patches.get());
             match save(&project, &recovery_path()) {
                 Ok(()) => self.last_recovery = now,
-                Err(e) => eprintln!("project: failed to write the recovery copy: {e}"),
+                Err(e) => tracing::warn!("project: failed to write the recovery copy: {e}"),
             }
         }
     }
@@ -351,7 +351,7 @@ impl ProjectModel {
                     self.my_tracks.set(my_tracks());
                 }
             }
-            Err(e) => eprintln!("project: failed to save {}: {e}", path.display()),
+            Err(e) => tracing::warn!("project: failed to save {}: {e}", path.display()),
         }
     }
 
@@ -366,7 +366,7 @@ impl ProjectModel {
                 self.current_path.set(Some(path.clone()));
                 self.display_name.set(name_from_path(Some(&path)));
             }
-            Err(e) => eprintln!("project: failed to load {}: {e}", path.display()),
+            Err(e) => tracing::warn!("project: failed to load {}: {e}", path.display()),
         }
     }
 
@@ -431,7 +431,7 @@ impl ProjectModel {
                 true
             }
             Err(e) => {
-                eprintln!("project: failed to save to {}: {e}", path.display());
+                tracing::warn!("project: failed to save to {}: {e}", path.display());
                 false
             }
         }
@@ -575,7 +575,7 @@ impl Model for ProjectModel {
                         self.export_status.set(format!("Exported {file}"));
                     }
                     Err(e) => {
-                        eprintln!("export: {e}");
+                        tracing::warn!("export: {e}");
                         self.export_status.set("Export failed".to_string());
                     }
                 }
@@ -622,7 +622,7 @@ impl Model for ProjectModel {
                         // it's saved somewhere.
                         self.saved.set(String::new());
                     }
-                    Err(e) => eprintln!("project: failed to recover: {e}"),
+                    Err(e) => tracing::warn!("project: failed to recover: {e}"),
                 }
             }
             ProjectEvent::LessonFinished(id) => {
@@ -659,7 +659,7 @@ impl Model for ProjectModel {
                         let new_path = old_path.with_file_name(format!("{name}.json"));
                         if new_path != old_path {
                             if let Err(e) = std::fs::rename(&old_path, &new_path) {
-                                eprintln!("project: failed to rename {} to {}: {e}", old_path.display(), new_path.display());
+                                tracing::warn!("project: failed to rename {} to {}: {e}", old_path.display(), new_path.display());
                                 return;
                             }
                         }

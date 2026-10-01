@@ -190,10 +190,12 @@ impl Model for AppData {
             }
             AppEvent::TogglePlay => {
                 let now_playing = !self.playing.get();
+                tracing::debug!(target: "action", "transport: {}", if now_playing { "play" } else { "pause" });
                 self.playing.set(now_playing);
                 self.params.set_playing(now_playing);
             }
             AppEvent::Stop => {
+                tracing::debug!(target: "action", "transport: stop");
                 self.playing.set(false);
                 self.params.request_stop();
                 self.position.set(Position::default());
@@ -204,6 +206,7 @@ impl Model for AppData {
                 cx.emit(crate::timeline::state::TimelineEvent::ScrubPlayhead(0));
             }
             AppEvent::Rewind => {
+                tracing::debug!(target: "action", "transport: rewind");
                 self.params.request_stop();
                 self.position.set(Position::default());
                 self.sample_counter.set(0);
@@ -245,11 +248,11 @@ impl Model for AppData {
             AppEvent::Tick => self.tick(cx),
             AppEvent::SwitchInputDevice(device) => {
                 if self.record_armed.get() && self.playing.get() {
-                    eprintln!("input: not switching devices mid-take");
+                    tracing::warn!("input: not switching devices mid-take");
                     return;
                 }
                 if !self.engine.switch_input(device.as_deref()) {
-                    eprintln!("input: couldn't open {}", device.as_deref().unwrap_or("the default input"));
+                    tracing::warn!("input: couldn't open {}", device.as_deref().unwrap_or("the default input"));
                 }
             }
         });

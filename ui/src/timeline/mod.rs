@@ -143,11 +143,8 @@ pub fn timeline_view(
                     use crate::browser::icon::IconKind;
                     HStack::new(cx, move |cx| {
                         add_track_button(cx, theme, IconKind::Effect, "Guitar")
-                            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "An armed audio track with a gate, amp and cabinet. Plug in, press Monitor, and play (headphones recommended)"); }).arrow(false))
-                            .on_press(|cx| {
-                                cx.emit(TimelineEvent::AddGuitarTrack);
-                                cx.emit(crate::recorder::RecorderModelEvent::SetMonitoring(true));
-                            });
+                            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "An armed audio track with a gate, amp and cabinet. Plug in and press Monitor to hear yourself (headphones: a mic near speakers will howl)"); }).arrow(false))
+                            .on_press(|cx| cx.emit(TimelineEvent::AddGuitarTrack));
                     })
                     .class("synth-seg")
                     .width(Auto)

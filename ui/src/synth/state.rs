@@ -407,6 +407,9 @@ impl Model for SynthModel {
             SynthEvent::SetOsc2Waveform(w) => self.state.update(|s| s.osc2.waveform = *w),
             SynthEvent::ToggleOsc2Sync => self.state.update(|s| s.osc2.sync = !s.osc2.sync),
             SynthEvent::Touched(param) => {
+                if let Some(skipped) = shared::diag::throttle("carve-knob", std::time::Duration::from_millis(300)) {
+                    tracing::debug!(target: "action", skipped, "carve knob: {param:?}");
+                }
                 if let Some(track) = self.selected_track.get() {
                     crate::context_menu::touched(track, shared::arrangement::AutomationTarget::Synth(*param));
                 }
@@ -477,7 +480,7 @@ impl Model for SynthModel {
             SynthEvent::LoadUserPreset(name) => match crate::user_presets::load(name) {
                 Some(preset) => self.load_preset(preset),
                 None => {
-                    eprintln!("presets: couldn't read the saved preset \u{201c}{name}\u{201d}");
+                    tracing::warn!("presets: couldn't read the saved preset \u{201c}{name}\u{201d}");
                     self.user_presets.set(crate::user_presets::list());
                 }
             },
@@ -488,7 +491,7 @@ impl Model for SynthModel {
                             self.state.update(|s| s.name = saved);
                             self.user_presets.set(crate::user_presets::list());
                         }
-                        Err(e) => eprintln!("presets: couldn't save \u{201c}{name}\u{201d}: {e}"),
+                        Err(e) => tracing::warn!("presets: couldn't save \u{201c}{name}\u{201d}: {e}"),
                     }
                 }
             }

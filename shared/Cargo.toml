@@ -8,3 +8,4 @@ rust-version.workspace = true
 rtrb = "0.4.0"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
+tracing = "0.1"

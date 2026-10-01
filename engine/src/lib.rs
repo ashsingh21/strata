@@ -234,6 +234,14 @@ pub fn start(
     let sample_rate = config.sample_rate();
     let sample_format = config.sample_format();
     let stream_config: StreamConfig = config.into();
+    tracing::info!(
+        target: "audio",
+        "output: {} on {:?} - {sample_rate} Hz, {} channel(s), {sample_format:?}, buffer {:?}",
+        input::device_label(&device),
+        host.id(),
+        stream_config.channels,
+        stream_config.buffer_size
+    );
 
     let (monitor_tx, monitor_rx) = rtrb::RingBuffer::<f32>::new(MONITOR_CAPACITY);
     let stream = match sample_format {
@@ -326,13 +334,13 @@ fn spawn_writer_thread(
                         };
                         match hound::WavWriter::create(&path, spec) {
                             Ok(w) => writer = Some(w),
-                            Err(e) => eprintln!("recorder: failed to create {}: {e}", path.display()),
+                            Err(e) => tracing::error!(target: "audio", "recorder: failed to create {}: {e}", path.display()),
                         }
                     }
                     RecordCommand::Stop => {
                         if let Some(w) = writer.take() {
                             if let Err(e) = w.finalize() {
-                                eprintln!("recorder: failed to finalize WAV: {e}");
+                                tracing::error!(target: "audio", "recorder: failed to finalize WAV: {e}");
                             }
                         }
                     }
@@ -419,12 +427,18 @@ where
     let mut current_plan = PlaybackPlan::default();
     let mut current_sources: Vec<DecodedSource> = Vec::with_capacity(DECODED_SOURCE_CAPACITY);
 
-    let err_fn = |err: CpalError| eprintln!("audio stream error: {err}");
+    // When the previous block started and how long it lasts: a gap well
+    // beyond that is a callback that ran late.
+    let mut last_block: Option<(std::time::Instant, f32)> = None;
+    let err_fn = |err: CpalError| tracing::error!(target: "audio", "output stream error: {err}");
 
     let stream = device
         .build_output_stream(
             config,
             move |data: &mut [T], _info: &OutputCallbackInfo| {
+                let block_start = std::time::Instant::now();
+                let gap_ratio = last_block.map_or(1.0, |(at, duration)| (block_start - at).as_secs_f32() / duration);
+                last_block = Some((block_start, (data.len() / channels) as f32 / sample_rate));
                 dsp::flush_denormals();
                 // Latest-wins: only the most recent params snapshot matters.
                 while let Ok(next) = synth_params.pop() {
@@ -484,6 +498,7 @@ where
                         None => monitor.chain.release(&mut guitar_pool),
                     }
                     master_effects.set_state(current_plan.master_effect_count, &current_plan.master_effects, &mut guitar_pool);
+                    params.diag().set_pool_dry(guitar_pool.dry);
                 }
                 // Latest-wins: a new preview replaces the one playing (an
                 // empty one just stops it). Finished buffers go back to be
@@ -536,6 +551,7 @@ where
                     &mut preview_now,
                     f32::from_bits(preview.gain.load(std::sync::atomic::Ordering::Relaxed)),
                     &mut preview.analyzer_tx,
+                    gap_ratio,
                 );
                 if preview_now.as_ref().is_some_and(|(buf, pos)| !buf.looping && *pos >= buf.audio.len()) {
                     if let Some((done, _)) = preview_now.take() {
@@ -548,6 +564,29 @@ where
         )?;
 
     Ok(stream)
+}
+
+/// Samples that came out as NaN or infinity this block: one would poison
+/// every filter after it, so it is replaced by silence, counted, and the
+/// UI says where it came from.
+#[derive(Default)]
+struct BadSamples {
+    first_stage: u32,
+    count: u32,
+}
+
+impl BadSamples {
+    #[inline]
+    fn scrub(&mut self, l: &mut f32, r: &mut f32, stage: u32) {
+        if !(l.is_finite() && r.is_finite()) {
+            *l = 0.0;
+            *r = 0.0;
+            if self.count == 0 {
+                self.first_stage = stage;
+            }
+            self.count += 1;
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -580,6 +619,7 @@ fn write_block<T>(
     preview: &mut Option<(shared::playback::PreviewBuffer, usize)>,
     preview_gain: f32,
     analyzer: &mut rtrb::Producer<f32>,
+    gap_ratio: f32,
 ) where
     T: Sample + FromSample<f32>,
 {
@@ -601,6 +641,7 @@ fn write_block<T>(
     let mut synth_peaks = [(0.0f32, 0.0f32); MAX_INSTRUMENTS];
     let mut bus_peaks = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut frames = 0u64;
+    let mut bad = BadSamples::default();
     let live = monitoring && plan.monitor.is_some();
     monitor.begin_block(live, output.len() / channels.max(1));
 
@@ -609,11 +650,13 @@ fn write_block<T>(
         let mut synth_l = 0.0f32;
         let mut synth_r = 0.0f32;
         for (i, engine) in synth_engines.iter_mut().enumerate() {
-            let (raw_l, raw_r) = if slot_is_drums[i] { drum_engines[i].process(sources) } else { engine.process() };
+            let (mut raw_l, mut raw_r) = if slot_is_drums[i] { drum_engines[i].process(sources) } else { engine.process() };
+            bad.scrub(&mut raw_l, &mut raw_r, shared::diag::STAGE_INSTRUMENT + i as u32);
             // Chain order: instrument -> Compressor insert -> track fader,
             // same as a real device chain (the fader is the last thing
             // before the master sum, not part of the chain itself).
-            let (fx_l, fx_r) = slot_effects[i].process(raw_l, raw_r);
+            let (mut fx_l, mut fx_r) = slot_effects[i].process(raw_l, raw_r);
+            bad.scrub(&mut fx_l, &mut fx_r, shared::diag::STAGE_SLOT_EFFECTS + i as u32);
             let gain = slot_gain_smooth[i].next(slot_gain[i]);
             let (l, r) = (fx_l * gain, fx_r * gain);
             synth_l += l;
@@ -640,15 +683,18 @@ fn write_block<T>(
         }
         *click_env *= click_decay_coeff;
 
-        let (clip_l, clip_r) = if playing {
+        let (mut clip_l, mut clip_r) = if playing {
             mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth, clip_fade_samples(sample_rate), &mut bus_peaks)
         } else {
             (0.0, 0.0)
         };
+        bad.scrub(&mut clip_l, &mut clip_r, shared::diag::STAGE_AUDIO_CLIPS);
         let (mon_l, mon_r) = match plan.monitor.as_ref().filter(|_| live) {
             Some(m) => {
-                let input = monitor.next_sample();
-                let (fx_l, fx_r) = monitor.chain.process(input, input);
+                let mut input = monitor.next_sample();
+                bad.scrub(&mut input, &mut 0.0, shared::diag::STAGE_MONITOR_INPUT);
+                let (mut fx_l, mut fx_r) = monitor.chain.process(input, input);
+                bad.scrub(&mut fx_l, &mut fx_r, shared::diag::STAGE_MONITOR_CHAIN);
                 let gain = monitor.gain.next(db_to_gain(m.gain_db));
                 let (l, r) = (fx_l * gain, fx_r * gain);
                 let peak = &mut bus_peaks[m.bus_slot as usize];
@@ -658,10 +704,14 @@ fn write_block<T>(
             }
             None => (0.0, 0.0),
         };
-        let (out_l, out_r) = master_effects.process(synth_l + click + clip_l + mon_l, synth_r + click + clip_r + mon_r);
+        let (mut sum_l, mut sum_r) = (synth_l + click + clip_l + mon_l, synth_r + click + clip_r + mon_r);
+        bad.scrub(&mut sum_l, &mut sum_r, shared::diag::STAGE_MASTER_INPUT);
+        let (mut out_l, mut out_r) = master_effects.process(sum_l, sum_r);
+        bad.scrub(&mut out_l, &mut out_r, shared::diag::STAGE_MASTER_EFFECTS);
         // The master's last stage: nothing reaches the device (or an
         // export) over -0.5 dBFS - a hot mix used to hard-clip there.
         let (mut out_l, mut out_r) = master_limiter.process(out_l, out_r);
+        bad.scrub(&mut out_l, &mut out_r, shared::diag::STAGE_LIMITER);
         // A lesson preview: already mixed and mastered, added last.
         if let Some((buf, pos)) = preview.as_mut() {
             if buf.looping && *pos + 1 >= buf.audio.len() {
@@ -707,6 +757,10 @@ fn write_block<T>(
     let position = position_from_samples(*sample_counter, sample_rate, bpm);
     let budget = frames as f32 / sample_rate;
     let cpu_load = if budget > 0.0 { started.elapsed().as_secs_f32() / budget } else { 0.0 };
+    params.diag().block(frames as u32, gap_ratio, cpu_load);
+    if bad.count > 0 {
+        params.diag().non_finite(bad.first_stage, bad.count);
+    }
     // Best-effort: if the UI hasn't drained recently the ring buffer may be
     // full. Dropping a telemetry frame is harmless; never block.
     let _ = telemetry.push(Telemetry {

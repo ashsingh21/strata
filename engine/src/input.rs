@@ -110,13 +110,13 @@ pub fn start(
         Some(pair) => pair,
         None => {
             let device = host.default_input_device().or_else(|| {
-                eprintln!("input: no default input device; recording disabled");
+                tracing::warn!(target: "audio", "input: no default input device; recording disabled");
                 None
             })?;
             let config = match build_input_config(&device, desired_sample_rate) {
                 Some(config) => config,
                 None => {
-                    eprintln!("input: no usable input config; recording disabled");
+                    tracing::warn!(target: "audio", "input: no usable input config; recording disabled");
                     return None;
                 }
             };
@@ -131,10 +131,17 @@ pub fn start(
     // be opened at it would play back at the wrong pitch, so it isn't fed.
     let can_monitor = sample_rate == desired_sample_rate;
     if !can_monitor {
-        eprintln!("input: opened at {sample_rate} Hz, output runs at {desired_sample_rate} Hz; live monitoring unavailable");
+        tracing::warn!(target: "audio", "input: opened at {sample_rate} Hz, output runs at {desired_sample_rate} Hz; live monitoring unavailable");
     }
     let tx = InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, can_monitor };
 
+    tracing::info!(
+        target: "audio",
+        "input: {} - {sample_rate} Hz, {channels} channel(s), {sample_format:?}, buffer {:?}{}",
+        device_label(&device),
+        stream_config.buffer_size,
+        if can_monitor { "" } else { " (can't be monitored)" }
+    );
     let stream = match sample_format {
         SampleFormat::F32 => {
             build_input_stream::<f32>(&device, stream_config, channels, tx, record_params)
@@ -149,7 +156,7 @@ pub fn start(
             build_input_stream::<u8>(&device, stream_config, channels, tx, record_params)
         }
         other => {
-            eprintln!("input: unsupported sample format {other}; recording disabled");
+            tracing::warn!(target: "audio", "input: unsupported sample format {other}; recording disabled");
             return None;
         }
     };
@@ -157,13 +164,13 @@ pub fn start(
     let stream = match stream {
         Ok(stream) => stream,
         Err(e) => {
-            eprintln!("input: failed to build stream: {e}");
+            tracing::error!(target: "audio", "input: failed to build stream: {e}");
             return None;
         }
     };
 
     if let Err(e) = stream.play() {
-        eprintln!("input: failed to start stream: {e}");
+        tracing::error!(target: "audio", "input: failed to start stream: {e}");
         return None;
     }
 
@@ -232,7 +239,7 @@ where
     f32: FromSample<T>,
 {
     let channels = channels.max(1);
-    let err_fn = |err: CpalError| eprintln!("input stream error: {err}");
+    let err_fn = |err: CpalError| tracing::error!(target: "audio", "input stream error: {err}");
     let InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, can_monitor } = tx;
 
     device.build_input_stream(
@@ -270,4 +277,10 @@ where
         err_fn,
         None,
     )
+}
+
+/// A device's name for the log.
+pub fn device_label(device: &cpal::Device) -> String {
+    use cpal::traits::DeviceTrait;
+    device.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "unnamed device".into())
 }
