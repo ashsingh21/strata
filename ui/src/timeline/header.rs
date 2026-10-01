@@ -232,7 +232,7 @@ pub fn track_header<'a>(
             .map(fader_pos_to_gain_db)
             .unwrap_or(committed)
     });
-    let gain_text = Memo::new(move |_| format!("{:+.1} dB", gain_preview.get().unwrap_or(shown_gain_db.get())));
+    let gain_text = Memo::new(move |_| format!("{:+.1} dB", gain_preview.get().unwrap_or(shown_gain_db.get())).replace('-', "\u{2212}"));
     let fader_pos = shown_gain_db.map(|db| gain_db_to_fader_pos(*db));
     let height = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.height).unwrap_or(DEFAULT_TRACK_HEIGHT)

@@ -68,28 +68,42 @@ pub fn effect_panel(
     });
     let enabled = arrangement.map(move |arr| arr.fx(track).and_then(|fx| fx.node(node)).map(|n| n.enabled).unwrap_or(true));
 
-    Button::new(cx, |cx| Label::new(cx, "Enabled"))
-        .class("btn")
-        .class("sm")
-        .toggle_class("is-on", enabled)
-        .on_press(move |cx| cx.emit(TimelineEvent::ToggleEffectEnabled(track, node)));
-
+    // One device: its name and on/off in a header, its controls under it
+    // (the toggle used to float above the frame, unlabelled by any name).
     let is_eq = matches!(initial, Effect::Eq(_));
-    HStack::new(cx, move |cx| {
-        if is_eq {
-            eq_controls(cx, theme, arrangement, stored, shown, track, node, initial);
-        } else {
-            for &param in EffectParam::for_effect(initial) {
-                param_knob(cx, theme, arrangement, stored, shown, track, node, param, initial);
+    VStack::new(cx, move |cx| {
+        HStack::new(cx, move |cx| {
+            Label::new(cx, initial.name()).class("heading");
+            Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+            Button::new(cx, |cx| Label::new(cx, "Enabled"))
+                .class("btn")
+                .class("sm")
+                .toggle_class("is-on", enabled)
+                .on_press(move |cx| cx.emit(TimelineEvent::ToggleEffectEnabled(track, node)));
+        })
+        .alignment(Alignment::Left)
+        .gap(Pixels(tokens::SPACE_2))
+        .width(Stretch(1.0))
+        .height(Auto);
+        HStack::new(cx, move |cx| {
+            if is_eq {
+                eq_controls(cx, theme, arrangement, stored, shown, track, node, initial);
+            } else {
+                for &param in EffectParam::for_effect(initial) {
+                    param_knob(cx, theme, arrangement, stored, shown, track, node, param, initial);
+                }
             }
-        }
+        })
+        .gap(Pixels(tokens::SPACE_4))
+        .alignment(Alignment::Left)
+        .width(Stretch(1.0))
+        .height(Pixels(if is_eq { 118.0 } else { 64.0 }));
     })
     .class("device")
     .gap(Pixels(tokens::SPACE_3))
-    .alignment(Alignment::Center)
     .padding(Pixels(tokens::SPACE_3))
     .width(Stretch(1.0))
-    .height(Pixels(if is_eq { 124.0 } else { 96.0 }));
+    .height(Auto);
 }
 
 /// The EQ: its curve (drag a band's dot), then each band's knobs under a
@@ -193,7 +207,8 @@ fn param_knob(
     };
     let default_pos = param.norm(&default_effect).unwrap_or(0.0);
     let pos = shown.map(move |e| param.norm(e).unwrap_or(0.0));
-    let text = shown.map(move |e| param.format(e));
+    // A true minus, as everywhere else values are shown.
+    let text = shown.map(move |e| param.format(e).replace('-', "\u{2212}"));
     // Automated: follows its lane and is read-only (a drag would only be
     // overridden by the lane).
     let target = AutomationTarget::Effect { node, param };

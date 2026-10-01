@@ -343,7 +343,7 @@ pub fn fx_board(cx: &mut Context, p: FxBoardProps) {
                                 Effect::Compressor(state) => {
                                     let state_signal = Memo::new(move |_| state);
                                     crate::compressor_curve::CompressorCurve::new(cx, state_signal, p.theme).class("device").width(Stretch(1.0)).height(Stretch(1.0));
-                                    Label::new(cx, format!("{:.0}:1 \u{b7} {:+.1} dB", state.ratio, state.threshold_db)).class("meta");
+                                    Label::new(cx, format!("{:.0}:1 \u{b7} {:+.1} dB", state.ratio, state.threshold_db).replace('-', "\u{2212}")).class("meta");
                                 }
                                 Effect::Guitar(fx) => {
                                     Label::new(cx, fx.kind.blurb()).class("meta").width(Stretch(1.0)).height(Stretch(1.0));
