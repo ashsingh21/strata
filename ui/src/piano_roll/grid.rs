@@ -238,6 +238,7 @@ impl Grid {
             .bind(theme, |mut h| h.needs_redraw())
             .bind(octave, |mut h| h.needs_redraw())
             .bind(crate::lessons::highlight_signal().unwrap_or_else(|| Signal::new(None)), |mut h| h.needs_redraw())
+            .bind(crate::lessons::ghosts_signal().unwrap_or_else(|| Signal::new(Vec::new())), |mut h| h.needs_redraw())
     }
 
     /// The open clip's id, start and length, plus its notes - or `None` if
@@ -677,7 +678,7 @@ impl View for Grid {
         let bounds = cx.lbounds();
         crate::hidpi::clip(canvas, bounds);
         let p: Palette = self.theme.get().palette();
-        let Some((_clip_id, clip_start, clip_length, mut notes)) = self.clip_info() else { return };
+        let Some((clip_id, clip_start, clip_length, mut notes)) = self.clip_info() else { return };
         if clip_length <= 0 {
             return;
         }
@@ -865,6 +866,37 @@ impl View for Grid {
         // A drum hit is a one-shot: drawn one Snap step wide at most, so a
         // 16th hat doesn't hide the empty 32nd after it.
         let hit_width = if self.drums() { self.snap.get().ticks().unwrap_or(PPQ / 4) } else { Ticks::MAX };
+
+        // A lesson step's notes still to place: a dashed outline where
+        // each goes, the next one in signal on a soft wash.
+        let lesson_ghosts: Vec<MidiNote> = crate::lessons::ghosts_signal()
+            .map(|g| g.get())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|g| g.clip == clip_id && !notes.iter().any(|n| n.start == g.note.start && n.pitch == g.note.pitch))
+            .map(|g| g.note)
+            .collect();
+        for (i, ghost) in lesson_ghosts.iter().enumerate() {
+            let Some(row) = rows.iter().position(|&r| r == ghost.pitch) else { continue };
+            let y0 = top + row as f32 * ROW_H + 1.0;
+            let x0 = tick_to_x(ghost.start) + 1.0;
+            let x1 = tick_to_x(ghost.start + ghost.length.min(hit_width)).min(gx + gw);
+            if x1 <= x0 {
+                continue;
+            }
+            let rect = vg::Rect::new(x0, y0, x1, y0 + ROW_H - 3.0);
+            let next = i == 0;
+            if next {
+                fill(canvas, rect, p.signal_soft);
+            }
+            let mut edge = vg::Paint::default();
+            edge.set_style(vg::PaintStyle::Stroke);
+            edge.set_anti_alias(true);
+            edge.set_color(if next { p.signal } else { p.ink_faint });
+            edge.set_stroke_width(if next { 1.5 } else { 1.0 });
+            edge.set_path_effect(vg::PathEffect::dash(&[4.0, 3.0], 0.0));
+            canvas.draw_path(&vg::Path::rect(rect.with_inset((0.75, 0.75)), None), &edge);
+        }
         for note in &notes {
             if self.paint.as_ref().is_some_and(|p| p.pitch == note.pitch) && erasing.contains(&note.start) {
                 continue;

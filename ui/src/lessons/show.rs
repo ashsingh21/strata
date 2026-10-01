@@ -21,11 +21,25 @@ pub type Show = Box<dyn Fn(&mut Snapshot)>;
 /// takes the app down with it.
 pub fn run(show: &dyn Fn(&mut Snapshot), s: &mut Snapshot) -> bool {
     let mut attempt = s.clone();
-    let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| show(&mut attempt))).is_ok();
+    let ok = crate::logging::quietly(|| std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| show(&mut attempt))).is_ok());
     if ok {
         *s = attempt;
     }
     ok
+}
+
+/// `s` with step `step` of `lesson` done by its "Show me" - the step's
+/// example - or `None` for a step that isn't an action, or can't be done
+/// from here.
+pub fn example(lesson: &super::course::Lesson, step: usize, s: &Snapshot) -> Option<Snapshot> {
+    use super::course::Kind;
+    if !matches!(lesson.steps.get(step)?.kind, Kind::Action { .. }) {
+        return None;
+    }
+    let index = lesson.steps[..step].iter().filter(|st| matches!(st.kind, Kind::Action { .. })).count();
+    let shows = steps(lesson.id);
+    let mut done = s.clone();
+    run(&**shows.get(index)?, &mut done).then_some(done)
 }
 
 fn b(f: impl Fn(&mut Snapshot) + 'static) -> Show {

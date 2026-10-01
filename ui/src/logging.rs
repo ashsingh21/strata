@@ -108,11 +108,33 @@ fn tee_stderr(mut file: std::fs::File) {
     }
 }
 
+thread_local! {
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with this thread's panics kept quiet - no crash report, no
+/// message - for code that may fail and catches it itself (a lesson's
+/// "Show me" run against a project the learner has changed).
+pub fn quietly<R>(f: impl FnOnce() -> R) -> R {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            QUIET.set(false);
+        }
+    }
+    QUIET.set(true);
+    let _reset = Reset;
+    f()
+}
+
 /// On a panic, anywhere (the audio thread too): a crash report file, then
 /// the usual message.
 fn install_crash_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        if QUIET.get() {
+            return;
+        }
         let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
         let message = info
             .payload()

@@ -26,6 +26,8 @@ pub struct LessonBarProps {
     pub completed: Signal<bool>,
     pub explaining: Signal<Option<usize>>,
     pub theme: Signal<crate::tokens::ThemeId>,
+    pub has_example: Signal<bool>,
+    pub ghost_progress: Signal<Option<(usize, usize)>>,
 }
 
 impl LessonBarProps {
@@ -45,6 +47,8 @@ impl LessonBarProps {
             completed: model.completed,
             explaining: model.explaining,
             theme,
+            has_example: model.has_example,
+            ghost_progress: model.ghost_progress,
         }
     }
 }

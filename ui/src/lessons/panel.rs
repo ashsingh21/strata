@@ -183,6 +183,23 @@ fn current_card(cx: &mut Context, p: LessonBarProps, lesson: usize, i: usize) {
                 .toggle_class("hidden", p.shown_step.map(move |s| *s != Some(i - 1)))
                 .on_press(|cx| cx.emit(LessonEvent::TryYourself));
         }
+        // The step done, to hear before doing it, and yours to compare;
+        // and how many of its notes are in.
+        if matches!(s.kind, Kind::Action { .. }) {
+            buttons(cx, move |cx| {
+                preview_button(cx, p, Which::Example, "Hear it").class("is-on").toggle_class("hidden", p.has_example.map(|h| !*h));
+                preview_button(cx, p, Which::Yours, "Hear yours").toggle_class("hidden", p.has_example.map(|h| !*h));
+            });
+            text(
+                cx,
+                p.ghost_progress.map(|g| match g {
+                    Some((placed, all)) => format!("{placed} of {all} notes in \u{b7} the dashed outlines show where"),
+                    None => String::new(),
+                }),
+                "value",
+            )
+            .toggle_class("hidden", p.ghost_progress.map(|g| g.is_none()));
+        }
         let last = i + 1 == l.steps.len();
         match s.kind {
             Kind::Action { .. } => buttons(cx, move |cx| {

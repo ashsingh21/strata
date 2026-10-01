@@ -128,6 +128,24 @@ thread_local! {
     static HIGHLIGHT: Cell<Option<Signal<Option<Target>>>> = const { Cell::new(None) };
 }
 
+/// A note the current step will add - drawn as an outline in the piano
+/// roll until it's there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ghost {
+    pub clip: shared::arrangement::ClipId,
+    pub note: shared::arrangement::MidiNote,
+}
+
+thread_local! {
+    static GHOSTS: Cell<Option<Signal<Vec<Ghost>>>> = const { Cell::new(None) };
+}
+
+/// The current step's notes still to place (in clip order), if a lesson
+/// is running.
+pub fn ghosts_signal() -> Option<Signal<Vec<Ghost>>> {
+    GHOSTS.get()
+}
+
 /// The current lesson target, if a lesson is running.
 pub fn highlighted() -> Option<Target> {
     HIGHLIGHT.get().and_then(|h| h.get())
@@ -215,6 +233,16 @@ pub struct LessonModel {
     export_status: Signal<String>,
     analyzer_open: Signal<bool>,
     snap: Signal<shared::arrangement::SnapGrid>,
+    /// The notes the current step adds (see `Ghost`).
+    pub ghosts: Signal<Vec<Ghost>>,
+    /// Of those, how many are in place now: (placed, all). `None` for a
+    /// step that adds no notes.
+    pub ghost_progress: Signal<Option<(usize, usize)>>,
+    /// The project with the current step done (its "Show me"), for Hear it.
+    example: Option<Snapshot>,
+    /// Whether that example sounds different from now (new notes or a
+    /// changed sound) - so worth a Hear it button.
+    pub has_example: Signal<bool>,
     /// A quiz step's answer that was wrong (cleared on the next step).
     pub quiz_wrong: Signal<Option<usize>>,
     /// The preview playing (for the buttons' labels), and when it ends.
@@ -291,6 +319,8 @@ impl LessonModel {
     ) -> Self {
         let highlight = Signal::new(None);
         HIGHLIGHT.set(Some(highlight));
+        let ghosts = Signal::new(Vec::new());
+        GHOSTS.set(Some(ghosts));
         Self {
             active: Signal::new(None),
             done: Signal::new(crate::settings::load_lessons_done()),
@@ -309,6 +339,10 @@ impl LessonModel {
             export_status,
             analyzer_open,
             snap,
+            ghosts,
+            ghost_progress: Signal::new(None),
+            example: None,
+            has_example: Signal::new(false),
             quiz_wrong: Signal::new(None),
             previewing: Signal::new(None),
             preview_generation: 0,
@@ -378,6 +412,7 @@ impl LessonModel {
         self.hint_visible.set(false);
         self.quiz_wrong.set(None);
         self.set_highlight(None);
+        self.prepare_example(lesson, step);
         // Reaching the closing step is finishing the lesson.
         if step == steps.len() - 1 {
             let id = course::LESSONS[lesson].id.to_string();
@@ -386,6 +421,36 @@ impl LessonModel {
                 self.done.update(|d| d.push(id));
                 crate::settings::save_lessons_done(&self.done.get());
             }
+        }
+    }
+
+    /// Works out the current step done (its "Show me" on a copy of the
+    /// project): the notes it adds become ghosts, and if it sounds any
+    /// different, Hear it can play it.
+    fn prepare_example(&mut self, lesson: usize, step: usize) {
+        let now = self.snapshot();
+        let example = show::example(&course::LESSONS[lesson], step, &now);
+        let ghosts = example.as_ref().map(|done| added_notes(&now.arrangement, &done.arrangement)).unwrap_or_default();
+        let sound_changed = example.as_ref().is_some_and(|done| {
+            let (mut a, mut b) = (now.synth.clone(), done.synth.clone());
+            a.held_notes.clear();
+            b.held_notes.clear();
+            a != b
+        });
+        self.has_example.set(!ghosts.is_empty() || sound_changed);
+        self.ghost_progress.set((!ghosts.is_empty()).then(|| (placed(&now.arrangement, &ghosts), ghosts.len())));
+        if self.ghosts.get() != ghosts {
+            self.ghosts.set(ghosts);
+        }
+        self.example = example;
+    }
+
+    fn clear_example(&mut self) {
+        self.example = None;
+        self.has_example.set(false);
+        self.ghost_progress.set(None);
+        if !self.ghosts.get().is_empty() {
+            self.ghosts.set(Vec::new());
         }
     }
 
@@ -426,6 +491,7 @@ impl LessonModel {
         self.change_step.set(None);
         self.hint_visible.set(false);
         self.set_highlight(None);
+        self.clear_example();
     }
 
     /// Renders `which` on a worker thread; `PreviewReady` plays it.
@@ -440,6 +506,7 @@ impl LessonModel {
             preview::Which::Before => self.last_change.as_ref().map(|(_, before, _)| before.clone()),
             preview::Which::After => self.last_change.as_ref().map(|(_, _, after)| after.clone()),
             preview::Which::Yours => Some(preview::take_of(&self.snapshot(), &self.patches.get())),
+            preview::Which::Example => self.example.as_ref().map(|done| preview::take_of(done, &self.patches.get())),
             preview::Which::Quiz => match course::LESSONS[lesson].steps[step].kind {
                 course::Kind::Quiz { notes, .. } => Some(preview::quiz_take(notes)),
                 _ => None,
@@ -466,15 +533,8 @@ impl LessonModel {
     /// undoable edit, then the selection, sound, editor and transport.
     fn show_me(&mut self, cx: &mut EventContext) {
         let Some((lesson, step)) = self.active.get() else { return };
-        let steps = course::LESSONS[lesson].steps;
-        let index = steps[..step].iter().filter(|s| matches!(s.kind, course::Kind::Action { .. })).count();
-        let shows = show::steps(course::LESSONS[lesson].id);
-        let Some(show) = shows.get(index) else { return };
         let before = self.snapshot();
-        let mut after = before.clone();
-        if !show::run(&**show, &mut after) {
-            return;
-        }
+        let Some(after) = show::example(&course::LESSONS[lesson], step, &before) else { return };
 
         let json = |a: &Arrangement| serde_json::to_string(a).unwrap_or_default();
         let edited = json(&after.arrangement) != json(&before.arrangement);
@@ -638,6 +698,13 @@ impl Model for LessonModel {
                         self.completed.set(true);
                     }
                 } else {
+                    let ghosts = self.ghosts.get();
+                    if !ghosts.is_empty() {
+                        let progress = Some((placed(&snap.arrangement, &ghosts), ghosts.len()));
+                        if self.ghost_progress.get() != progress {
+                            self.ghost_progress.set(progress);
+                        }
+                    }
                     self.set_highlight(target(&snap));
                     if !self.hint_visible.get() && self.step_started.elapsed() >= HINT_AFTER {
                         self.hint_visible.set(true);
@@ -709,6 +776,37 @@ impl Model for LessonModel {
             }
         });
     }
+}
+
+/// Notes in `after` that `before` doesn't have (same clip, start and
+/// pitch), in clip then time order.
+fn added_notes(before: &Arrangement, after: &Arrangement) -> Vec<Ghost> {
+    use shared::arrangement::ClipContent;
+    let mut ghosts = Vec::new();
+    for clip in &after.clips {
+        let ClipContent::Midi { notes, .. } = &clip.content else { continue };
+        let old: &[shared::arrangement::MidiNote] = match before.clip(clip.id).map(|c| &c.content) {
+            Some(ClipContent::Midi { notes, .. }) => notes,
+            _ => &[],
+        };
+        for note in notes {
+            if !old.iter().any(|o| o.start == note.start && o.pitch == note.pitch) {
+                ghosts.push(Ghost { clip: clip.id, note: *note });
+            }
+        }
+    }
+    ghosts.sort_by_key(|g| (g.clip, g.note.start, g.note.pitch));
+    ghosts
+}
+
+/// How many of `ghosts` are in place in `arr`.
+fn placed(arr: &Arrangement, ghosts: &[Ghost]) -> usize {
+    ghosts.iter().filter(|g| is_placed(arr, g)).count()
+}
+
+pub fn is_placed(arr: &Arrangement, g: &Ghost) -> bool {
+    matches!(arr.clip(g.clip).map(|c| &c.content), Some(shared::arrangement::ClipContent::Midi { notes, .. })
+        if notes.iter().any(|n| n.start == g.note.start && n.pitch == g.note.pitch))
 }
 
 /// The track a snapshot's selection points at.

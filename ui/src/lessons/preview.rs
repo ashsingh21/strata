@@ -40,6 +40,8 @@ pub enum Which {
     Yours,
     /// A quiz step's question.
     Quiz,
+    /// The current step, done (its "Show me").
+    Example,
 }
 
 /// A quiz question's notes - (16th, pitch, 16ths) - played by the theory
