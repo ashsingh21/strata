@@ -3,6 +3,8 @@
 //! smoothing, a DC blocker and an anti-aliased saturator. Nothing here
 //! allocates.
 
+use wide::{f32x4, i32x4};
+
 /// PolyBLAMP residual (the integrated PolyBLEP) for a corner - a jump in
 /// *slope* - at phase 0 of an oscillator with phase `t` in 0..1 and
 /// per-sample increment `dt`. Scaled by the slope change per sample, it
@@ -198,6 +200,163 @@ impl OversampledDrive {
     }
 }
 
+/// How many drive channels one [`DriveBank`] runs side by side: two
+/// stereo voices, one 128-bit register's worth.
+pub const DRIVE_LANES: usize = 4;
+
+fn splat(x: f32) -> f32x4 {
+    f32x4::splat(x)
+}
+
+/// `exp(x)` for `x <= 0` (clamped at -30), to about 1e-8 absolute: a Taylor
+/// series on the fractional power of two, scaled by building the exponent
+/// bits.
+#[inline(always)]
+fn exp_neg(x: f32x4) -> f32x4 {
+    let y = x.max(splat(-30.0)) * splat(std::f32::consts::LOG2_E);
+    let whole = y.trunc_int();
+    let u = (y - f32x4::from_i32x4(whole)) * splat(std::f32::consts::LN_2);
+    let mut p = splat(1.0 / 362_880.0);
+    for c in [1.0 / 40_320.0, 1.0 / 5040.0, 1.0 / 720.0, 1.0 / 120.0, 1.0 / 24.0, 1.0 / 6.0, 0.5, 1.0, 1.0] {
+        p = p * u + splat(c);
+    }
+    p * f32x4::from_bits(((whole + i32x4::splat(127)) << 23i32).cast_unsigned())
+}
+
+/// `ln(1 + e)` for `0 <= e <= 1`, through the series for `atanh`.
+#[inline(always)]
+fn ln_1p_unit(e: f32x4) -> f32x4 {
+    let s = e / (splat(2.0) + e);
+    let s2 = s * s;
+    let mut p = splat(1.0 / 15.0);
+    for c in [1.0 / 13.0, 1.0 / 11.0, 1.0 / 9.0, 1.0 / 7.0, 1.0 / 5.0, 1.0 / 3.0, 1.0] {
+        p = p * s2 + splat(c);
+    }
+    splat(2.0) * s * p
+}
+
+/// [`ln_cosh`] across lanes.
+#[inline(always)]
+fn ln_cosh_lanes(x: f32x4) -> f32x4 {
+    let a = x.abs();
+    a + ln_1p_unit(exp_neg(splat(-2.0) * a)) - splat(std::f32::consts::LN_2)
+}
+
+#[inline(always)]
+fn tanh_lanes(x: f32x4) -> f32x4 {
+    let e = exp_neg(splat(-2.0) * x.abs());
+    ((splat(1.0) - e) / (splat(1.0) + e)).copysign(x)
+}
+
+/// A short history ring for four channels at once, written twice so any
+/// 16-long window is contiguous. All lanes share one write position.
+#[derive(Clone, Copy)]
+struct LaneHistory {
+    buf: [f32x4; 32],
+    pos: usize,
+}
+
+impl LaneHistory {
+    const ZERO: Self = Self { buf: [f32x4::ZERO; 32], pos: 0 };
+
+    #[inline(always)]
+    fn push(&mut self, x: f32x4) {
+        self.pos = (self.pos + 15) % 16;
+        self.buf[self.pos] = x;
+        self.buf[self.pos + 16] = x;
+    }
+
+    #[inline(always)]
+    fn get(&self, age: usize) -> f32x4 {
+        self.buf[self.pos + age]
+    }
+
+    fn clear_lane(&mut self, lane: usize) {
+        for row in &mut self.buf {
+            *row = clear(*row, lane);
+        }
+    }
+}
+
+fn clear(v: f32x4, lane: usize) -> f32x4 {
+    let mut a = v.to_array();
+    a[lane] = 0.0;
+    f32x4::from(a)
+}
+
+/// [`AdaaTanh`] across lanes.
+#[derive(Clone, Copy)]
+struct LaneAdaa {
+    x1: f32x4,
+    f1: f32x4,
+}
+
+impl LaneAdaa {
+    #[inline(always)]
+    fn process(&mut self, x: f32x4) -> f32x4 {
+        let f = ln_cosh_lanes(x);
+        let dx = x - self.x1;
+        let wide = (f - self.f1) / dx;
+        let mid = splat(0.5) * (x + self.x1);
+        let small = dx.abs().simd_le(splat(1.0e-4));
+        // Only a still, non-zero signal takes the slow path (silence is
+        // zero either way).
+        let narrow = if (small & mid.abs().simd_gt(splat(0.0))).any() { tanh_lanes(mid) } else { f32x4::ZERO };
+        let y = small.select(narrow, wide);
+        self.x1 = x;
+        self.f1 = f;
+        y
+    }
+}
+
+/// [`OversampledDrive`] for `DRIVE_LANES` channels in lockstep: the same
+/// filters and saturator, as SIMD. A lane whose input stays zero stays
+/// silent, so unused lanes only cost their share of the vector.
+#[derive(Clone, Copy)]
+pub struct DriveBank {
+    input: LaneHistory,
+    even: LaneHistory,
+    odd: LaneHistory,
+    sat: LaneAdaa,
+}
+
+impl Default for DriveBank {
+    fn default() -> Self {
+        Self { input: LaneHistory::ZERO, even: LaneHistory::ZERO, odd: LaneHistory::ZERO, sat: LaneAdaa { x1: f32x4::ZERO, f1: f32x4::ZERO } }
+    }
+}
+
+impl DriveBank {
+    /// Forgets lane `lane`'s past, so a new note doesn't start on the
+    /// ringing of whatever played there before.
+    pub fn clear_lane(&mut self, lane: usize) {
+        self.input.clear_lane(lane);
+        self.even.clear_lane(lane);
+        self.odd.clear_lane(lane);
+        self.sat.x1 = clear(self.sat.x1, lane);
+        self.sat.f1 = clear(self.sat.f1, lane);
+    }
+
+    #[inline]
+    pub fn process(&mut self, x: [f32; DRIVE_LANES]) -> [f32; DRIVE_LANES] {
+        self.input.push(f32x4::from(x));
+        let mut up_even = f32x4::ZERO;
+        for &(k, h) in &HALFBAND_EVEN_TAPS {
+            up_even += splat(h) * self.input.get(k / 2);
+        }
+        let up_odd = splat(HALFBAND_CENTRE) * self.input.get(7);
+        let a = self.sat.process(splat(2.0) * up_even);
+        let b = self.sat.process(splat(2.0) * up_odd);
+        self.even.push(a);
+        self.odd.push(b);
+        let mut down = splat(HALFBAND_CENTRE) * self.even.get(7);
+        for &(k, h) in &HALFBAND_EVEN_TAPS {
+            down += splat(h) * self.odd.get(k / 2);
+        }
+        down.to_array()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +389,58 @@ mod tests {
             y = dc.process(0.5);
         }
         assert!(y.abs() < 1.0e-3, "{y}");
+    }
+
+    #[test]
+    fn the_drive_bank_matches_the_scalar_drive() {
+        let mut scalar = [OversampledDrive::default(); DRIVE_LANES];
+        let mut bank = DriveBank::default();
+        let gains = [0.3f32, 1.0, 4.0, 12.0];
+        let mut worst = 0.0f32;
+        let mut rng = 12345u32;
+        for i in 0..20_000 {
+            let mut x = [0.0; DRIVE_LANES];
+            for l in 0..DRIVE_LANES {
+                rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let noise = (rng >> 8) as f32 / (1 << 23) as f32 - 1.0;
+                let tone = (i as f32 * 0.01 * (l + 1) as f32).sin();
+                // Lane 3 is silent half the time, like an idle voice.
+                let on = if l == 3 { (i / 4000) % 2 == 0 } else { true };
+                x[l] = if on { gains[l] * (0.8 * tone + 0.2 * noise) } else { 0.0 };
+            }
+            let out = bank.process(x);
+            for l in 0..DRIVE_LANES {
+                let want = scalar[l].process(x[l]);
+                worst = worst.max((out[l] - want).abs());
+            }
+        }
+        assert!(worst < 2.0e-3, "worst difference {worst}");
+    }
+
+    #[test]
+    fn the_fast_math_agrees_with_libm() {
+        let mut worst_exp = 0.0f32;
+        let mut worst_ln = 0.0f32;
+        for i in 0..=3000 {
+            let x = -i as f32 * 0.01;
+            worst_exp = worst_exp.max((exp_neg(splat(x)).to_array()[0] - x.exp()).abs());
+            let e = i as f32 / 3000.0;
+            worst_ln = worst_ln.max((ln_1p_unit(splat(e)).to_array()[0] - e.ln_1p()).abs());
+        }
+        assert!(worst_exp < 2.0e-7, "exp {worst_exp}");
+        assert!(worst_ln < 2.0e-7, "ln {worst_ln}");
+        assert!(ln_cosh_lanes(splat(0.0)).to_array()[0].abs() < 1.0e-7);
+    }
+
+    #[test]
+    fn clearing_a_lane_silences_its_memory() {
+        let mut bank = DriveBank::default();
+        for i in 0..100 {
+            bank.process([(i as f32 * 0.2).sin(); DRIVE_LANES]);
+        }
+        bank.clear_lane(1);
+        let out = bank.process([0.0; DRIVE_LANES]);
+        assert_eq!(out[1], 0.0);
+        assert_ne!(out[0], 0.0);
     }
 }

@@ -18,7 +18,7 @@ use shared::synth::{
     LFO_PULSE_WIDTH_MAX, LFO_RESONANCE_MAX, MAX_UNISON,
 };
 
-use crate::dsp::{poly_blamp, DcBlocker, OversampledDrive, Smoother};
+use crate::dsp::{poly_blamp, DcBlocker, DriveBank, Smoother};
 use crate::fx::{Chorus, Limiter, Reverb};
 
 const MAX_VOICES: usize = 16;
@@ -340,7 +340,6 @@ struct Voice {
     amp_env: Envelope,
     filter_env: Envelope,
     dc: [DcBlocker; 2],
-    drive: [OversampledDrive; 2],
     filter: [Filter; 2],
 }
 
@@ -361,7 +360,6 @@ impl Voice {
             amp_env: Envelope::new(),
             filter_env: Envelope::new(),
             dc: [DcBlocker::new(10.0, sample_rate); 2],
-            drive: [OversampledDrive::default(); 2],
             filter: [Filter::default(); 2],
         }
     }
@@ -419,6 +417,8 @@ impl Smoothed {
 pub struct SynthEngine {
     sample_rate: f32,
     voices: [Voice; MAX_VOICES],
+    /// The drive stage of every voice, two voices (four channels) to a bank.
+    drive: [DriveBank; MAX_VOICES / 2],
     next_voice: usize,
     mono_stack: Vec<u8>,
     lfo1_phase: f32,
@@ -444,6 +444,7 @@ impl SynthEngine {
         Self {
             sample_rate,
             voices: std::array::from_fn(|i| Voice::new(0x9e37_79b9u32.wrapping_mul(i as u32 + 1), sample_rate)),
+            drive: [DriveBank::default(); MAX_VOICES / 2],
             next_voice: 0,
             mono_stack: Vec::with_capacity(MAX_VOICES),
             lfo1_phase: 0.0,
@@ -499,6 +500,7 @@ impl SynthEngine {
                 self.voices[0].current_note = note as f32;
                 self.voices[0].current_hz = midi_to_hz(note as f32);
                 self.voices[0].active = true;
+                self.clear_drive(0);
                 self.voices[0].amp_env.note_on();
                 self.voices[0].filter_env.note_on();
             }
@@ -512,6 +514,7 @@ impl SynthEngine {
             slot
         });
 
+        self.clear_drive(slot);
         let voice = &mut self.voices[slot];
         voice.active = true;
         voice.note = note;
@@ -521,6 +524,14 @@ impl SynthEngine {
         voice.target_note = note as f32;
         voice.amp_env.note_on();
         voice.filter_env.note_on();
+    }
+
+    /// A voice starting fresh must not inherit the drive stage's memory of
+    /// the note that last played in its slot.
+    fn clear_drive(&mut self, voice: usize) {
+        for ch in 0..2 {
+            self.drive[voice / 2].clear_lane(voice % 2 * 2 + ch);
+        }
     }
 
     fn note_off(&mut self, note: u8) {
@@ -633,7 +644,14 @@ impl SynthEngine {
         let mut sum_l = 0.0f32;
         let mut sum_r = 0.0f32;
 
-        for voice in &mut self.voices {
+        // Pass 1, per voice: envelopes, oscillators and DC blocker, up to
+        // the drive stage's input.
+        let mut live = [false; MAX_VOICES];
+        let mut pre = [[0.0f32; 2]; MAX_VOICES];
+        let mut coeffs = [SvfCoeffs { k: 0.0, a1: 0.0, a2: 0.0, a3: 0.0 }; MAX_VOICES];
+        let mut level = [0.0f32; MAX_VOICES];
+
+        for (vi, voice) in self.voices.iter_mut().enumerate() {
             if !voice.active {
                 continue;
             }
@@ -715,18 +733,36 @@ impl SynthEngine {
             let env_oct = env_amount * filter_level;
             let cutoff =
                 2f32.powf(cutoff_log2 + key_oct + env_oct + cutoff_lfo_oct).clamp(20.0, 20_000.0).min(sr * 0.45);
-            let coeffs = SvfCoeffs::new(cutoff, q, sr);
-
+            coeffs[vi] = SvfCoeffs::new(cutoff, q, sr);
+            level[vi] = amp_level * voice.velocity_gain;
             for (ch, dry) in [dry_l, dry_r].into_iter().enumerate() {
-                let x = voice.dc[ch].process(dry);
-                let x = voice.drive[ch].process(x * drive_gain);
-                let y = voice.filter[ch].process(x, p.filter.filter_type, &coeffs) * amp_level * voice.velocity_gain;
-                if ch == 0 {
-                    sum_l += y;
-                } else {
-                    sum_r += y;
-                }
+                pre[vi][ch] = voice.dc[ch].process(dry) * drive_gain;
             }
+            live[vi] = true;
+        }
+
+        // Pass 2: the drive stage, two voices at a time as one vector. A
+        // pair with no live voice is skipped; a dead one in a live pair
+        // gets silence.
+        for (b, bank) in self.drive.iter_mut().enumerate() {
+            let (v0, v1) = (2 * b, 2 * b + 1);
+            if !(live[v0] || live[v1]) {
+                continue;
+            }
+            let out = bank.process([pre[v0][0], pre[v0][1], pre[v1][0], pre[v1][1]]);
+            pre[v0] = [out[0], out[1]];
+            pre[v1] = [out[2], out[3]];
+        }
+
+        // Pass 3, per voice: filter, level, sum.
+        for (vi, voice) in self.voices.iter_mut().enumerate() {
+            if !live[vi] {
+                continue;
+            }
+            let l = voice.filter[0].process(pre[vi][0], p.filter.filter_type, &coeffs[vi]) * level[vi];
+            let r = voice.filter[1].process(pre[vi][1], p.filter.filter_type, &coeffs[vi]) * level[vi];
+            sum_l += l;
+            sum_r += r;
         }
 
         let gain = volume * VOICE_GAIN;
