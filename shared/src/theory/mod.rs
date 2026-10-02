@@ -4,6 +4,7 @@
 
 pub mod chord;
 pub mod scale;
+pub mod voicing;
 
 pub use chord::{recognize, ChordMatch};
 pub use scale::{

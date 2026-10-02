@@ -205,6 +205,9 @@ fn rail(cx: &mut Context, p: BrowserProps) {
         let theory = Memo::new(move |_| p.theory_open.get());
         rail_button(cx, p, IconKind::Theory, "Theory: explore the key's scale and chords", theory)
             .on_press(|cx| cx.emit(crate::interval_input::state::IntervalInputEvent::ToggleOpen));
+        let chords = Memo::new(|_| crate::voicing::open_signal().is_some_and(|s| s.get()));
+        rail_button(cx, p, IconKind::Chords, "Voice leading: chords that move as little as they can", chords)
+            .on_press(|cx| cx.emit(crate::voicing::VoicingEvent::ToggleOpen));
         Element::new(cx).height(Stretch(1.0)).width(Pixels(1.0));
         let open = Memo::new(move |_| p.open.get());
         rail_button(cx, p, IconKind::Panel, "Show or hide the panel", open).on_press(|cx| cx.emit(crate::app::AppEvent::ToggleSidebar));

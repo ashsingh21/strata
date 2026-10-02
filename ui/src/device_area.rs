@@ -62,6 +62,8 @@ pub struct DeviceAreaProps {
     pub scale_mask: Signal<u16>,
     pub interval_open: Signal<bool>,
     pub show_note_names: Signal<bool>,
+    /// Voice leading, docked under Theory.
+    pub voicing: crate::voicing::VoicingProps,
 }
 
 pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
@@ -193,6 +195,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
         p.interval_open,
         p.show_note_names,
     );
+    crate::voicing::voicing_view(cx, p.voicing);
 }
 
 /// The selected track's swatch and name, then its devices as chips: the

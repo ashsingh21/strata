@@ -3,6 +3,7 @@ mod app;
 mod audio_watch;
 mod browser;
 mod preview_player;
+mod voicing;
 mod bpm_field;
 mod canvas_text;
 mod compressor_curve;
@@ -277,6 +278,9 @@ fn main() -> Result<(), ApplicationError> {
         let interval_open = interval_model.open;
         let interval_show_note_names = interval_model.show_note_names;
         interval_model.build(cx);
+        let voicing_model = voicing::VoicingModel::new(interval_key, interval_scale_mask, preview_player.clone(), engine_sample_rate);
+        let voicing_props = voicing::VoicingProps::of(&voicing_model, theme);
+        voicing_model.build(cx);
 
         // Before any view is built: it also publishes the highlight signal
         // that `lesson_target` glows read.
@@ -646,6 +650,7 @@ fn main() -> Result<(), ApplicationError> {
                                     scale_mask: interval_scale_mask,
                                     interval_open,
                                     show_note_names: interval_show_note_names,
+                                    voicing: voicing_props,
                                 },
                             );
                         });
