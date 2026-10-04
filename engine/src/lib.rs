@@ -100,6 +100,7 @@ struct InputPath {
     capture: input::SharedProducer<f32>,
     monitor: input::SharedProducer<f32>,
     telemetry: input::SharedProducer<shared::recorder::InputTelemetry>,
+    voice: input::SharedProducer<f32>,
     record_params: Arc<shared::recorder::RecordParams>,
     rate: Arc<std::sync::atomic::AtomicU32>,
 }
@@ -120,8 +121,10 @@ impl EngineHandle {
             self.input.capture.clone(),
             self.input.monitor.clone(),
             self.input.telemetry.clone(),
+            self.input.voice.clone(),
             self.input.record_params.clone(),
         );
+        self.input.record_params.set_input_rate(opened.as_ref().map(|(_, rate)| *rate).unwrap_or(0));
         match opened {
             Some((stream, rate)) => {
                 self.input.rate.store(rate, std::sync::atomic::Ordering::Relaxed);
@@ -224,6 +227,7 @@ pub fn start(
     decoded_sources: rtrb::Consumer<DecodedSource>,
     record_commands: rtrb::Consumer<RecordCommand>,
     input_telemetry: rtrb::Producer<shared::recorder::InputTelemetry>,
+    voice: rtrb::Producer<f32>,
     record_params: Arc<shared::recorder::RecordParams>,
     preferred_input_device: Option<&str>,
     preview: shared::playback::PreviewEnds,
@@ -297,6 +301,7 @@ pub fn start(
         capture: Arc::new(std::sync::Mutex::new(capture_tx)),
         monitor: Arc::new(std::sync::Mutex::new(monitor_tx)),
         telemetry: Arc::new(std::sync::Mutex::new(input_telemetry)),
+        voice: Arc::new(std::sync::Mutex::new(voice)),
         record_params,
         rate: Arc::new(std::sync::atomic::AtomicU32::new(sample_rate)),
     };

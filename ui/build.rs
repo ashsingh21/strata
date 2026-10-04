@@ -212,6 +212,11 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   font-size: 15px;
   font-weight: 600;
 }}
+/* Riyaz: the swar being sung. */
+.riyaz-swar {{
+  font-size: 32px;
+  font-weight: 600;
+}}
 /* The course map's title. */
 .display-sm {{
   font-size: 24px;
@@ -872,6 +877,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".lesson-done", vec![("color", c("signal"))]);
     rule(".lesson-progress", vec![("color", c("signal"))]);
     rule(".display-sm", vec![("color", c("ink"))]);
+    rule(".riyaz-swar", vec![("color", c("ink"))]);
     rule(".course-map", vec![("background-color", c("bg-100"))]);
     rule(".map-card", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".map-card:hover", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);

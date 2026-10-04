@@ -4,6 +4,7 @@ mod audio_watch;
 mod browser;
 mod preview_player;
 mod voicing;
+mod riyaz;
 mod bpm_field;
 mod canvas_text;
 mod compressor_curve;
@@ -73,6 +74,7 @@ fn main() -> Result<(), ApplicationError> {
         playback_bridge.decode_rx,
         recorder_bridge.command_rx,
         recorder_bridge.telemetry_tx,
+        recorder_bridge.voice_tx,
         record_params.clone(),
         preferred_input_device.as_deref(),
         shared::playback::PreviewEnds {
@@ -281,6 +283,16 @@ fn main() -> Result<(), ApplicationError> {
         let voicing_model = voicing::VoicingModel::new(interval_key, interval_scale_mask, preview_player.clone(), engine_sample_rate);
         let voicing_props = voicing::VoicingProps::of(&voicing_model, theme);
         voicing_model.build(cx);
+        let riyaz_model = riyaz::RiyazModel::new(
+            interval_key,
+            interval_scale_mask,
+            recorder_bridge.voice_rx,
+            record_params.clone(),
+            preview_player.clone(),
+            engine_sample_rate,
+        );
+        let riyaz_props = riyaz::RiyazProps::of(&riyaz_model, theme);
+        riyaz_model.build(cx);
 
         // Before any view is built: it also publishes the highlight signal
         // that `lesson_target` glows read.
@@ -387,6 +399,7 @@ fn main() -> Result<(), ApplicationError> {
                 midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing, loop_params.seek_count());
                 cx.emit(SynthEvent::Tick(dt));
                 cx.emit(lessons::LessonEvent::Tick);
+                cx.emit(riyaz::RiyazEvent::Tick);
                 cx.emit(project::ProjectEvent::Tick);
 
                 // Latest-wins: cheap to rebuild every tick, and avoids
@@ -651,6 +664,7 @@ fn main() -> Result<(), ApplicationError> {
                                     interval_open,
                                     show_note_names: interval_show_note_names,
                                     voicing: voicing_props,
+                                    riyaz: riyaz_props,
                                 },
                             );
                         });

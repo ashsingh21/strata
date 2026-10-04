@@ -64,6 +64,8 @@ pub struct DeviceAreaProps {
     pub show_note_names: Signal<bool>,
     /// Voice leading, docked under Theory.
     pub voicing: crate::voicing::VoicingProps,
+    /// Riyaz, docked likewise.
+    pub riyaz: crate::riyaz::RiyazProps,
 }
 
 pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
@@ -196,6 +198,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
         p.show_note_names,
     );
     crate::voicing::voicing_view(cx, p.voicing);
+    crate::riyaz::riyaz_view(cx, p.riyaz);
 }
 
 /// The selected track's swatch and name, then its devices as chips: the

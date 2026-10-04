@@ -82,6 +82,7 @@ pub fn start(
     capture_tx: SharedProducer<f32>,
     monitor_tx: SharedProducer<f32>,
     telemetry: SharedProducer<InputTelemetry>,
+    voice_tx: SharedProducer<f32>,
     record_params: Arc<RecordParams>,
 ) -> Option<(cpal::Stream, u32)> {
     let host = cpal::default_host();
@@ -133,7 +134,7 @@ pub fn start(
     if !can_monitor {
         tracing::warn!(target: "audio", "input: opened at {sample_rate} Hz, output runs at {desired_sample_rate} Hz; live monitoring unavailable");
     }
-    let tx = InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, can_monitor };
+    let tx = InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, voice: voice_tx, can_monitor };
 
     tracing::info!(
         target: "audio",
@@ -224,6 +225,7 @@ struct InputTx {
     capture: SharedProducer<f32>,
     monitor: SharedProducer<f32>,
     telemetry: SharedProducer<InputTelemetry>,
+    voice: SharedProducer<f32>,
     can_monitor: bool,
 }
 
@@ -240,7 +242,7 @@ where
 {
     let channels = channels.max(1);
     let err_fn = |err: CpalError| tracing::error!(target: "audio", "input stream error: {err}");
-    let InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, can_monitor } = tx;
+    let InputTx { capture: capture_tx, monitor: monitor_tx, telemetry, voice: voice_tx, can_monitor } = tx;
 
     device.build_input_stream(
         config,
@@ -253,6 +255,8 @@ where
             let gain = db_to_gain(record_params.input_gain_db());
             // Fed only while it's being listened to, so the ring never holds stale audio.
             let mut monitor = if can_monitor && record_params.monitoring() { monitor_tx.try_lock().ok() } else { None };
+            // Riyaz's pitch tracker, likewise only while it listens.
+            let mut voice = if record_params.listening() { voice_tx.try_lock().ok() } else { None };
             let mut peak = 0.0f32;
             for frame in data.chunks(channels) {
                 // The loudest channel this frame, not the average of all
@@ -270,6 +274,9 @@ where
                 let _ = capture_tx.push(mono);
                 if let Some(monitor) = monitor.as_mut() {
                     let _ = monitor.push(mono);
+                }
+                if let Some(voice) = voice.as_mut() {
+                    let _ = voice.push(mono);
                 }
             }
             let _ = telemetry.push(InputTelemetry { peak });

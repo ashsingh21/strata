@@ -24,6 +24,7 @@ pub mod lessons;
 pub mod playback;
 pub mod project;
 pub mod recorder;
+pub mod riyaz;
 pub mod synth;
 pub mod theory;
 

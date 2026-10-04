@@ -20,11 +20,36 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 pub struct RecordParams {
     input_gain_db: AtomicU32,
     monitoring: AtomicBool,
+    /// Riyaz is listening: the input's samples go to the voice ring too.
+    listening: AtomicBool,
+    /// The open input's sample rate (0: none open).
+    input_rate: AtomicU32,
 }
 
 impl RecordParams {
     pub fn new() -> Self {
-        Self { input_gain_db: AtomicU32::new(0.0f32.to_bits()), monitoring: AtomicBool::new(false) }
+        Self {
+            input_gain_db: AtomicU32::new(0.0f32.to_bits()),
+            monitoring: AtomicBool::new(false),
+            listening: AtomicBool::new(false),
+            input_rate: AtomicU32::new(0),
+        }
+    }
+
+    pub fn set_listening(&self, on: bool) {
+        self.listening.store(on, Ordering::Relaxed);
+    }
+
+    pub fn listening(&self) -> bool {
+        self.listening.load(Ordering::Relaxed)
+    }
+
+    pub fn set_input_rate(&self, rate: u32) {
+        self.input_rate.store(rate, Ordering::Relaxed);
+    }
+
+    pub fn input_rate(&self) -> u32 {
+        self.input_rate.load(Ordering::Relaxed)
     }
 
     /// Whether the input is heard live, through the armed track's effects.
@@ -74,16 +99,22 @@ pub const RECORD_COMMAND_CAPACITY: usize = 16;
 /// Generous relative to a typical block size, so the producer never
 /// blocks waiting for the UI to drain it.
 pub const INPUT_TELEMETRY_CAPACITY: usize = 512;
+/// Two seconds at 48 kHz: the UI drains it every frame.
+pub const VOICE_CAPACITY: usize = 96_000;
 
 pub struct RecorderBridge {
     pub command_tx: rtrb::Producer<RecordCommand>,
     pub command_rx: rtrb::Consumer<RecordCommand>,
     pub telemetry_tx: rtrb::Producer<InputTelemetry>,
     pub telemetry_rx: rtrb::Consumer<InputTelemetry>,
+    /// The input's samples while Riyaz listens, for its pitch tracker.
+    pub voice_tx: rtrb::Producer<f32>,
+    pub voice_rx: rtrb::Consumer<f32>,
 }
 
 pub fn recorder_bridge() -> RecorderBridge {
     let (command_tx, command_rx) = rtrb::RingBuffer::new(RECORD_COMMAND_CAPACITY);
     let (telemetry_tx, telemetry_rx) = rtrb::RingBuffer::new(INPUT_TELEMETRY_CAPACITY);
-    RecorderBridge { command_tx, command_rx, telemetry_tx, telemetry_rx }
+    let (voice_tx, voice_rx) = rtrb::RingBuffer::new(VOICE_CAPACITY);
+    RecorderBridge { command_tx, command_rx, telemetry_tx, telemetry_rx, voice_tx, voice_rx }
 }
