@@ -12,6 +12,7 @@ pub fn status_bar(
     touched: Signal<Option<(String, Memo<String>)>>,
     save_status: Memo<String>,
     export_status: Signal<String>,
+    midi_devices: Signal<String>,
 ) {
     HStack::new(cx, move |cx| {
         let audio = block_frames.map(move |&frames| {
@@ -24,6 +25,11 @@ pub fn status_bar(
             }
         });
         Label::new(cx, audio).class("value");
+        // The MIDI controllers playing the selected track.
+        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(12.0)).toggle_class("hidden", midi_devices.map(|d| d.is_empty()));
+        Label::new(cx, midi_devices.map(|d| format!("MIDI \u{b7} {d}")))
+            .class("value")
+            .toggle_class("hidden", midi_devices.map(|d| d.is_empty()));
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
         let touched_text = Memo::new(move |_| match touched.get() {
             Some((name, value)) => format!("{name} {}", value.get()),

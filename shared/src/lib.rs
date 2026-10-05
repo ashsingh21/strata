@@ -21,6 +21,7 @@ pub mod drums;
 pub mod eq;
 pub mod guitar;
 pub mod lessons;
+pub mod midi;
 pub mod playback;
 pub mod project;
 pub mod recorder;

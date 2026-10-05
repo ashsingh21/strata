@@ -44,6 +44,9 @@ pub enum SynthEvent {
     /// the mouse button stays down on it.
     KeyPress(u8),
     KeyRelease(u8),
+    /// A key on a MIDI controller: (pitch, velocity). Released with
+    /// `KeyRelease`, like the on-screen keys.
+    PlayNote(u8, u8),
     /// Click on an Interval Input pad: toggles the note into/out of the
     /// held chord. Deliberately different from the keyboard's
     /// press-and-hold - a mouse can only press one thing at a time, so
@@ -382,8 +385,8 @@ impl SynthModel {
 
     /// A note the player actually pressed (mouse or computer keyboard):
     /// sounds it and marks it as part of the in-progress step-entry chord.
-    fn note_on(&mut self, note: u8) {
-        self.sound_on(self.selected_track.get(), note, shared::arrangement::DEFAULT_VELOCITY);
+    fn note_on(&mut self, note: u8, velocity: u8) {
+        self.sound_on(self.selected_track.get(), note, velocity);
         self.step_record_pitches.insert(note);
     }
 
@@ -446,7 +449,12 @@ impl Model for SynthModel {
             SynthEvent::SetVoiceMode(m) => self.state.update(|s| s.voice_mode = *m),
             SynthEvent::KeyPress(note) => {
                 if !self.state.get().held_notes.contains(note) {
-                    self.note_on(*note);
+                    self.note_on(*note, shared::arrangement::DEFAULT_VELOCITY);
+                }
+            }
+            SynthEvent::PlayNote(note, velocity) => {
+                if !self.state.get().held_notes.contains(note) {
+                    self.note_on(*note, *velocity);
                 }
             }
             SynthEvent::KeyRelease(note) => {
@@ -458,7 +466,7 @@ impl Model for SynthModel {
                 if self.state.get().held_notes.contains(note) {
                     self.note_off(cx, *note);
                 } else {
-                    self.note_on(*note);
+                    self.note_on(*note, shared::arrangement::DEFAULT_VELOCITY);
                 }
             }
             SynthEvent::NoteOn(track, note, velocity) => self.sound_on(Some(*track), *note, *velocity),
@@ -601,7 +609,7 @@ impl Model for SynthModel {
                             let note = (KEYBOARD_BASE_NOTE + self.octave_shift.get() as i32 * 12 + offset)
                                 .clamp(0, 127) as u8;
                             self.held_computer_keys.insert(*code, note);
-                            self.note_on(note);
+                            self.note_on(note, shared::arrangement::DEFAULT_VELOCITY);
                         }
                     }
                 }

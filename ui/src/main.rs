@@ -5,6 +5,7 @@ mod browser;
 mod preview_player;
 mod voicing;
 mod riyaz;
+mod midi_in;
 mod bpm_field;
 mod canvas_text;
 mod compressor_curve;
@@ -293,6 +294,9 @@ fn main() -> Result<(), ApplicationError> {
         );
         let riyaz_props = riyaz::RiyazProps::of(&riyaz_model, theme);
         riyaz_model.build(cx);
+        let midi_model = midi_in::MidiModel::new(tl_arrangement, selected_track);
+        let midi_devices = midi_model.devices;
+        midi_model.build(cx);
 
         // Before any view is built: it also publishes the highlight signal
         // that `lesson_target` glows read.
@@ -400,6 +404,7 @@ fn main() -> Result<(), ApplicationError> {
                 cx.emit(SynthEvent::Tick(dt));
                 cx.emit(lessons::LessonEvent::Tick);
                 cx.emit(riyaz::RiyazEvent::Tick);
+                cx.emit(midi_in::MidiEvent::Tick);
                 cx.emit(project::ProjectEvent::Tick);
 
                 // Latest-wins: cheap to rebuild every tick, and avoids
@@ -703,7 +708,7 @@ fn main() -> Result<(), ApplicationError> {
             .height(Stretch(1.0));
 
             Element::new(cx).class("hairline").height(Pixels(1.0)).width(Stretch(1.0));
-            sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status);
+            sidebar::status_bar(cx, sample_rate, block_frames, status_touched, save_status, export_status, midi_devices);
 
             context_menu::context_menu_view(cx, tl_arrangement, tl_context_menu, synth_state);
             timeline::clip_rename_view(cx, tl_arrangement, tl_renaming_clip);
