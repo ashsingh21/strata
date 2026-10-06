@@ -533,7 +533,10 @@ fn collection_row<'a>(cx: &'a mut Context, p: BrowserProps, coll: Coll, name: St
     HStack::new(cx, move |cx| {
         Element::new(cx).class("brw-swatch").background_color(swatch).width(Pixels(8.0)).height(Pixels(8.0));
         let editing = Memo::new(move |_| matches!(coll, Coll::User(i) if p.renaming.get() == Some(i)));
-        Label::new(cx, name.clone()).class("body").text_wrap(false).text_overflow(TextOverflow::Ellipsis).width(Stretch(1.0)).toggle_class("hidden", editing);
+        // Not hoverable: a click on the name (most of the row) must reach
+        // the row, or selecting and leaving a collection only worked from
+        // its edges.
+        Label::new(cx, name.clone()).class("body").text_wrap(false).text_overflow(TextOverflow::Ellipsis).width(Stretch(1.0)).hoverable(false).toggle_class("hidden", editing);
         if let Coll::User(i) = coll {
             let draft = Signal::new(name.clone());
             Textbox::new(cx, draft)
@@ -544,7 +547,7 @@ fn collection_row<'a>(cx: &'a mut Context, p: BrowserProps, coll: Coll, name: St
                 .width(Stretch(1.0))
                 .toggle_class("hidden", editing.map(|e| !*e));
         }
-        Label::new(cx, count.to_string()).class("value");
+        Label::new(cx, count.to_string()).class("value").hoverable(false);
         if let Coll::User(i) = coll {
             Button::new(cx, move |cx| Icon::new(cx, IconKind::Close, 10.0, Signal::new(false), p.theme, muted_or_ink))
                 .class("brw-mini")
