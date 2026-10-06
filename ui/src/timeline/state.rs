@@ -441,6 +441,8 @@ pub enum TimelineEvent {
     SetDrumPad { track: TrackId, pad: usize, settings: shared::drums::PadSettings },
     /// Which kit a Drum Kit track plays (its pads keep their settings).
     SetDrumKit { track: TrackId, kit: shared::drums::Kit },
+    /// All of a Drum Kit track's pads at once (a chopped loop).
+    SetDrumPads { track: TrackId, pads: shared::drums::Pads },
     /// Mute or unmute one pad (a click on its row's name in the step grid).
     ToggleDrumPadMute { track: TrackId, pad: usize },
     /// A MIDI clip's swing, 0 (straight) to 1 (see `Clip::swing`). Like
@@ -1012,6 +1014,19 @@ impl Model for TimelineState {
                 self.with_arrangement(|arr, _| {
                     if let Some(p) = arr.track_mut(*track).and_then(|t| t.drum_pads.get_mut(*pad)) {
                         *p = *settings;
+                    }
+                });
+            }
+            TimelineEvent::SetDrumPads { track, pads } => {
+                if let Some(tx) = &self.decode_request_tx {
+                    let samples: HashSet<&'static str> = pads.pads.iter().filter_map(|p| p.sample).collect();
+                    for sample in samples {
+                        let _ = tx.send(sample.into());
+                    }
+                }
+                self.with_arrangement(|arr, _| {
+                    if let Some(t) = arr.track_mut(*track) {
+                        t.drum_pads = *pads;
                     }
                 });
             }

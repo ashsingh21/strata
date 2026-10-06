@@ -23,6 +23,8 @@ struct Voice {
     pos: f64,
     /// Source frames per output frame.
     step: f64,
+    /// Where it stops (a slice's end), in source frames: it fades out there.
+    end: f64,
     gain: f32,
     /// 1.0 while playing; ramps to 0 once `fading`.
     fade: f32,
@@ -90,11 +92,14 @@ impl DrumEngine {
         };
         self.counter += 1;
         let velocity = event.velocity.clamp(1, 127) as f32 / 127.0;
+        let frames = sources[source].samples.len() as f64 / sources[source].channels.max(1) as f64;
+        let (from, to) = settings.slice.map(|(a, b)| (a as f64 * frames, b as f64 * frames)).unwrap_or((0.0, frames));
         self.voices[index] = Voice {
             active: true,
             note: event.note,
             source,
-            pos: 0.0,
+            pos: from,
+            end: to,
             // Retuned by the pad's pitch: faster is higher.
             step: sources[source].sample_rate as f64 / self.sample_rate as f64 * 2f64.powf(settings.pitch as f64 / 12.0),
             // A gentle curve: soft hits are quieter, not inaudible.
@@ -125,6 +130,10 @@ impl DrumEngine {
             let at = |frame: usize, ch: usize| src.samples[frame * channels + ch.min(channels - 1)];
             let l = at(i, 0) + (at(i + 1, 0) - at(i, 0)) * frac;
             let r = at(i, 1) + (at(i + 1, 1) - at(i, 1)) * frac;
+            // The end of its slice: out in a few ms, not a click.
+            if v.pos >= v.end {
+                v.fading = true;
+            }
             if v.fading {
                 v.fade -= self.fade_step;
                 if v.fade <= 0.0 {
@@ -231,5 +240,23 @@ mod tests {
         d.set_pads(mine);
         d.handle_note_event(hit(shared::drums::KICK), &sources);
         assert_eq!(d.voices.iter().find(|v| v.active).map(|v| v.source), Some(2));
+    }
+
+    #[test]
+    fn a_slice_plays_only_its_part_of_the_sample() {
+        // 1000 frames: the second quarter is loud, the rest quiet.
+        let samples: Vec<f32> = (0..1000).map(|i| if (250..500).contains(&i) { 1.0 } else { 0.1 }).collect();
+        let sources = [DecodedSource { source: Arc::from("loop.wav"), sample_rate: 48_000, channels: 1, samples: Arc::from(samples) }];
+        let mut pads = Pads { kit: Kit::Chop, ..Pads::default() };
+        pads.pads[1].sample = Some(shared::drums::intern("loop.wav"));
+        pads.pads[1].slice = Some((0.25, 0.5));
+        let mut d = DrumEngine::new(48_000.0);
+        d.set_pads(pads);
+        d.handle_note_event(hit(37), &sources);
+        let out: Vec<f32> = (0..600).map(|_| d.process(&sources).0).collect();
+        assert!(out[0] > 0.5, "starts at the slice: {}", out[0]);
+        let sounding = out.iter().filter(|x| x.abs() > 1e-6).count();
+        // 250 frames of slice plus a 5 ms (240 frame) fade, then silence.
+        assert!((250..=250 + 241).contains(&sounding), "{sounding}");
     }
 }

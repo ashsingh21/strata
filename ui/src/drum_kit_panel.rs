@@ -34,7 +34,15 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
                 move |cx, i| cx.emit(TimelineEvent::SetDrumKit { track, kit: Kit::ALL[i] }),
             )
             .height(Pixels(tokens::SIZE_CONTROL));
-            Label::new(cx, "Drag a sample from the browser onto a pad to play it instead").class("value").class("empty-note");
+            Label::new(
+                cx,
+                kit.map(|k| match k {
+                    Kit::Chop => "Drop a loop here to cut it across the pads, or a sample on one pad",
+                    _ => "Drag a sample from the browser onto a pad to play it instead",
+                }),
+            )
+            .class("value")
+            .class("empty-note");
         })
         .gap(Pixels(tokens::SPACE_2))
         .alignment(Alignment::Left)
@@ -43,16 +51,49 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
         Binding::new(cx, kit, move |cx| pads(cx, color, track, kit.get(), arrangement, theme));
     })
     .class("device")
+    // Chop: a loop dropped on the panel (not on one pad) fills them all.
+    .on_drop(move |cx, _| {
+        if kit.get() != Kit::Chop {
+            return;
+        }
+        let Some(source) = crate::browser::view::dragged().and_then(|item| item.source().cloned()) else { return };
+        if let Some(pads) = chop(&source, arrangement.get().track(track).map(|t| t.drum_pads).unwrap_or_default()) {
+            cx.emit(TimelineEvent::SetDrumPads { track, pads });
+        }
+    })
     .gap(Pixels(tokens::SPACE_3))
     .padding(Pixels(tokens::SPACE_3))
     .width(Stretch(1.0))
     .height(Auto);
 }
 
+/// `source` cut into a slice per Chop pad, keeping each pad's mute, level
+/// and tuning. `None` if it can't be read.
+fn chop(source: &str, mut pads: shared::drums::Pads) -> Option<shared::drums::Pads> {
+    let path = crate::paths::audio_file(&crate::timeline::assets_dir(), source);
+    let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&path)?;
+    let channels = spec.channels.max(1) as usize;
+    let mono: Vec<f32> = samples.chunks(channels).map(|f| f.iter().sum::<f32>() / channels as f32).collect();
+    let slices = shared::drums::chop_points(&mono, spec.sample_rate, Kit::Chop.pads().len());
+    let name = shared::drums::intern(source);
+    pads.kit = Kit::Chop;
+    for (pad, slice) in pads.pads.iter_mut().zip(slices) {
+        pad.sample = Some(name);
+        pad.slice = Some(slice);
+    }
+    Some(pads)
+}
+
 fn pads(cx: &mut Context, color: ClipColor, track: TrackId, kit: Kit, arrangement: Signal<Arrangement>, theme: Signal<ThemeId>) {
     let accent = crate::timeline::header::clip_color_to_rgb(color);
+    let all = kit.pads();
+    // Eight pads: two rows of four, as on the MPK Mini - 5-8 above, 1-4 below.
+    let rows: Vec<std::ops::Range<usize>> = if all.len() > 5 { vec![4..all.len(), 0..4] } else { vec![0..all.len()] };
+    VStack::new(cx, move |cx| {
+    for range in rows {
     HStack::new(cx, move |cx| {
-        for (index, pad) in kit.pads().iter().enumerate() {
+        for index in range.clone() {
+            let pad = &all[index];
             let settings = Memo::new(move |_| {
                 arrangement.get().track(track).and_then(|t| t.drum_pads.get(index).copied()).unwrap_or_default()
             });
@@ -66,9 +107,18 @@ fn pads(cx: &mut Context, color: ClipColor, track: TrackId, kit: Kit, arrangemen
             let octave = note as i32 / 12 - 1;
             let note_label = format!("{}{} \u{b7} {}", shared::theory::scale::note_name(note % 12), octave, note);
             // Your own sample's name under the pad's, when it has one.
-            let detail = settings.map(move |s| match s.sample {
-                Some(sample) => std::path::Path::new(sample).file_stem().and_then(|f| f.to_str()).unwrap_or(sample).to_string(),
-                None => note_label.clone(),
+            let detail = settings.map(move |s| match (s.sample, s.slice) {
+                (Some(sample), slice) => {
+                    let stem = std::path::Path::new(sample).file_stem().and_then(|f| f.to_str()).unwrap_or(sample);
+                    match slice {
+                        // Where in the loop the slice starts (the loop's
+                        // name is the same on every pad).
+                        Some((start, _)) => format!("from {:.0}%", start * 100.0),
+                        None => stem.to_string(),
+                    }
+                }
+                (None, _) if kit == Kit::Chop => "empty".to_string(),
+                (None, _) => note_label.clone(),
             });
             Button::new(cx, move |cx| {
                 VStack::new(cx, move |cx| {
@@ -103,7 +153,10 @@ fn pads(cx: &mut Context, color: ClipColor, track: TrackId, kit: Kit, arrangemen
             .on_drop(move |cx, _| {
                 if let Some(source) = crate::browser::view::dragged().and_then(|item| item.source().cloned()) {
                     let name = shared::drums::intern(&source);
-                    set(cx, &move |s| s.sample = Some(name));
+                    set(cx, &move |s| {
+                        s.sample = Some(name);
+                        s.slice = None;
+                    });
                 }
             });
             // Mute, level and tuning for this pad.
@@ -143,7 +196,12 @@ fn pads(cx: &mut Context, color: ClipColor, track: TrackId, kit: Kit, arrangemen
                     .class("quiet")
                     .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Back to the kit's own sound"); }).arrow(false))
                     .toggle_class("hidden", settings.map(|s| s.sample.is_none()))
-                    .on_press(move |cx| set(cx, &|s| s.sample = None));
+                    .on_press(move |cx| {
+                        set(cx, &|s| {
+                            s.sample = None;
+                            s.slice = None;
+                        })
+                    });
             })
             .gap(Pixels(4.0))
             .alignment(Alignment::Left)
@@ -157,4 +215,9 @@ fn pads(cx: &mut Context, color: ClipColor, track: TrackId, kit: Kit, arrangemen
     .alignment(Alignment::Left)
     .width(Stretch(1.0))
     .height(Pixels(96.0));
+    }
+    })
+    .gap(Pixels(tokens::SPACE_2))
+    .width(Stretch(1.0))
+    .height(Auto);
 }

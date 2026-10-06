@@ -46,6 +46,19 @@ pub const TABLA: [DrumPad; 8] = [
     DrumPad { note: 43, name: "Dhin", sample: "drums/tabla/dhin.wav", chokes: &[] },
 ];
 
+/// Chop: eight empty pads, filled by dropping a loop on the kit (cut into
+/// eight slices) or a sample on a pad.
+pub const CHOP: [DrumPad; 8] = [
+    DrumPad { note: 36, name: "1", sample: "", chokes: &[] },
+    DrumPad { note: 37, name: "2", sample: "", chokes: &[] },
+    DrumPad { note: 38, name: "3", sample: "", chokes: &[] },
+    DrumPad { note: 39, name: "4", sample: "", chokes: &[] },
+    DrumPad { note: 40, name: "5", sample: "", chokes: &[] },
+    DrumPad { note: 41, name: "6", sample: "", chokes: &[] },
+    DrumPad { note: 42, name: "7", sample: "", chokes: &[] },
+    DrumPad { note: 43, name: "8", sample: "", chokes: &[] },
+];
+
 /// The most pads a kit has (a track keeps settings for this many).
 pub const MAX_PADS: usize = 8;
 
@@ -55,15 +68,17 @@ pub enum Kit {
     #[default]
     Standard,
     Tabla,
+    Chop,
 }
 
 impl Kit {
-    pub const ALL: [Kit; 2] = [Kit::Standard, Kit::Tabla];
+    pub const ALL: [Kit; 3] = [Kit::Standard, Kit::Tabla, Kit::Chop];
 
     pub fn name(self) -> &'static str {
         match self {
             Kit::Standard => "Standard",
             Kit::Tabla => "Tabla",
+            Kit::Chop => "Chop",
         }
     }
 
@@ -72,6 +87,7 @@ impl Kit {
         match self {
             Kit::Standard => &DRUM_KIT,
             Kit::Tabla => &TABLA,
+            Kit::Chop => &CHOP,
         }
     }
 
@@ -86,7 +102,7 @@ impl Kit {
 
 /// Every kit's own samples, to load up front.
 pub fn all_kit_samples() -> impl Iterator<Item = &'static str> {
-    Kit::ALL.into_iter().flat_map(|k| k.pads().iter().map(|p| p.sample))
+    Kit::ALL.into_iter().flat_map(|k| k.pads().iter().map(|p| p.sample)).filter(|s| !s.is_empty())
 }
 
 /// One pad's own settings on a Drum Kit track (indexed like its kit's pads).
@@ -102,6 +118,10 @@ pub struct PadSettings {
     /// clip's source); `None` plays the kit's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample: Option<&'static str>,
+    /// Only this part of the sample, as fractions of its length (start,
+    /// end) - a slice of a chopped loop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice: Option<(f32, f32)>,
 }
 
 /// A pad as saved: its sample name read as text (and then interned).
@@ -115,20 +135,22 @@ struct PadSaved {
     pitch: f32,
     #[serde(default)]
     sample: Option<String>,
+    #[serde(default)]
+    slice: Option<(f32, f32)>,
 }
 
 // By hand: a derived one ties the `&'static str` to the input's lifetime.
 impl<'de> serde::Deserialize<'de> for PadSettings {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let p = PadSaved::deserialize(d)?;
-        Ok(PadSettings { mute: p.mute, gain_db: p.gain_db, pitch: p.pitch, sample: p.sample.as_deref().map(intern) })
+        Ok(PadSettings { mute: p.mute, gain_db: p.gain_db, pitch: p.pitch, sample: p.sample.as_deref().map(intern), slice: p.slice })
     }
 }
 
 impl PadSettings {
     /// What this pad plays in `kit` at `index`.
     pub fn sample_in(&self, kit: Kit, index: usize) -> Option<&'static str> {
-        self.sample.or_else(|| kit.pads().get(index).map(|p| p.sample))
+        self.sample.or_else(|| kit.pads().get(index).map(|p| p.sample)).filter(|s| !s.is_empty())
     }
 }
 
@@ -200,6 +222,41 @@ mod interned {
 
 pub use interned::intern;
 
+/// Where to cut a loop into `count` slices, as fractions of its length:
+/// even divisions, each moved to the nearest hit (a jump in loudness)
+/// within 60 ms, so a slice starts on its drum rather than just before.
+/// `mono` is the loop's samples at `rate`.
+pub fn chop_points(mono: &[f32], rate: u32, count: usize) -> Vec<(f32, f32)> {
+    let len = mono.len().max(1);
+    // Loudness in 5 ms frames, and how much each frame rose over the last.
+    let frame = (rate as usize / 200).max(1);
+    let energy: Vec<f32> = mono.chunks(frame).map(|c| c.iter().map(|x| x * x).sum::<f32>() / c.len() as f32).collect();
+    let rise = |i: usize| if i == 0 { energy[0] } else { (energy[i] - energy[i - 1]).max(0.0) };
+    let reach = (rate as f32 * 0.06) as usize / frame;
+    let mut starts: Vec<usize> = (0..count)
+        .map(|k| {
+            let even = k * len / count;
+            if k == 0 || energy.is_empty() {
+                return even;
+            }
+            let centre = even / frame;
+            let lo = centre.saturating_sub(reach);
+            let hi = (centre + reach).min(energy.len() - 1);
+            let best = (lo..=hi).max_by(|&a, &b| rise(a).total_cmp(&rise(b))).unwrap_or(centre);
+            // Only move to a real hit; on a smooth sound stay on the grid.
+            if rise(best) > 1.0e-6 { best * frame } else { even }
+        })
+        .collect();
+    starts.dedup();
+    starts.sort_unstable();
+    (0..starts.len())
+        .map(|i| {
+            let end = starts.get(i + 1).copied().unwrap_or(len);
+            (starts[i] as f32 / len as f32, end as f32 / len as f32)
+        })
+        .collect()
+}
+
 /// Where `note`'s pad sits in the standard kit.
 pub fn pad_index(note: u8) -> Option<usize> {
     Kit::Standard.pad_index(note)
@@ -258,6 +315,27 @@ mod tests {
     }
 
     #[test]
+    fn a_loop_is_chopped_on_its_hits() {
+        // Four hits, the third 20 ms late: the third slice starts on it.
+        let rate = 1000;
+        let mut mono = vec![0.0f32; 4000];
+        for &at in &[0usize, 1000, 2020, 3000] {
+            for x in &mut mono[at..at + 200] {
+                *x = 0.8;
+            }
+        }
+        let slices = chop_points(&mono, rate, 4);
+        assert_eq!(slices.len(), 4);
+        assert_eq!(slices[0].0, 0.0);
+        assert_eq!(slices[3].1, 1.0);
+        assert!((slices[2].0 - 0.505).abs() < 0.003, "{slices:?}");
+        assert!(slices.windows(2).all(|w| w[0].1 == w[1].0));
+        // Silence: even slices.
+        let even = chop_points(&vec![0.0; 800], 1000, 8);
+        assert!((even[1].0 - 0.125).abs() < 1e-6);
+    }
+
+    #[test]
     fn old_projects_pads_still_load_and_new_ones_round_trip() {
         // Before kits: a list of the five standard pads.
         let old = r#"[{"mute":true,"gain_db":-3.0,"pitch":0.0},{"mute":false,"gain_db":0.0,"pitch":2.0},{"mute":false,"gain_db":0.0,"pitch":0.0},{"mute":false,"gain_db":0.0,"pitch":0.0},{"mute":false,"gain_db":0.0,"pitch":0.0}]"#;
@@ -266,6 +344,7 @@ mod tests {
         assert!(pads.pads[0].mute && pads.pads[1].pitch == 2.0 && pads.pads[7] == PadSettings::default());
         let mut tabla = Pads { kit: Kit::Tabla, ..Pads::default() };
         tabla.pads[2].sample = Some(intern("drums/clap.wav"));
+        tabla.pads[2].slice = Some((0.25, 0.5));
         let back: Pads = serde_json::from_str(&serde_json::to_string(&tabla).unwrap()).unwrap();
         assert_eq!(back, tabla);
         assert_eq!(back.pads[2].sample_in(Kit::Tabla, 2), Some("drums/clap.wav"));
