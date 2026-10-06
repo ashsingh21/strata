@@ -20,6 +20,7 @@ pub enum IconKind {
     Theory,
     Chords,
     Mic,
+    Metronome,
     Panel,
     Settings,
     /// Strata's mark: layers, like rock strata.
@@ -48,7 +49,7 @@ impl IconKind {
     fn view_box(self) -> f32 {
         use IconKind::*;
         match self {
-            Browse | Samples | Presets | Files | History | Learn | Theory | Chords | Mic | Panel | Settings | Logo => 16.0,
+            Browse | Samples | Presets | Files | History | Learn | Theory | Chords | Mic | Metronome | Panel | Settings | Logo => 16.0,
             _ => 12.0,
         }
     }
@@ -187,6 +188,11 @@ pub fn draw_icon(canvas: &Canvas, kind: IconKind, x: f32, y: f32, size: f32, col
             poly(canvas, &[(2.0, 4.0), (6.0, 4.0), (10.0, 2.5), (14.0, 2.5)], false, &paint);
             poly(canvas, &[(2.0, 8.0), (14.0, 8.0)], false, &paint);
             poly(canvas, &[(2.0, 13.0), (6.0, 13.0), (10.0, 11.5), (14.0, 11.5)], false, &paint);
+        }
+        // A metronome: its body and arm.
+        Metronome => {
+            poly(canvas, &[(5.5, 2.0), (10.5, 2.0), (13.0, 14.0), (3.0, 14.0)], true, &paint);
+            lines(canvas, &[((8.0, 11.0), (11.5, 4.5)), ((4.0, 11.0), (12.0, 11.0))], &paint);
         }
         // A microphone on its stand.
         Mic => {

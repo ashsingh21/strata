@@ -211,6 +211,9 @@ fn rail(cx: &mut Context, p: BrowserProps) {
         let riyaz = Memo::new(|_| crate::riyaz::open_signal().is_some_and(|s| s.get()));
         rail_button(cx, p, IconKind::Mic, "Riyaz: sing against the tanpura and see your pitch", riyaz)
             .on_press(|cx| cx.emit(crate::riyaz::RiyazEvent::ToggleOpen));
+        let practice = Memo::new(|_| crate::practice::open_signal().is_some_and(|s| s.get()));
+        rail_button(cx, p, IconKind::Metronome, "Practice: hear a rhythm or melody, play it back", practice)
+            .on_press(|cx| cx.emit(crate::practice::PracticeEvent::ToggleOpen));
         Element::new(cx).height(Stretch(1.0)).width(Pixels(1.0));
         let open = Memo::new(move |_| p.open.get());
         rail_button(cx, p, IconKind::Panel, "Show or hide the panel", open).on_press(|cx| cx.emit(crate::app::AppEvent::ToggleSidebar));

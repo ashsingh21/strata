@@ -66,6 +66,8 @@ pub struct DeviceAreaProps {
     pub voicing: crate::voicing::VoicingProps,
     /// Riyaz, docked likewise.
     pub riyaz: crate::riyaz::RiyazProps,
+    /// Practice, docked likewise.
+    pub practice: crate::practice::PracticeProps,
 }
 
 pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
@@ -199,6 +201,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
     );
     crate::voicing::voicing_view(cx, p.voicing);
     crate::riyaz::riyaz_view(cx, p.riyaz);
+    crate::practice::practice_view(cx, p.practice);
 }
 
 /// The selected track's swatch and name, then its devices as chips: the

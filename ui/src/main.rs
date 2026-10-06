@@ -6,6 +6,7 @@ mod preview_player;
 mod voicing;
 mod riyaz;
 mod midi_in;
+mod practice;
 mod bpm_field;
 mod canvas_text;
 mod compressor_curve;
@@ -294,6 +295,9 @@ fn main() -> Result<(), ApplicationError> {
         );
         let riyaz_props = riyaz::RiyazProps::of(&riyaz_model, theme);
         riyaz_model.build(cx);
+        let practice_model = practice::PracticeModel::new(interval_key, interval_scale_mask, preview_player.clone(), engine_sample_rate);
+        let practice_props = practice::PracticeProps::of(&practice_model, theme);
+        practice_model.build(cx);
         let midi_model = midi_in::MidiModel::new(tl_arrangement, selected_track);
         let midi_devices = midi_model.devices;
         midi_model.build(cx);
@@ -405,6 +409,7 @@ fn main() -> Result<(), ApplicationError> {
                 cx.emit(lessons::LessonEvent::Tick);
                 cx.emit(riyaz::RiyazEvent::Tick);
                 cx.emit(midi_in::MidiEvent::Tick);
+                cx.emit(practice::PracticeEvent::Tick);
                 cx.emit(project::ProjectEvent::Tick);
 
                 // Latest-wins: cheap to rebuild every tick, and avoids
@@ -670,6 +675,7 @@ fn main() -> Result<(), ApplicationError> {
                                     show_note_names: interval_show_note_names,
                                     voicing: voicing_props,
                                     riyaz: riyaz_props,
+                                    practice: practice_props,
                                 },
                             );
                         });

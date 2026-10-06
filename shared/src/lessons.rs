@@ -800,7 +800,7 @@ pub fn project_chords() -> Vec<MidiNote> {
 }
 
 /// A clip from `start_bar` to `end_bar` looping a `pattern_bars` pattern.
-fn add_clip(arr: &mut Arrangement, track: TrackId, name: &str, start_bar: i64, end_bar: i64, pattern_bars: i64, notes: Vec<MidiNote>) {
+pub(crate) fn add_clip(arr: &mut Arrangement, track: TrackId, name: &str, start_bar: i64, end_bar: i64, pattern_bars: i64, notes: Vec<MidiNote>) {
     let id = arr.alloc_id();
     arr.clips.push(Clip {
         id,
@@ -835,7 +835,7 @@ pub fn lesson_two_bassline() -> Vec<MidiNote> {
     (0..4).map(|beat| MidiNote { start: beat * PPQ + PPQ / 2, length: SIXTEENTH, pitch: BASS_NOTE, velocity: 100 }).collect()
 }
 
-fn add_track(arr: &mut Arrangement, name: &str, color: ClipColor, instrument: Instrument, gain_db: f32) -> TrackId {
+pub(crate) fn add_track(arr: &mut Arrangement, name: &str, color: ClipColor, instrument: Instrument, gain_db: f32) -> TrackId {
     let id = arr.alloc_id();
     arr.tracks.push(Track {
         id,

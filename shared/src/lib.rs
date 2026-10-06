@@ -23,6 +23,7 @@ pub mod guitar;
 pub mod lessons;
 pub mod midi;
 pub mod playback;
+pub mod practice;
 pub mod project;
 pub mod recorder;
 pub mod riyaz;
