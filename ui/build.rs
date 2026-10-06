@@ -223,6 +223,15 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   height: 52px;
   padding: 0px;
 }}
+.ear-slot {{
+  width: 52px;
+  height: 44px;
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 6px;
+  border-width: 2px;
+}}
 .ear-pad-degree {{
   font-size: 20px;
   font-weight: 600;
@@ -900,6 +909,11 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".ear-pad", vec![("background-color", c("bg-000")), ("border-color", c("line-control")), ("color", c("ink"))]);
     rule(".ear-pad:hover", vec![("background-color", c("bg-200"))]);
     rule(".ear-pad-note", vec![("color", c("ink-muted"))]);
+    rule(".ear-slot", vec![("background-color", c("bg-200")), ("border-color", c("bg-200")), ("color", c("ink-faint"))]);
+    rule(".ear-slot.is-filled", vec![("background-color", c("bg-300")), ("border-color", c("bg-300")), ("color", c("ink"))]);
+    rule(".ear-slot.is-current", vec![("border-color", c("ink"))]);
+    rule(".ear-slot.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
+    rule(".ear-slot.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
     rule(".ear-pad.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
     rule(".ear-pad.is-right .ear-pad-note", vec![("color", c("on-signal"))]);
     rule(".ear-pad.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
