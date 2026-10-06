@@ -35,6 +35,43 @@ pub fn lofi_keys() -> SynthState {
     s
 }
 
+/// A soft, warm piano (more Rhodes than concert grand - a subtractive
+/// synth can't do a hammered string): a rounded triangle with a quiet sine
+/// an octave up for the bell, a filter that opens on the attack and with
+/// the pitch (high notes brighter, as on a real one), and a long fall to
+/// silence while the key's held. Louder playing is louder.
+pub fn piano() -> SynthState {
+    let mut s = init("Piano");
+    s.osc1.waveform = Waveform::Triangle;
+    s.osc1.knob_b = 0.25;
+    s.osc1.knob_c = 0.04;
+    s.osc2.waveform = Waveform::Sine;
+    s.osc2.octave = 1;
+    s.osc2.knob_a_cents = 3.0;
+    s.osc2.knob_c = 0.06;
+    s.mix.osc1_db = -6.0;
+    s.mix.osc2_db = -15.0;
+    s.filter.filter_type = FilterType::Lp12;
+    s.filter.cutoff_hz = 900.0;
+    s.filter.resonance = 0.0;
+    s.filter.env_amount_oct = 2.6;
+    s.filter.key_track = 0.7;
+    s.filter_env.attack_ms = 1.0;
+    s.filter_env.decay_ms = 700.0;
+    s.filter_env.sustain = 0.1;
+    s.filter_env.release_ms = 400.0;
+    s.amp_env.attack_ms = 1.0;
+    s.amp_env.decay_ms = 2800.0;
+    s.amp_env.sustain = 0.0;
+    s.amp_env.release_ms = 380.0;
+    s.fx.chorus_mix = 0.12;
+    s.fx.chorus_depth = 0.3;
+    s.fx.reverb_mix = 0.22;
+    s.fx.reverb_size = 0.55;
+    s.output.volume_db = -4.0;
+    s
+}
+
 pub fn deep_bass() -> SynthState {
     let mut s = init("Deep Bass");
     s.osc1.octave = -1;

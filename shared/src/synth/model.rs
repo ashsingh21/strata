@@ -280,7 +280,7 @@ pub fn seed_synth() -> SynthState {
 /// From "Deep Bass" on they are the lessons' sounds (see `super::recipes`).
 /// "Init" comes first: the blank starting point (one plain saw, filter
 /// open, nothing moving) for building a sound from scratch.
-pub const PRESETS: [(&str, fn() -> SynthState); 12] = [
+pub const PRESETS: [(&str, fn() -> SynthState); 13] = [
     ("Init", crate::lessons::init_patch),
     ("Warm Bass", seed_synth),
     ("Deep Rave Bass", deep_rave_bass),
@@ -292,6 +292,7 @@ pub const PRESETS: [(&str, fn() -> SynthState); 12] = [
     ("Reed", super::recipes::reed),
     ("Lead", super::recipes::lead),
     ("Lo-fi Keys", super::recipes::lofi_keys),
+    ("Piano", super::recipes::piano),
     ("808", super::recipes::eight_oh_eight),
 ];
 
