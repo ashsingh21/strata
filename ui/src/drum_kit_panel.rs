@@ -1,12 +1,14 @@
-//! The Drum Kit's device panel: one pad per kit sound. Clicking a pad plays
-//! it on the selected track (and, while step entry is armed, records it),
-//! the same way a key on Carve's keyboard does. Under each pad: mute, level
-//! and tuning for that pad on this track.
+//! The Drum Kit's device panel: the kit (Standard or Tabla), then one pad
+//! per sound. Clicking a pad plays it on the selected track (and, while
+//! step entry is armed, records it), the same way a key on Carve's
+//! keyboard does. Under each pad: mute, level and tuning for that pad on
+//! this track. Drop a sample from the browser on a pad and it plays that
+//! instead; x puts the kit's own back.
 
 use vizia::prelude::*;
 
 use shared::arrangement::{Arrangement, ClipColor, TrackId};
-use shared::drums::{PadSettings, DRUM_KIT};
+use shared::drums::{Kit, PadSettings};
 
 use crate::knob::Knob;
 use crate::timeline::state::TimelineEvent;
@@ -20,9 +22,37 @@ use crate::synth::state::SynthEvent;
 use crate::tokens;
 
 pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrangement: Signal<Arrangement>, theme: Signal<ThemeId>) {
+    let kit = Memo::new(move |_| arrangement.get().track(track).map(|t| t.drum_pads.kit).unwrap_or_default());
+    VStack::new(cx, move |cx| {
+        HStack::new(cx, move |cx| {
+            Label::new(cx, "Kit").class("label");
+            crate::synth::segmented::segmented(
+                cx,
+                Kit::ALL.len(),
+                |cx, i| Label::new(cx, Kit::ALL[i].name()),
+                move |i| kit.map(move |k| *k == Kit::ALL[i]),
+                move |cx, i| cx.emit(TimelineEvent::SetDrumKit { track, kit: Kit::ALL[i] }),
+            )
+            .height(Pixels(tokens::SIZE_CONTROL));
+            Label::new(cx, "Drag a sample from the browser onto a pad to play it instead").class("value").class("empty-note");
+        })
+        .gap(Pixels(tokens::SPACE_2))
+        .alignment(Alignment::Left)
+        .height(Auto);
+        // The pads, rebuilt when the kit changes.
+        Binding::new(cx, kit, move |cx| pads(cx, color, track, kit.get(), arrangement, theme));
+    })
+    .class("device")
+    .gap(Pixels(tokens::SPACE_3))
+    .padding(Pixels(tokens::SPACE_3))
+    .width(Stretch(1.0))
+    .height(Auto);
+}
+
+fn pads(cx: &mut Context, color: ClipColor, track: TrackId, kit: Kit, arrangement: Signal<Arrangement>, theme: Signal<ThemeId>) {
     let accent = crate::timeline::header::clip_color_to_rgb(color);
     HStack::new(cx, move |cx| {
-        for (index, pad) in DRUM_KIT.iter().enumerate() {
+        for (index, pad) in kit.pads().iter().enumerate() {
             let settings = Memo::new(move |_| {
                 arrangement.get().track(track).and_then(|t| t.drum_pads.get(index).copied()).unwrap_or_default()
             });
@@ -35,13 +65,27 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
             let note = pad.note;
             let octave = note as i32 / 12 - 1;
             let note_label = format!("{}{} \u{b7} {}", shared::theory::scale::note_name(note % 12), octave, note);
+            // Your own sample's name under the pad's, when it has one.
+            let detail = settings.map(move |s| match s.sample {
+                Some(sample) => std::path::Path::new(sample).file_stem().and_then(|f| f.to_str()).unwrap_or(sample).to_string(),
+                None => note_label.clone(),
+            });
             Button::new(cx, move |cx| {
                 VStack::new(cx, move |cx| {
                     Element::new(cx).background_color(accent).width(Stretch(1.0)).height(Pixels(3.0)).hoverable(false);
                     Label::new(cx, pad.name).class("label").hoverable(false);
-                    Label::new(cx, note_label.clone()).class("value").hoverable(false);
+                    Label::new(cx, detail)
+                        .class("value")
+                        .text_wrap(false)
+                        .text_overflow(TextOverflow::Ellipsis)
+                        .width(Stretch(1.0))
+                        .hoverable(false);
                 })
                 .gap(Pixels(4.0))
+                .alignment(Alignment::Center)
+                .padding_left(Pixels(6.0))
+                .padding_right(Pixels(6.0))
+                .width(Stretch(1.0))
                 .hoverable(false)
             })
             .class("btn")
@@ -54,7 +98,14 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
                 cx.emit(SynthEvent::KeyPress(note));
                 cx.emit(SynthEvent::KeyRelease(note));
             })
-            .toggle_class("is-muted", settings.map(|s| s.mute));
+            .toggle_class("is-muted", settings.map(|s| s.mute))
+            // A sample from the browser dropped here: this pad plays it.
+            .on_drop(move |cx, _| {
+                if let Some(source) = crate::browser::view::dragged().and_then(|item| item.source().cloned()) {
+                    let name = shared::drums::intern(&source);
+                    set(cx, &move |s| s.sample = Some(name));
+                }
+            });
             // Mute, level and tuning for this pad.
             HStack::new(cx, move |cx| {
                 Button::new(cx, |cx| Label::new(cx, "M"))
@@ -85,6 +136,14 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
                     }),
                 )
                 .class("value");
+                // Back to the kit's own sound.
+                Button::new(cx, |cx| Label::new(cx, "\u{2715}"))
+                    .class("btn")
+                    .class("sm")
+                    .class("quiet")
+                    .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Back to the kit's own sound"); }).arrow(false))
+                    .toggle_class("hidden", settings.map(|s| s.sample.is_none()))
+                    .on_press(move |cx| set(cx, &|s| s.sample = None));
             })
             .gap(Pixels(4.0))
             .alignment(Alignment::Left)
@@ -94,10 +153,8 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
             .size(Auto);
         }
     })
-    .class("device")
     .gap(Pixels(tokens::SPACE_2))
     .alignment(Alignment::Left)
-    .padding(Pixels(tokens::SPACE_3))
     .width(Stretch(1.0))
-    .height(Pixels(124.0));
+    .height(Pixels(96.0));
 }

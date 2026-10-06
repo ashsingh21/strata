@@ -17,7 +17,7 @@ use shared::theory::{degree_name, note_name};
 use crate::synth::segmented::segmented;
 use crate::timeline::state::TimelineEvent;
 use crate::tokens::{self, ThemeId};
-use grid::{grid_height, is_drum_clip, note_with_octave, row_pitches, ticks_to_bbs, Grid};
+use grid::{clip_kit, grid_height, is_drum_clip, note_with_octave, row_pitches, ticks_to_bbs, Grid};
 use state::{ChordShape, EditMode, LabelMode, NoteKey, PianoRollEvent};
 
 /// The footer's description of the selection: how many, which degrees and
@@ -272,7 +272,7 @@ pub fn piano_roll_view(
                             ClipContent::Audio { .. } => Vec::new(),
                         })
                         .unwrap_or_default();
-                    let rows = row_pitches(&notes, key.get(), scale_mask.get(), false, octave.get());
+                    let rows = row_pitches(&notes, key.get(), scale_mask.get(), None, octave.get());
                     match (rows.last(), rows.first()) {
                         (Some(&lo), Some(&hi)) => format!("{}\u{2013}{}", note_with_octave(lo), note_with_octave(hi)),
                         _ => String::new(),
@@ -414,8 +414,8 @@ pub fn piano_roll_view(
                     ClipContent::Audio { .. } => Vec::new(),
                 })
                 .unwrap_or_default();
-            let drums = open_clip.get().is_some_and(|id| is_drum_clip(&arr, id));
-            Pixels(grid_height(row_pitches(&notes, key.get(), scale_mask.get(), drums, octave.get()).len()))
+            let kit = open_clip.get().and_then(|id| clip_kit(&arr, id));
+            Pixels(grid_height(row_pitches(&notes, key.get(), scale_mask.get(), kit, octave.get()).len()))
         });
         Grid::new(cx, arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, new_length)
             .width(Stretch(1.0))

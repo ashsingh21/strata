@@ -384,6 +384,12 @@ impl ProjectModel {
             crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &assets_dir, source.clone());
             let _ = self.decode_request_tx.send(source);
         }
+        // Samples of your own on drum pads (the kits' own are loaded at start).
+        for t in &project.arrangement.tracks {
+            for sample in t.drum_pads.pads.iter().filter_map(|p| p.sample) {
+                let _ = self.decode_request_tx.send(sample.into());
+            }
+        }
     }
 
     /// Renders the project as it is now to `path` on a background thread,
@@ -696,8 +702,8 @@ pub fn startup_path() -> Option<PathBuf> {
 pub fn decode_sources(arrangement: &shared::arrangement::Arrangement, sample_rate: u32) -> Vec<shared::playback::DecodedSource> {
     let assets = crate::timeline::assets_dir();
     let mut names: Vec<Arc<str>> = crate::timeline::peaks_loader::audio_sources(arrangement).into_iter().collect();
-    if arrangement.tracks.iter().any(|t| t.instrument == Some(shared::arrangement::Instrument::Drums)) {
-        names.extend(shared::drums::DRUM_KIT.iter().map(|p| Arc::from(p.sample)));
+    for t in arrangement.tracks.iter().filter(|t| t.instrument == Some(shared::arrangement::Instrument::Drums)) {
+        names.extend(t.drum_pads.samples().map(Arc::from));
     }
     names.sort();
     names.dedup();

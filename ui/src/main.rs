@@ -208,8 +208,8 @@ fn main() -> Result<(), ApplicationError> {
         );
         // The Drum Kit's samples, loaded up front: a kit can be added to
         // any track at any time and must play on its first note.
-        for pad in &shared::drums::DRUM_KIT {
-            let _ = decode_request_tx.send(pad.sample.into());
+        for sample in shared::drums::all_kit_samples() {
+            let _ = decode_request_tx.send(sample.into());
         }
         timeline_state.set_decode_sender(decode_request_tx.clone());
 

@@ -72,7 +72,7 @@ pub struct Track {
     /// A Drum Kit track's per-pad mute, level and tuning, in `DRUM_KIT`
     /// order. `default` so older projects load with every pad as sampled.
     #[serde(default)]
-    pub drum_pads: [crate::drums::PadSettings; crate::drums::DRUM_KIT.len()],
+    pub drum_pads: crate::drums::Pads,
     /// Old shape (a flat `Vec<EffectSlot>`, no positions/graph) - read-
     /// only, kept only so `Project::migrate` can convert it into `fx`
     /// once. Never written to a new save (`skip_serializing`).

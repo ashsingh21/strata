@@ -73,7 +73,7 @@ pub struct SynthParams {
     /// the synth voice fields above are ignored. Set by the caller.
     pub drums: bool,
     /// A Drum Kit slot's per-pad settings (`Track::drum_pads`).
-    pub drum_pads: [crate::drums::PadSettings; crate::drums::DRUM_KIT.len()],
+    pub drum_pads: crate::drums::Pads,
 }
 
 impl SynthParams {

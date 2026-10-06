@@ -99,8 +99,10 @@ impl MidiModel {
     /// The selected Drum Kit's pad notes, in pad order (none for Carve).
     fn drum_pads(&self) -> Vec<u8> {
         let arr = self.arrangement.get();
-        let drums = self.selected_track.get().and_then(|t| arr.track(t)).is_some_and(|t| t.instrument == Some(Instrument::Drums));
-        if drums { shared::drums::DRUM_KIT.iter().map(|p| p.note).collect() } else { Vec::new() }
+        match self.selected_track.get().and_then(|t| arr.track(t)).filter(|t| t.instrument == Some(Instrument::Drums)) {
+            Some(t) => t.drum_pads.kit.pads().iter().map(|p| p.note).collect(),
+            None => Vec::new(),
+        }
     }
 
     fn handle(&mut self, cx: &mut EventContext, action: Action) {

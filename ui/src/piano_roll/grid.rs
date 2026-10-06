@@ -38,11 +38,11 @@ const STEM_GRAB_PX: f32 = 6.0;
 /// it's off-scale (e.g. from before a key change). High to low,
 /// piano-style. `octave` moves the two-octave window (the Octave −/+ in
 /// the header); notes outside it still get their rows.
-pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, drums: bool, octave: i32) -> Vec<u8> {
-    // A Drum Kit clip is a step grid: one row per pad (plus any other
-    // pitch the notes use), kick at the bottom, scale ignored.
-    if drums {
-        let mut rows: Vec<u8> = shared::drums::DRUM_KIT.iter().map(|p| p.note).collect();
+pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, kit: Option<shared::drums::Kit>, octave: i32) -> Vec<u8> {
+    // A Drum Kit clip is a step grid: one row per pad of its kit (plus any
+    // other pitch the notes use), lowest pad at the bottom, scale ignored.
+    if let Some(kit) = kit {
+        let mut rows: Vec<u8> = kit.pads().iter().map(|p| p.note).collect();
         rows.extend(notes.iter().map(|n| n.pitch));
         rows.sort_unstable_by(|a, b| b.cmp(a));
         rows.dedup();
@@ -80,9 +80,15 @@ pub fn row_pitches(notes: &[MidiNote], key: u8, mask: u16, drums: bool, octave: 
 
 /// Whether `clip` sits on a Drum Kit track (its editor is a step grid).
 pub fn is_drum_clip(arr: &Arrangement, clip: ClipId) -> bool {
+    clip_kit(arr, clip).is_some()
+}
+
+/// The kit of `clip`'s Drum Kit track, if it's on one.
+pub fn clip_kit(arr: &Arrangement, clip: ClipId) -> Option<shared::drums::Kit> {
     arr.clip(clip)
         .and_then(|c| arr.track(c.track))
-        .is_some_and(|t| t.instrument == Some(shared::arrangement::Instrument::Drums))
+        .filter(|t| t.instrument == Some(shared::arrangement::Instrument::Drums))
+        .map(|t| t.drum_pads.kit)
 }
 
 /// The canvas height for `rows` rows: ruler + rows + velocity lane.
@@ -255,7 +261,11 @@ impl Grid {
     }
 
     fn drums(&self) -> bool {
-        self.open_clip.get().is_some_and(|id| is_drum_clip(&self.arrangement.get(), id))
+        self.kit().is_some()
+    }
+
+    fn kit(&self) -> Option<shared::drums::Kit> {
+        self.open_clip.get().and_then(|id| clip_kit(&self.arrangement.get(), id))
     }
 
     /// The open clip's track colour - notes are filled with it.
@@ -389,7 +399,7 @@ impl View for Grid {
             | WindowEvent::MouseTripleClick(MouseButton::Left) => {
                 let Some((clip_id, clip_start, clip_length, notes)) = self.clip_info() else { return };
                 let bounds = cx.lbounds();
-                let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums(), self.octave.get());
+                let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.kit(), self.octave.get());
                 if rows.is_empty() || clip_length <= 0 {
                     return;
                 }
@@ -407,7 +417,7 @@ impl View for Grid {
                     let row = (ly / ROW_H) as usize;
                     let track = self.arrangement.get().clip(clip_id).map(|c| c.track);
                     if let (Some(&pitch), Some(track)) = (rows.get(row), track) {
-                        if let Some(pad) = shared::drums::pad_index(pitch) {
+                        if let Some(pad) = self.kit().and_then(|k| k.pad_index(pitch)) {
                             cx.emit(TimelineEvent::ToggleDrumPadMute { track, pad });
                         }
                     }
@@ -575,7 +585,7 @@ impl View for Grid {
                     if let Some((_, _, clip_length, notes)) = self.clip_info() {
                         let bounds = cx.lbounds();
                         let (lx, ly) = (crate::hidpi::l(cx, *x) - bounds.x - LABEL_W, crate::hidpi::l(cx, *y) - bounds.y - RULER_H);
-                        let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), false, self.octave.get());
+                        let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), None, self.octave.get());
                         let px_per_tick = (bounds.w - LABEL_W) as f64 / clip_length.max(1) as f64;
                         let over_edge = lx >= 0.0 && ly >= 0.0 && Self::edge_note(&notes, &rows, lx, ly, px_per_tick).is_some();
                         let on_ruler = lx >= 0.0 && ly < 0.0;
@@ -613,7 +623,7 @@ impl View for Grid {
                 }
                 if let Some((key, _)) = self.vel_drag {
                     let Some((_, _, _, notes)) = self.clip_info() else { return };
-                    let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.drums(), self.octave.get());
+                    let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.kit(), self.octave.get());
                     let lane_top = cx.lbounds().y + RULER_H + rows.len() as f32 * ROW_H;
                     self.vel_drag = Some((key, Self::velocity_at(lane_top, crate::hidpi::l(cx, *y))));
                     cx.needs_redraw();
@@ -690,8 +700,9 @@ impl View for Grid {
             }
         }
         let key = self.key.get();
-        let drums = self.drums();
-        let rows = row_pitches(&notes, key, self.scale_mask.get(), drums, self.octave.get());
+        let kit = self.kit();
+        let drums = kit.is_some();
+        let rows = row_pitches(&notes, key, self.scale_mask.get(), kit, self.octave.get());
         if rows.is_empty() {
             return;
         }
@@ -701,7 +712,8 @@ impl View for Grid {
         let muted_pads: Vec<u8> = if drums {
             let arr = self.arrangement.get();
             let track = self.open_clip.get().and_then(|id| arr.clip(id)).and_then(|c| arr.track(c.track));
-            shared::drums::DRUM_KIT
+            kit.unwrap_or_default()
+                .pads()
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| track.is_some_and(|t| t.drum_pads.get(*i).is_some_and(|p| p.mute)))
@@ -756,7 +768,7 @@ impl View for Grid {
 
             let (big, small) = match (drums, label_mode) {
                 (true, _) => (
-                    shared::drums::pad_for_note(pitch).map(|p| p.name.to_string()).unwrap_or_else(|| note_with_octave(pitch)),
+                    kit.and_then(|k| k.pad_for_note(pitch)).map(|p| p.name.to_string()).unwrap_or_else(|| note_with_octave(pitch)),
                     String::new(),
                 ),
                 (false, LabelMode::Intervals) => (degree_name(rel).to_string(), note_with_octave(pitch)),
@@ -1002,40 +1014,40 @@ mod tests {
 
     #[test]
     fn an_empty_clip_starts_on_the_keys_third_octave() {
-        let rows = row_pitches(&[], A, MINOR_PENTATONIC, false, 0);
+        let rows = row_pitches(&[], A, MINOR_PENTATONIC, None, 0);
         assert_eq!(*rows.last().unwrap(), 57, "A3 at the bottom");
     }
 
     #[test]
     fn adding_a_note_on_a_visible_row_never_moves_the_rows() {
-        let empty = row_pitches(&[], A, MINOR_PENTATONIC, false, 0);
+        let empty = row_pitches(&[], A, MINOR_PENTATONIC, None, 0);
         for &pitch in &empty {
-            assert_eq!(row_pitches(&[note(pitch)], A, MINOR_PENTATONIC, false, 0), empty, "after adding {pitch}");
+            assert_eq!(row_pitches(&[note(pitch)], A, MINOR_PENTATONIC, None, 0), empty, "after adding {pitch}");
         }
         // The same from a clip that already has low notes.
         let low = [note(33), note(45)];
-        let rows = row_pitches(&low, A, MINOR_PENTATONIC, false, 0);
+        let rows = row_pitches(&low, A, MINOR_PENTATONIC, None, 0);
         for &pitch in &rows {
             let mut more = low.to_vec();
             more.push(note(pitch));
-            assert_eq!(row_pitches(&more, A, MINOR_PENTATONIC, false, 0), rows, "after adding {pitch}");
+            assert_eq!(row_pitches(&more, A, MINOR_PENTATONIC, None, 0), rows, "after adding {pitch}");
         }
     }
 
     #[test]
     fn low_notes_get_a_compact_grid_round_them() {
-        let rows = row_pitches(&[note(29), note(43)], A, MINOR_PENTATONIC, false, 0);
+        let rows = row_pitches(&[note(29), note(43)], A, MINOR_PENTATONIC, None, 0);
         assert!(rows.contains(&29) && rows.contains(&43));
         assert!(rows.len() <= 12, "{} rows", rows.len());
     }
 
     #[test]
     fn the_octave_moves_the_window_but_keeps_every_note() {
-        let up = row_pitches(&[], A, MINOR_PENTATONIC, false, 1);
+        let up = row_pitches(&[], A, MINOR_PENTATONIC, None, 1);
         assert_eq!(*up.last().unwrap(), 69, "A4 at the bottom");
-        let down = row_pitches(&[], A, MINOR_PENTATONIC, false, -2);
+        let down = row_pitches(&[], A, MINOR_PENTATONIC, None, -2);
         assert_eq!(*down.last().unwrap(), 33, "A1 at the bottom");
-        let with_low_note = row_pitches(&[note(45)], A, MINOR_PENTATONIC, false, 1);
+        let with_low_note = row_pitches(&[note(45)], A, MINOR_PENTATONIC, None, 1);
         assert!(with_low_note.contains(&45) && with_low_note.contains(&93), "A2 note kept, A6 top kept");
     }
 

@@ -1,9 +1,9 @@
-//! The Drum Kit instrument: plays `shared::drums::DRUM_KIT` samples as
+//! The Drum Kit instrument: plays a kit's samples (or a pad's own) as
 //! one-shots, one voice per hit. Sample data comes from the same decoded
 //! sources the arrangement's audio clips use, so nothing here allocates or
 //! touches the disk. Note-offs are ignored: a drum hit always plays out.
 
-use shared::drums::{pad_for_note, pad_index, PadSettings, DRUM_KIT};
+use shared::drums::Pads;
 use shared::playback::DecodedSource;
 use shared::synth::{NoteEvent, ALL_NOTES_OFF};
 
@@ -36,8 +36,8 @@ pub struct DrumEngine {
     sample_rate: f32,
     fade_step: f32,
     counter: u64,
-    /// The track's per-pad mute, level and tuning.
-    pads: [PadSettings; DRUM_KIT.len()],
+    /// The track's kit and its pads' mute, level, tuning and own samples.
+    pads: Pads,
 }
 
 impl DrumEngine {
@@ -51,7 +51,7 @@ impl DrumEngine {
         }
     }
 
-    pub fn set_pads(&mut self, pads: [PadSettings; DRUM_KIT.len()]) {
+    pub fn set_pads(&mut self, pads: Pads) {
         self.pads = pads;
     }
 
@@ -65,13 +65,15 @@ impl DrumEngine {
         if !event.on {
             return;
         }
-        let Some(pad) = pad_for_note(event.note) else { return };
-        let settings = pad_index(event.note).map(|i| self.pads[i]).unwrap_or_default();
+        let kit = self.pads.kit;
+        let (Some(pad), Some(index)) = (kit.pad_for_note(event.note), kit.pad_index(event.note)) else { return };
+        let settings = self.pads.pads[index];
         if settings.mute {
             return;
         }
+        let sample = settings.sample.unwrap_or(pad.sample);
         // Not decoded yet (or failed to decode): nothing to play.
-        let Some(source) = sources.iter().position(|s| &*s.source == pad.sample) else { return };
+        let Some(source) = sources.iter().position(|s| &*s.source == sample) else { return };
 
         for v in self.voices.iter_mut().filter(|v| v.active && pad.chokes.contains(&v.note)) {
             v.fading = true;
@@ -142,6 +144,7 @@ impl DrumEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::drums::{pad_index, Kit, PadSettings};
     use std::sync::Arc;
 
     fn source(name: &str, rate: u32, frames: usize) -> DecodedSource {
@@ -191,8 +194,8 @@ mod tests {
         let sources = [source("drums/kick.wav", 48_000, 480)];
         let play = |settings: PadSettings| {
             let mut d = DrumEngine::new(48_000.0);
-            let mut pads = [PadSettings::default(); DRUM_KIT.len()];
-            pads[pad_index(shared::drums::KICK).unwrap()] = settings;
+            let mut pads = Pads::default();
+            pads.pads[pad_index(shared::drums::KICK).unwrap()] = settings;
             d.set_pads(pads);
             d.handle_note_event(hit(shared::drums::KICK), &sources);
             let out: Vec<f32> = (0..1000).map(|_| d.process(&sources).0).collect();
@@ -204,5 +207,29 @@ mod tests {
         assert!((quieter / plain_level - 0.501).abs() < 0.01, "-6 dB is half the level: {}", quieter / plain_level);
         let (octave_up_len, _) = play(PadSettings { pitch: 12.0, ..Default::default() });
         assert!((octave_up_len as f32 - plain_len as f32 / 2.0).abs() <= 2.0, "an octave up plays twice as fast: {octave_up_len} vs {plain_len}");
+    }
+
+    #[test]
+    fn a_tabla_track_plays_tabla_and_a_pad_can_play_your_own_sample() {
+        let sources = [source("drums/tabla/na.wav", 48_000, 480), source("drums/kick.wav", 48_000, 480), source("mine/hit.wav", 48_000, 480)];
+        let sounding = |pads: Pads, note: u8| {
+            let mut d = DrumEngine::new(48_000.0);
+            d.set_pads(pads);
+            d.handle_note_event(hit(note), &sources);
+            d.process(&sources).0 != 0.0
+        };
+        let tabla = Pads { kit: Kit::Tabla, ..Pads::default() };
+        // Na is note 38 on the tabla - the standard kit's snare, which a
+        // tabla track doesn't have.
+        assert!(sounding(tabla, 38));
+        assert!(!sounding(tabla, 46), "no open hat on a tabla");
+        // Kick replaced by your own sample.
+        let mut mine = Pads::default();
+        mine.pads[0].sample = Some(shared::drums::intern("mine/hit.wav"));
+        assert!(sounding(mine, shared::drums::KICK));
+        let mut d = DrumEngine::new(48_000.0);
+        d.set_pads(mine);
+        d.handle_note_event(hit(shared::drums::KICK), &sources);
+        assert_eq!(d.voices.iter().find(|v| v.active).map(|v| v.source), Some(2));
     }
 }

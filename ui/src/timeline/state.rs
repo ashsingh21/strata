@@ -439,6 +439,8 @@ pub enum TimelineEvent {
     /// A Drum Kit pad's mute, level or tuning (like a knob, not an undo
     /// step).
     SetDrumPad { track: TrackId, pad: usize, settings: shared::drums::PadSettings },
+    /// Which kit a Drum Kit track plays (its pads keep their settings).
+    SetDrumKit { track: TrackId, kit: shared::drums::Kit },
     /// Mute or unmute one pad (a click on its row's name in the step grid).
     ToggleDrumPadMute { track: TrackId, pad: usize },
     /// A MIDI clip's swing, 0 (straight) to 1 (see `Clip::swing`). Like
@@ -1003,9 +1005,20 @@ impl Model for TimelineState {
             }
             TimelineEvent::SetSnap(grid) => self.snap.set(*grid),
             TimelineEvent::SetDrumPad { track, pad, settings } => {
+                // A sample of your own: loaded so the pad can play it.
+                if let (Some(sample), Some(tx)) = (settings.sample, &self.decode_request_tx) {
+                    let _ = tx.send(sample.into());
+                }
                 self.with_arrangement(|arr, _| {
                     if let Some(p) = arr.track_mut(*track).and_then(|t| t.drum_pads.get_mut(*pad)) {
                         *p = *settings;
+                    }
+                });
+            }
+            TimelineEvent::SetDrumKit { track, kit } => {
+                self.with_arrangement(|arr, _| {
+                    if let Some(t) = arr.track_mut(*track) {
+                        t.drum_pads.kit = *kit;
                     }
                 });
             }
