@@ -4,7 +4,6 @@
 //! hear it on the selected track; Play hears them all in turn. Docked under
 //! the devices like Theory, opened from the rail.
 
-use std::cell::Cell;
 use std::sync::Arc;
 
 use vizia::prelude::*;
@@ -19,15 +18,6 @@ use crate::tokens::{self, ThemeId};
 
 /// How long each chord sounds in Play, in 16ths (half a bar).
 const CHORD_16THS: i64 = 8;
-
-thread_local! {
-    static OPEN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
-}
-
-/// Whether the panel is open, for the rail button (set once in `main`).
-pub fn open_signal() -> Option<Signal<bool>> {
-    OPEN.get()
-}
 
 pub enum VoicingEvent {
     ToggleOpen,
@@ -59,7 +49,6 @@ pub struct VoicingModel {
 impl VoicingModel {
     pub fn new(key: Signal<u8>, scale_mask: Signal<u16>, player: crate::preview_player::SharedPlayer, sample_rate: u32) -> Self {
         let open = Signal::new(false);
-        OPEN.set(Some(open));
         Self {
             open,
             progression: Signal::new(Vec::new()),

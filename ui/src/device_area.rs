@@ -68,6 +68,8 @@ pub struct DeviceAreaProps {
     pub riyaz: crate::riyaz::RiyazProps,
     /// Practice, docked likewise.
     pub practice: crate::practice::PracticeProps,
+    /// Which of those is open (the tabs over them).
+    pub tools: crate::tools::ToolsProps,
 }
 
 pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
@@ -185,11 +187,14 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                         cx.emit(TimelineEvent::SetInstrument { track, instrument: Some(Instrument::Drums) })
                     });
             }),
-            Panel::Audio => empty_state(cx, "An audio track plays its clips; add effects with the buttons above", |_| {}),
-            Panel::Nothing => empty_state(cx, "Select a track to see its instrument and effects", |_| {}),
+            // Just a note - left out while a practice tool is open, so the
+            // tool gets the room.
+            Panel::Audio => quiet_note(cx, p, "An audio track plays its clips; add effects with the buttons above"),
+            Panel::Nothing => quiet_note(cx, p, "Select a track to see its instrument and effects"),
         });
     });
 
+    crate::tools::tabs(cx, p.tools);
     interval_input::interval_input_view(
         cx,
         p.theme,
@@ -433,6 +438,15 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
 }
 
 /// A quiet, short panel standing in for a device the track doesn't have.
+fn quiet_note(cx: &mut Context, p: DeviceAreaProps, message: &'static str) {
+    let tools = Memo::new(move |_| p.tools.any_open());
+    Binding::new(cx, tools, move |cx| {
+        if !tools.get() {
+            empty_state(cx, message, |_| {});
+        }
+    });
+}
+
 fn empty_state(cx: &mut Context, message: &'static str, action: impl FnOnce(&mut Context)) {
     HStack::new(cx, move |cx| {
         Label::new(cx, message).class("body").class("empty-note");

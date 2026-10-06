@@ -3,7 +3,6 @@
 //! few seconds, and the notes you held and how steadily. Docked under the
 //! devices like Theory, opened from the rail.
 
-use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -22,15 +21,6 @@ const HOP_SECS: f32 = 1.0 / 40.0;
 /// The trace's range against Sa, in cents: Pa below to Re above.
 const LOW_CENTS: f32 = -500.0;
 const HIGH_CENTS: f32 = 1400.0;
-
-thread_local! {
-    static OPEN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
-}
-
-/// Whether the panel is open, for the rail button.
-pub fn open_signal() -> Option<Signal<bool>> {
-    OPEN.get()
-}
 
 pub enum RiyazEvent {
     ToggleOpen,
@@ -79,7 +69,6 @@ impl RiyazModel {
         sample_rate: u32,
     ) -> Self {
         let open = Signal::new(false);
-        OPEN.set(Some(open));
         Self {
             open,
             listening: Signal::new(false),

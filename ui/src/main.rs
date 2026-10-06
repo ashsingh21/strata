@@ -7,6 +7,7 @@ mod voicing;
 mod riyaz;
 mod midi_in;
 mod practice;
+mod tools;
 mod bpm_field;
 mod canvas_text;
 mod compressor_curve;
@@ -298,6 +299,8 @@ fn main() -> Result<(), ApplicationError> {
         let practice_model = practice::PracticeModel::new(interval_key, interval_scale_mask, preview_player.clone(), engine_sample_rate);
         let practice_props = practice::PracticeProps::of(&practice_model, theme);
         practice_model.build(cx);
+        let tools_props = tools::ToolsProps { open: [interval_open, voicing_props.open, riyaz_props.open, practice_props.open] };
+        tools::ToolsModel::new(tools_props).build(cx);
         let midi_model = midi_in::MidiModel::new(tl_arrangement, selected_track);
         let midi_devices = midi_model.devices;
         midi_model.build(cx);
@@ -676,6 +679,7 @@ fn main() -> Result<(), ApplicationError> {
                                     voicing: voicing_props,
                                     riyaz: riyaz_props,
                                     practice: practice_props,
+                                    tools: tools_props,
                                 },
                             );
                         });

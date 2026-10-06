@@ -38,24 +38,19 @@ const HISTORY_LEN: usize = 40;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
     Browse,
-    Samples,
-    Presets,
     Files,
-    History,
     Learn,
 }
 
 impl Section {
-    /// The rail's top group, in order.
-    pub const RAIL: [Section; 6] = [Section::Browse, Section::Samples, Section::Presets, Section::Files, Section::History, Section::Learn];
+    /// The rail's top group, in order. Samples and Presets are Browse's
+    /// chips, History its Recent order - not buttons of their own.
+    pub const RAIL: [Section; 3] = [Section::Browse, Section::Files, Section::Learn];
 
     pub fn title(self) -> &'static str {
         match self {
             Section::Browse => "Browse",
-            Section::Samples => "Samples",
-            Section::Presets => "Presets",
             Section::Files => "Project files",
-            Section::History => "History",
             Section::Learn => "Learn",
         }
     }
@@ -63,10 +58,7 @@ impl Section {
     pub fn icon(self) -> icon::IconKind {
         match self {
             Section::Browse => icon::IconKind::Browse,
-            Section::Samples => icon::IconKind::Samples,
-            Section::Presets => icon::IconKind::Presets,
             Section::Files => icon::IconKind::Files,
-            Section::History => icon::IconKind::History,
             Section::Learn => icon::IconKind::Learn,
         }
     }
@@ -74,10 +66,7 @@ impl Section {
     fn key(self) -> &'static str {
         match self {
             Section::Browse => "browse",
-            Section::Samples => "samples",
-            Section::Presets => "presets",
             Section::Files => "files",
-            Section::History => "history",
             Section::Learn => "learn",
         }
     }
@@ -88,7 +77,7 @@ impl Section {
 
     /// Whether the filters (chips, Fits key, collections) apply here.
     pub fn filters(self) -> bool {
-        matches!(self, Section::Browse | Section::Samples | Section::Presets)
+        self == Section::Browse
     }
 }
 
@@ -146,10 +135,7 @@ pub struct Filter<'a> {
 /// The rows to show, in order.
 pub fn results(all: &[Item], f: &Filter) -> Vec<Item> {
     let mut out: Vec<Item> = match f.section {
-        Section::History => f.history.iter().filter_map(|id| all.iter().find(|i| &i.id == id).cloned()).collect(),
         Section::Browse => all.iter().filter(|i| matches!(i.kind, Kind::Instrument(_) | Kind::Effect(_) | Kind::Preset(_) | Kind::Sample(_) | Kind::Pattern(_))).cloned().collect(),
-        Section::Samples => all.iter().filter(|i| matches!(i.kind, Kind::Sample(_) | Kind::Pattern(_))).cloned().collect(),
-        Section::Presets => all.iter().filter(|i| matches!(i.kind, Kind::Preset(_))).cloned().collect(),
         Section::Files => all.iter().filter(|i| matches!(i.kind, Kind::ProjectAudio(_) | Kind::Track(_) | Kind::Song(_))).cloned().collect(),
         Section::Learn => all.iter().filter(|i| matches!(i.kind, Kind::Lesson(_))).cloned().collect(),
     };
@@ -169,8 +155,8 @@ pub fn results(all: &[Item], f: &Filter) -> Vec<Item> {
         }
     }
     out.retain(|i| i.matches(f.query));
-    // History is already newest first; Learn keeps the course's order.
-    if !matches!(f.section, Section::History | Section::Learn) {
+    // Learn keeps the course's order.
+    if f.section != Section::Learn {
         let recency = |i: &Item| f.history.iter().position(|h| h == &i.id).unwrap_or(usize::MAX);
         match f.sort {
             Sort::Recent => out.sort_by(|a, b| recency(a).cmp(&recency(b)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))),
@@ -339,8 +325,19 @@ impl BrowserModel {
         let path = self.project_path.get();
         if let Some((width, section)) = crate::settings::load_browser_layout(path.as_deref()) {
             self.width.set(width.clamp(MIN_WIDTH, MAX_WIDTH));
-            if let Some(section) = Section::from_key(&section) {
+            // Saved before Samples, Presets and History left the rail:
+            // Browse, filtered the same way.
+            let (section, chip) = match section.as_str() {
+                "samples" => (Some(Section::Browse), Some(Chip::Samples)),
+                "presets" => (Some(Section::Browse), Some(Chip::Presets)),
+                "history" => (Some(Section::Browse), None),
+                key => (Section::from_key(key), None),
+            };
+            if let Some(section) = section {
                 self.section.set(section);
+            }
+            if let Some(chip) = chip {
+                self.chip.set(chip);
             }
         }
     }
@@ -626,11 +623,11 @@ mod tests {
         let browse = results(&all, &filter(Section::Browse, &keys));
         assert!(browse.iter().any(|i| i.name == "Carve"));
         assert!(!browse.iter().any(|i| matches!(i.kind, Kind::Song(_))), "songs are project files");
-        let presets = results(&all, &filter(Section::Presets, &keys));
+        let presets = results(&all, &Filter { chip: Chip::Presets, ..filter(Section::Browse, &keys) });
         assert!(presets.iter().all(|i| matches!(i.kind, Kind::Preset(_))));
         let effects = results(&all, &Filter { chip: Chip::Effects, ..filter(Section::Browse, &keys) });
         assert_eq!(effects.len(), 2 + shared::guitar::GuitarKind::ALL.len());
-        let searched = results(&all, &Filter { query: "piano", ..filter(Section::Samples, &keys) });
+        let searched = results(&all, &Filter { query: "piano", chip: Chip::Samples, ..filter(Section::Browse, &keys) });
         assert!(!searched.is_empty() && searched.iter().all(|i| i.matches("piano")));
         let favs = vec!["inst:carve".to_string()];
         let fav = results(&all, &Filter { collection: Some(Coll::Favourites), favourites: &favs, ..filter(Section::Browse, &keys) });

@@ -3,7 +3,6 @@
 //! before the phrase and before your turn; then each hit's timing, or each
 //! note, and a streak to beat. Docked under the devices, from the rail.
 
-use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -16,14 +15,6 @@ use shared::theory::note_name_for_key;
 use crate::hidpi::Logical;
 use crate::synth::state::SynthEvent;
 use crate::tokens::{self, ThemeId};
-
-thread_local! {
-    static OPEN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
-}
-
-pub fn open_signal() -> Option<Signal<bool>> {
-    OPEN.get()
-}
 
 /// After the last bar, how long late notes still count (ms).
 const GRACE_MS: f32 = 400.0;
@@ -108,7 +99,6 @@ pub struct PracticeModel {
 impl PracticeModel {
     pub fn new(key: Signal<u8>, scale_mask: Signal<u16>, player: crate::preview_player::SharedPlayer, sample_rate: u32) -> Self {
         let open = Signal::new(false);
-        OPEN.set(Some(open));
         Self {
             open,
             kind: Signal::new(Kind::Rhythm),
@@ -384,7 +374,7 @@ pub fn practice_view(cx: &mut Context, p: PracticeProps) {
 
 fn header(cx: &mut Context, p: PracticeProps) {
     HStack::new(cx, move |cx| {
-        Label::new(cx, "Practice").class("heading");
+        Label::new(cx, "Exercises").class("heading");
         crate::synth::segmented::segmented(
             cx,
             3,

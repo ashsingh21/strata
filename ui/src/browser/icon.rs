@@ -12,14 +12,8 @@ use crate::tokens::{Palette, ThemeId};
 pub enum IconKind {
     // The rail (16px box).
     Browse,
-    Samples,
-    Presets,
     Files,
-    History,
     Learn,
-    Theory,
-    Chords,
-    Mic,
     Metronome,
     Panel,
     Settings,
@@ -49,7 +43,7 @@ impl IconKind {
     fn view_box(self) -> f32 {
         use IconKind::*;
         match self {
-            Browse | Samples | Presets | Files | History | Learn | Theory | Chords | Mic | Metronome | Panel | Settings | Logo => 16.0,
+            Browse | Files | Learn | Metronome | Panel | Settings | Logo => 16.0,
             _ => 12.0,
         }
     }
@@ -152,53 +146,21 @@ pub fn draw_icon(canvas: &Canvas, kind: IconKind, x: f32, y: f32, size: f32, col
                 rect(canvas, rx, ry, 5.0, 5.0, 1.0, &paint);
             }
         }
-        Samples => lines(
-            canvas,
-            &[((2.0, 8.0), (3.5, 8.0)), ((4.5, 5.0), (4.5, 11.0)), ((7.0, 3.0), (7.0, 13.0)), ((9.5, 6.0), (9.5, 10.0)), ((12.0, 4.5), (12.0, 11.5)), ((14.0, 8.0), (14.5, 8.0))],
-            &paint,
-        ),
-        Presets => {
-            lines(canvas, &[((4.0, 2.0), (4.0, 14.0)), ((8.0, 2.0), (8.0, 14.0)), ((12.0, 2.0), (12.0, 14.0))], &paint);
-            for (rx, ry) in [(2.5, 9.0), (6.5, 4.0), (10.5, 7.0)] {
-                rect(canvas, rx, ry, 3.0, 2.0, 0.5, &paint);
-            }
-        }
         Files => poly(
             canvas,
             &[(2.0, 4.5), (2.0, 12.0), (3.0, 13.0), (13.0, 13.0), (14.0, 12.0), (14.0, 6.0), (13.0, 5.0), (8.0, 5.0), (6.5, 3.5), (3.0, 3.5)],
             true,
             &paint,
         ),
-        History => {
-            circle(canvas, 8.0, 8.0, 5.5, &paint);
-            poly(canvas, &[(8.0, 5.0), (8.0, 8.0), (10.0, 9.5)], false, &paint);
-        }
         Learn => {
             poly(canvas, &[(8.0, 5.0), (6.5, 3.5), (2.0, 3.5), (2.0, 12.0), (7.0, 12.0), (8.0, 13.0)], false, &paint);
             poly(canvas, &[(8.0, 5.0), (9.5, 3.5), (14.0, 3.5), (14.0, 12.0), (9.0, 12.0), (8.0, 13.0)], false, &paint);
             lines(canvas, &[((8.0, 5.0), (8.0, 13.0))], &paint);
         }
-        // The chord ring: a triangle of notes on a circle.
-        Theory => {
-            circle(canvas, 8.0, 8.0, 6.0, &paint);
-            poly(canvas, &[(8.0, 2.0), (13.2, 11.0), (2.8, 11.0)], true, &paint);
-        }
-        // Three voices, each stepping to the next chord.
-        Chords => {
-            poly(canvas, &[(2.0, 4.0), (6.0, 4.0), (10.0, 2.5), (14.0, 2.5)], false, &paint);
-            poly(canvas, &[(2.0, 8.0), (14.0, 8.0)], false, &paint);
-            poly(canvas, &[(2.0, 13.0), (6.0, 13.0), (10.0, 11.5), (14.0, 11.5)], false, &paint);
-        }
         // A metronome: its body and arm.
         Metronome => {
             poly(canvas, &[(5.5, 2.0), (10.5, 2.0), (13.0, 14.0), (3.0, 14.0)], true, &paint);
             lines(canvas, &[((8.0, 11.0), (11.5, 4.5)), ((4.0, 11.0), (12.0, 11.0))], &paint);
-        }
-        // A microphone on its stand.
-        Mic => {
-            rect(canvas, 5.5, 1.5, 5.0, 8.0, 2.5, &paint);
-            poly(canvas, &[(3.0, 7.5), (3.0, 8.5), (5.0, 11.5), (8.0, 12.0), (11.0, 11.5), (13.0, 8.5), (13.0, 7.5)], false, &paint);
-            lines(canvas, &[((8.0, 12.0), (8.0, 14.5)), ((5.5, 14.5), (10.5, 14.5))], &paint);
         }
         Panel => {
             rect(canvas, 2.0, 2.5, 12.0, 11.0, 1.5, &paint);

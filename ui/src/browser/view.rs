@@ -201,19 +201,15 @@ fn rail(cx: &mut Context, p: BrowserProps) {
             let on = Memo::new(move |_| p.open.get() && p.section.get() == section);
             rail_button(cx, p, section.icon(), section.title(), on).on_press(move |cx| cx.emit(BrowserEvent::Rail(section)));
         }
-        // Too wide for the panel: it opens under the devices instead.
-        let theory = Memo::new(move |_| p.theory_open.get());
-        rail_button(cx, p, IconKind::Theory, "Theory: explore the key's scale and chords", theory)
-            .on_press(|cx| cx.emit(crate::interval_input::state::IntervalInputEvent::ToggleOpen));
-        let chords = Memo::new(|_| crate::voicing::open_signal().is_some_and(|s| s.get()));
-        rail_button(cx, p, IconKind::Chords, "Voice leading: chords that move as little as they can", chords)
-            .on_press(|cx| cx.emit(crate::voicing::VoicingEvent::ToggleOpen));
-        let riyaz = Memo::new(|_| crate::riyaz::open_signal().is_some_and(|s| s.get()));
-        rail_button(cx, p, IconKind::Mic, "Riyaz: sing against the tanpura and see your pitch", riyaz)
-            .on_press(|cx| cx.emit(crate::riyaz::RiyazEvent::ToggleOpen));
-        let practice = Memo::new(|_| crate::practice::open_signal().is_some_and(|s| s.get()));
-        rail_button(cx, p, IconKind::Metronome, "Practice: hear a rhythm or melody, play it back", practice)
-            .on_press(|cx| cx.emit(crate::practice::PracticeEvent::ToggleOpen));
+        // Theory, Voice leading, Riyaz and Exercises: one button, the
+        // tools open under the devices (too wide for the panel) with tabs.
+        let tools = Memo::new(move |_| {
+            // Read the signals so the button follows them.
+            let _ = p.theory_open.get();
+            crate::tools::any_open()
+        });
+        rail_button(cx, p, IconKind::Metronome, "Practice: theory, voice leading, riyaz and exercises", tools)
+            .on_press(|cx| cx.emit(crate::tools::ToolsEvent::Toggle));
         Element::new(cx).height(Stretch(1.0)).width(Pixels(1.0));
         let open = Memo::new(move |_| p.open.get());
         rail_button(cx, p, IconKind::Panel, "Show or hide the panel", open).on_press(|cx| cx.emit(crate::app::AppEvent::ToggleSidebar));
@@ -502,10 +498,7 @@ fn browser_panel(cx: &mut Context, p: BrowserProps) {
                     return;
                 }
                 if items.is_empty() {
-                    let empty = match p.section.get() {
-                        Section::History => "Things you use show up here.",
-                        _ => "Nothing matches.",
-                    };
+                    let empty = "Nothing matches.";
                     Label::new(cx, empty).class("value").padding(Pixels(tokens::SPACE_3));
                 }
                 for item in items {
