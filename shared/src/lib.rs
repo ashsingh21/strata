@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 pub mod analysis;
 pub mod arrangement;
+pub mod classics;
 pub mod demo;
 pub mod diag;
 pub mod drums;

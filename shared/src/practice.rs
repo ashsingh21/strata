@@ -30,6 +30,8 @@ pub struct Exercise {
     pub kind: Kind,
     pub level: usize,
     pub notes: Vec<(i64, u8, i64)>,
+    /// How many bars the phrase takes (and you have to play it back).
+    pub bars: i64,
 }
 
 /// The pitch a rhythm is played on (the clap, on a Drum Kit).
@@ -86,7 +88,7 @@ pub fn rhythm(level: usize, seed: u32) -> Exercise {
         }
     };
     let notes = onsets.iter().map(|&o| (o, RHYTHM_PITCH, 1)).collect();
-    Exercise { kind: Kind::Rhythm, level, notes }
+    Exercise { kind: Kind::Rhythm, level, notes, bars: 1 }
 }
 
 /// A new melody exercise at `level` in the key (`key` 0 = C, `mask` its
@@ -135,12 +137,21 @@ pub fn melody(level: usize, seed: u32, key: u8, mask: u16) -> Exercise {
         }
     };
     let notes = steps.iter().zip(starts).map(|(&s, (at, len))| (at, pitch(s), len)).collect();
-    Exercise { kind: Kind::Melody, level, notes }
+    Exercise { kind: Kind::Melody, level, notes, bars: 1 }
 }
 
-/// The bar you play in (0-based): a count-in, the phrase, a count-in, you.
-pub const YOUR_BAR: i64 = 3;
-pub const BARS: i64 = 4;
+impl Exercise {
+    /// The bar your turn starts in (0-based): after a count-in, the
+    /// phrase and a second count-in.
+    pub fn your_bar(&self) -> i64 {
+        2 + self.bars
+    }
+
+    /// The whole session, in bars.
+    pub fn total_bars(&self) -> i64 {
+        2 + 2 * self.bars
+    }
+}
 
 /// The exercise as a song to play: four clicks, the phrase, four clicks,
 /// then quieter clicks under your turn. A rhythm is clapped on the Drum
@@ -164,8 +175,10 @@ pub fn session(ex: &Exercise, bpm: f64) -> crate::project::Project {
     let mut drums: Vec<MidiNote> = Vec::new();
     for beat in 0..4 {
         drums.push(click(0, beat, true));
-        drums.push(click(2, beat, true));
-        drums.push(click(YOUR_BAR, beat, false));
+        drums.push(click(1 + ex.bars, beat, true));
+        for b in 0..ex.bars {
+            drums.push(click(ex.your_bar() + b, beat, false));
+        }
     }
     let phrase = ex.notes.iter().map(|&(at, pitch, len)| MidiNote { start: bar + at * SIXTEENTH, length: len * SIXTEENTH, pitch, velocity: 110 });
     let mut instruments = Vec::new();
@@ -173,12 +186,12 @@ pub fn session(ex: &Exercise, bpm: f64) -> crate::project::Project {
         Kind::Rhythm => drums.extend(phrase),
         Kind::Melody => {
             let keys = add_track(&mut arr, "Piano", ClipColor::Violet, Instrument::Carve, 0.0);
-            add_clip(&mut arr, keys, "Phrase", 0, BARS, BARS, phrase.collect());
+            add_clip(&mut arr, keys, "Phrase", 0, ex.total_bars(), ex.total_bars(), phrase.collect());
             instruments.push((keys, crate::synth::recipes::piano()));
         }
     }
     let kit = add_track(&mut arr, "Click", ClipColor::Amber, Instrument::Drums, -4.0);
-    add_clip(&mut arr, kit, "Click", 0, BARS, BARS, drums);
+    add_clip(&mut arr, kit, "Click", 0, ex.total_bars(), ex.total_bars(), drums);
     crate::project::Project { arrangement: arr, instruments, synth: None }
 }
 
@@ -321,7 +334,7 @@ mod tests {
         let r = session(&rhythm(0, 3), 80.0);
         assert_eq!(r.arrangement.tracks.len(), 1);
         assert_eq!(targets_ms(&rhythm(0, 3), 60.0)[0], 0.0);
-        assert_eq!(targets_ms(&Exercise { kind: Kind::Rhythm, level: 0, notes: vec![(4, 39, 1)] }, 60.0), [1000.0]);
+        assert_eq!(targets_ms(&Exercise { kind: Kind::Rhythm, level: 0, notes: vec![(4, 39, 1)], bars: 1 }, 60.0), [1000.0]);
     }
 
     #[test]
