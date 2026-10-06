@@ -301,8 +301,8 @@ fn main() -> Result<(), ApplicationError> {
         let practice_model = practice::PracticeModel::new(interval_key, interval_scale_mask, preview_player.clone(), engine_sample_rate);
         let practice_props = practice::PracticeProps::of(&practice_model, theme);
         practice_model.build(cx);
-        let ear_model = ear::EarModel::new(interval_key, interval_scale_mask, preview_player.clone(), mic.clone(), engine_sample_rate);
-        let ear_props = ear::EarProps::of(&ear_model);
+        let ear_model = ear::EarModel::new(preview_player.clone(), mic.clone(), engine_sample_rate);
+        let ear_props = ear::EarProps::of(&ear_model, theme);
         ear_model.build(cx);
         let tools_props = tools::ToolsProps { open: [interval_open, voicing_props.open, ear_props.open, riyaz_props.open, practice_props.open] };
         tools::ToolsModel::new(tools_props).build(cx);

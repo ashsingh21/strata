@@ -217,27 +217,21 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   font-size: 22px;
   font-weight: 600;
 }}
-/* Ear: a degree's pad - the degree big, its note small under it. */
-.ear-pad {{
-  width: 58px;
-  height: 52px;
-  padding: 0px;
-}}
-.ear-slot {{
-  width: 52px;
-  height: 44px;
-  font-size: 20px;
+/* Ear: what to do, a box per note (lit while it plays), the answers. */
+.ear-question {{
+  font-size: 15px;
   font-weight: 600;
-  text-align: center;
-  border-radius: 6px;
+}}
+.ear-chip {{
+  font-size: 13px;
+  border-radius: 5px;
   border-width: 2px;
 }}
-.ear-pad-degree {{
-  font-size: 20px;
+.ear-choice {{
+  width: 130px;
+  height: 64px;
+  font-size: 16px;
   font-weight: 600;
-}}
-.ear-pad-note {{
-  font-size: 11px;
 }}
 /* Riyaz: the swar being sung. */
 .riyaz-swar {{
@@ -906,18 +900,16 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".display-sm", vec![("color", c("ink"))]);
     rule(".riyaz-swar", vec![("color", c("ink"))]);
     rule(".practice-status", vec![("color", c("ink"))]);
-    rule(".ear-pad", vec![("background-color", c("bg-000")), ("border-color", c("line-control")), ("color", c("ink"))]);
-    rule(".ear-pad:hover", vec![("background-color", c("bg-200"))]);
-    rule(".ear-pad-note", vec![("color", c("ink-muted"))]);
-    rule(".ear-slot", vec![("background-color", c("bg-200")), ("border-color", c("bg-200")), ("color", c("ink-faint"))]);
-    rule(".ear-slot.is-filled", vec![("background-color", c("bg-300")), ("border-color", c("bg-300")), ("color", c("ink"))]);
-    rule(".ear-slot.is-current", vec![("border-color", c("ink"))]);
-    rule(".ear-slot.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
-    rule(".ear-slot.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
-    rule(".ear-pad.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
-    rule(".ear-pad.is-right .ear-pad-note", vec![("color", c("on-signal"))]);
-    rule(".ear-pad.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
-    rule(".ear-pad.is-wrong .ear-pad-note", vec![("color", c("on-record"))]);
+    rule(".ear-question", vec![("color", c("ink"))]);
+    rule(".ear-chip", vec![("background-color", c("bg-200")), ("border-color", c("bg-200")), ("color", c("ink-muted"))]);
+    rule(".ear-chip.is-given", vec![("color", c("ink"))]);
+    rule(".ear-chip.is-sounding", vec![("background-color", c("signal-soft")), ("border-color", c("signal")), ("color", c("ink"))]);
+    rule(".ear-chip.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
+    rule(".ear-chip.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
+    rule(".ear-choice", vec![("background-color", c("bg-000")), ("border-color", c("line-control")), ("color", c("ink"))]);
+    rule(".ear-choice:hover", vec![("background-color", c("bg-200"))]);
+    rule(".ear-choice.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
+    rule(".ear-choice.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
     rule(".course-map", vec![("background-color", c("bg-100"))]);
     rule(".map-card", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".map-card:hover", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);

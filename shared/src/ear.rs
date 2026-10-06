@@ -1,140 +1,168 @@
-//! Ear training for hearing a melody in your head and finding it on an
-//! instrument. Everything is a scale degree in the song's key, the way a
-//! tune sits in the mind ("it starts on the 5th and falls to the 3rd"),
-//! never an absolute note:
+//! Ear training for a guitarist who wants to play what they hear in
+//! their head: five steps, each one skill on the way there, in notes and
+//! frets - no theory words.
 //!
-//! - Find: the key, then one note - which degree is it?
-//! - Echo: the key, then a short melody - play it back.
-//! - Imagine: degrees on screen - hear them inside, play them, then hear
-//!   whether that's what you imagined.
+//! 1. Higher or lower: two notes - which way did it go?
+//! 2. Step or jump: next door (a fret or two), or further?
+//! 3. One string: the first note is lit on the A string - find the second
+//!    on the same string (how far it went becomes how many frets).
+//! 4. Short tunes: four notes from the lit one, in the box at the 5th fret
+//!    most guitarists learn first.
+//! 5. Tunes you know: the start of a tune everyone can hum, from memory,
+//!    starting on the lit note - then hear it.
 //!
-//! Degrees come from the scale mask, so it works for major, a pentatonic
-//! or a raag alike. Answers compare pitch classes: any octave counts (a
-//! guitar sounds an octave under the piano's written note anyway).
+//! Notes count in any octave and anywhere on the neck.
 
 use crate::arrangement::{empty_arrangement, ClipColor, Instrument, MidiNote, TempoMap, TimeSignature, PPQ};
 use crate::lessons::{add_clip, add_track};
-use crate::theory::scale::{degree_name, degrees_in_mask, sargam_name};
+use crate::theory::scale::NOTE_NAMES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    Find,
-    Echo,
-    Imagine,
+pub enum Step {
+    Direction,
+    Distance,
+    OneString,
+    Tunes,
+    Known,
 }
 
-impl Mode {
-    pub const ALL: [Mode; 3] = [Mode::Find, Mode::Echo, Mode::Imagine];
+impl Step {
+    pub const ALL: [Step; 5] = [Step::Direction, Step::Distance, Step::OneString, Step::Tunes, Step::Known];
 
+    pub fn title(self) -> &'static str {
+        match self {
+            Step::Direction => "Higher or lower",
+            Step::Distance => "Step or jump",
+            Step::OneString => "One string",
+            Step::Tunes => "Short tunes",
+            Step::Known => "Tunes you know",
+        }
+    }
+
+    /// Why this step, in a line.
+    pub fn why(self) -> &'static str {
+        match self {
+            Step::Direction => "Hearing which way a tune moves is the first thing to get right.",
+            Step::Distance => "Then how far: the next fret or two, or a leap.",
+            Step::OneString => "On one string, how far it went is how many frets.",
+            Step::Tunes => "Short tunes in the shape at the 5th fret most players learn first.",
+            Step::Known => "The real thing: a tune already in your head, onto the guitar.",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        Step::ALL.iter().position(|s| *s == self).unwrap_or(0)
+    }
+}
+
+/// An answer for the first two steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    Lower,
+    Same,
+    Higher,
+    Step,
+    Jump,
+}
+
+impl Choice {
     pub fn name(self) -> &'static str {
         match self {
-            Mode::Find => "Find the note",
-            Mode::Echo => "Echo",
-            Mode::Imagine => "Imagine",
-        }
-    }
-
-    pub fn how(self) -> &'static str {
-        match self {
-            Mode::Find => "Hear the key, then a note. Which degree? Tap it, or play it.",
-            Mode::Echo => "Hear the key, then a melody. Play it back.",
-            Mode::Imagine => "Hear the numbers in your head, play them, then check.",
+            Choice::Lower => "Lower",
+            Choice::Same => "Same",
+            Choice::Higher => "Higher",
+            Choice::Step => "A step",
+            Choice::Jump => "A jump",
         }
     }
 }
 
-pub const LEVELS: usize = 5;
+/// Standard tuning, low E to high E.
+pub const TUNING: [u8; 6] = [40, 45, 50, 55, 59, 64];
+pub const STRING_NAMES: [&str; 6] = ["E", "A", "D", "G", "B", "e"];
+/// The neck shown: open strings to the 12th fret.
+pub const FRETS: u8 = 12;
 
-/// Right answers in a row that move you up a level.
-pub const LEVEL_UP_STREAK: u32 = 6;
-
-/// What each level adds, for the label next to it.
-pub fn level_name(level: usize) -> &'static str {
-    ["Home notes: 1 3 5", "Five notes", "The whole scale", "Wider: up to the 8", "Two octaves"][level.min(LEVELS - 1)]
+pub fn pitch_at(string: usize, fret: u8) -> u8 {
+    TUNING[string] + fret
 }
 
-/// The scale's degrees in the order they're easiest to hear: home (1),
-/// the 5th, the 3rd, then the rest from the steadiest out.
-fn by_ease(mask: u16) -> Vec<u8> {
-    const ORDER: [u8; 12] = [0, 7, 4, 3, 5, 2, 9, 8, 11, 10, 6, 1];
-    let degrees = degrees_in_mask(mask | 1);
-    ORDER.iter().copied().filter(|d| degrees.contains(d)).collect()
+/// The A minor pentatonic box at the 5th fret: two notes a string.
+pub const BOX: [(usize, u8); 12] = [(0, 5), (0, 8), (1, 5), (1, 7), (2, 5), (2, 7), (3, 5), (3, 7), (4, 5), (4, 8), (5, 5), (5, 8)];
+
+/// Where to show `pitch` on the neck: the place nearest `near` (or an
+/// octave or two either way if it's off the neck).
+pub fn position_of(pitch: u8, near: (usize, u8)) -> Option<(usize, u8)> {
+    for p in [0, -12, 12, -24, 24].map(|o| pitch as i32 + o) {
+        let best = (0..6)
+            .filter_map(|s| {
+                let fret = p - TUNING[s] as i32;
+                (0..=FRETS as i32).contains(&fret).then_some((s, fret as u8))
+            })
+            .min_by_key(|&(s, f)| (f as i32 - near.1 as i32).abs() * 2 + (s as i32 - near.0 as i32).abs() * 3);
+        if best.is_some() {
+            return best;
+        }
+    }
+    None
 }
 
-/// The degrees (semitones above home, 0..12) a level uses, in scale order.
-pub fn pool(level: usize, mask: u16) -> Vec<u8> {
-    let easy = by_ease(mask);
-    let n = match level {
-        0 => 3,
-        1 => 5,
-        _ => easy.len(),
+/// "A", "C#".
+pub fn name(pitch: u8) -> &'static str {
+    NOTE_NAMES[(pitch % 12) as usize]
+}
+
+/// "1st", "2nd", ...
+pub fn ordinal(i: usize) -> String {
+    let n = i + 1;
+    let suffix = match n {
+        1 => "st",
+        2 => "nd",
+        3 => "rd",
+        _ => "th",
     };
-    let mut out: Vec<u8> = easy.into_iter().take(n).collect();
-    out.sort_unstable();
-    out
-}
-
-/// A degree's name: "1", "♭3", "5" (or Sa, ga, Pa).
-pub fn label(degree: u8, sargam: bool) -> String {
-    if sargam {
-        return sargam_name(degree).to_string();
-    }
-    degree_name(degree).replace('b', "\u{266d}").replace('#', "\u{266f}")
-}
-
-/// Home (degree 1) for `key`: between F3 and E4, under a guitar's
-/// middle and a comfortable singing range.
-pub fn home(key: u8) -> u8 {
-    let key = key % 12;
-    if key <= 4 {
-        60 + key
-    } else {
-        48 + key
-    }
-}
-
-/// The notes a level may use, as pitches, low to high.
-fn range(level: usize, key: u8, mask: u16) -> Vec<u8> {
-    let tonic = home(key);
-    let degrees = pool(level, mask);
-    let mut out: Vec<u8> = degrees.iter().map(|d| tonic + d).collect();
-    // Melodies dip under home from level 2 (the 5th below is where so
-    // many begin).
-    if level >= 1 {
-        out.extend(degrees.iter().filter(|&&d| d >= 7).map(|d| tonic + d - 12));
-    }
-    if level >= 3 {
-        out.push(tonic + 12);
-    }
-    if level >= 4 {
-        out.extend(degrees.iter().filter(|&&d| d >= 5).map(|d| tonic + d - 12));
-        out.extend(degrees.iter().filter(|&&d| d > 0 && d <= 7).map(|d| tonic + 12 + d));
-    }
-    out.sort_unstable();
-    out.dedup();
-    out
+    format!("{n}{suffix}")
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Question {
-    pub mode: Mode,
-    pub key: u8,
-    /// The notes to hear (Find: one), as pitches.
+    pub step: Step,
+    /// Every note, the first one given.
     pub notes: Vec<u8>,
+    /// Where the first note is lit on the neck.
+    pub given_at: (usize, u8),
+    /// Tunes you know: which.
+    pub title: Option<&'static str>,
 }
 
 impl Question {
-    /// Each note's degree.
-    pub fn degrees(&self) -> Vec<u8> {
-        self.notes.iter().map(|&n| degree_of(n, self.key)).collect()
+    /// The answer, for the first two steps.
+    pub fn choice(&self) -> Option<Choice> {
+        let d = self.notes[1] as i32 - self.notes[0] as i32;
+        match self.step {
+            Step::Direction => Some(match d {
+                0 => Choice::Same,
+                d if d > 0 => Choice::Higher,
+                _ => Choice::Lower,
+            }),
+            Step::Distance => Some(if d.abs() <= 2 { Choice::Step } else { Choice::Jump }),
+            _ => None,
+        }
+    }
+
+    /// The notes to find (all but the given first).
+    pub fn to_find(&self) -> &[u8] {
+        &self.notes[1..]
+    }
+
+    /// Whether the whole question plays before you answer (Tunes you know
+    /// plays only the first note: the rest is in your head).
+    pub fn plays_all(&self) -> bool {
+        self.step != Step::Known
     }
 }
 
-pub fn degree_of(pitch: u8, key: u8) -> u8 {
-    (pitch + 12 - key % 12) % 12
-}
-
-/// A small, fast random step (no dependency): xorshift.
+/// A small, fast random step: xorshift.
 fn next(seed: &mut u32) -> u32 {
     let mut x = (*seed).max(1);
     x ^= x << 13;
@@ -144,145 +172,125 @@ fn next(seed: &mut u32) -> u32 {
     x
 }
 
-/// How many notes a melody has at a level.
-fn length(level: usize) -> usize {
-    [3, 3, 4, 4, 5][level.min(LEVELS - 1)]
-}
-
-/// A new question. `avoid` is the last one's notes, so the same thing
-/// doesn't come twice running.
-pub fn question(mode: Mode, level: usize, key: u8, mask: u16, seed: u32, avoid: &[u8]) -> Question {
-    let notes = range(level, key, mask);
+/// A new question; `avoid` is the last one's notes, so it doesn't repeat.
+pub fn question(step: Step, seed: u32, avoid: &[u8]) -> Question {
     let mut seed = seed;
-    let pick = |seed: &mut u32| -> Vec<u8> {
-        match mode {
-            Mode::Find => vec![notes[next(seed) as usize % notes.len()]],
-            Mode::Echo | Mode::Imagine => melody(&notes, home(key), length(level), level, seed),
-        }
-    };
-    let mut out = pick(&mut seed);
+    let mut q = make(step, &mut seed);
     for _ in 0..8 {
-        if out.as_slice() != avoid {
+        if q.notes.as_slice() != avoid {
             break;
         }
-        out = pick(&mut seed);
+        q = make(step, &mut seed);
     }
-    Question { mode, key: key % 12, notes: out }
+    q
 }
 
-/// A walk over `notes`: steps mostly, the odd leap from level 2 up, never
-/// the same note twice running (a guitar can't tell a second pluck from
-/// the first ringing on). The first level starts at home, the first two
-/// end there.
-fn melody(notes: &[u8], home: u8, len: usize, level: usize, seed: &mut u32) -> Vec<u8> {
-    let home_at = notes.iter().position(|&n| n == home).unwrap_or(0);
-    let mut at = if level == 0 { home_at } else { next(seed) as usize % notes.len() };
-    let mut out = vec![notes[at]];
-    let reach = if level < 4 { 2 } else { 3 };
-    while out.len() < len {
-        let step = 1 + next(seed) as usize % reach;
-        let up = next(seed) % 2 == 0;
-        let to = if up { at + step } else { at.wrapping_sub(step) };
-        let to = if to >= notes.len() { if up { at.saturating_sub(step) } else { (at + step).min(notes.len() - 1) } } else { to };
-        if to == at {
-            continue;
+fn make(step: Step, seed: &mut u32) -> Question {
+    let mut pick = |n: u32| next(seed) % n;
+    match step {
+        Step::Direction | Step::Distance => {
+            let first = 45 + pick(13) as u8;
+            let size = match step {
+                // Same now and then; otherwise up to a 5th either way.
+                Step::Direction if pick(7) == 0 => 0,
+                Step::Direction => 1 + pick(7) as i32,
+                // A step (1-2) or a clear jump (4-7): nothing in between.
+                _ if pick(2) == 0 => 1 + pick(2) as i32,
+                _ => 4 + pick(4) as i32,
+            };
+            let second = if pick(2) == 0 { first as i32 + size } else { first as i32 - size };
+            let given_at = position_of(first, (1, 5)).unwrap_or((1, 0));
+            Question { step, notes: vec![first, second as u8], given_at, title: None }
         }
-        at = to;
-        out.push(notes[at]);
-    }
-    // Early melodies end at home: they resolve, which is easier to hold.
-    if level < 2 && len > 2 {
-        out.truncate(len - 1);
-        let i = out.len() - 1;
-        if out[i] == home {
-            // The note before home can't be home: a neighbour instead.
-            let before = if i > 0 { Some(out[i - 1]) } else { None };
-            let near = [home_at + 1, home_at.wrapping_sub(1), home_at + 2]
-                .into_iter()
-                .filter_map(|j| notes.get(j).copied())
-                .find(|&n| n != home && Some(n) != before);
-            if let Some(n) = near {
-                out[i] = n;
+        Step::OneString => {
+            let from = pick(FRETS as u32 + 1) as i32;
+            let mut to = from;
+            while to == from || !(0..=FRETS as i32).contains(&to) {
+                to = from + pick(11) as i32 - 5;
             }
+            Question { step, notes: vec![pitch_at(1, from as u8), pitch_at(1, to as u8)], given_at: (1, from as u8), title: None }
         }
-        out.push(home);
+        Step::Tunes => {
+            let pitches: Vec<u8> = BOX.iter().map(|&(s, f)| pitch_at(s, f)).collect();
+            // From an A: the low one or the middle one.
+            let mut at = if pick(2) == 0 { 0 } else { 5 };
+            let given_at = BOX[at];
+            let mut notes = vec![pitches[at]];
+            while notes.len() < 4 {
+                let step = 1 + pick(2) as usize;
+                let up = pick(2) == 0;
+                let to = if up { at + step } else { at.wrapping_sub(step) };
+                if to < pitches.len() {
+                    at = to;
+                    notes.push(pitches[at]);
+                }
+            }
+            Question { step, notes, given_at, title: None }
+        }
+        Step::Known => {
+            let (title, tune) = KNOWN[pick(KNOWN.len() as u32) as usize];
+            // Starting on A (57), kept on the neck.
+            let mut shift = 57 - tune[0] as i32;
+            if tune.iter().any(|&n| n as i32 + shift < 45) {
+                shift += 12;
+            }
+            if tune.iter().any(|&n| n as i32 + shift > 76) {
+                shift -= 12;
+            }
+            let notes: Vec<u8> = tune.iter().map(|&n| (n as i32 + shift) as u8).collect();
+            let given_at = position_of(notes[0], (2, 7)).unwrap_or((2, 7));
+            Question { step, notes, given_at, title: Some(title) }
+        }
     }
-    out
 }
 
-/// What the notes played say: each right or not (any octave).
-pub fn check(question: &Question, played: &[u8]) -> Vec<bool> {
-    question.notes.iter().enumerate().map(|(i, &n)| played.get(i).is_some_and(|&p| p % 12 == n % 12)).collect()
+/// Tunes nearly everyone can hum, their openings (all public domain).
+pub const KNOWN: &[(&str, &[u8])] = &[
+    ("Twinkle, Twinkle, Little Star", &[60, 60, 67, 67, 69, 69, 67]),
+    ("Happy Birthday", &[67, 67, 69, 67, 72, 71]),
+    ("Mary Had a Little Lamb", &[64, 62, 60, 62, 64, 64, 64]),
+    ("Ode to Joy", &[64, 64, 65, 67, 67, 65, 64]),
+    ("Fr\u{e8}re Jacques", &[60, 62, 64, 60, 60, 62, 64]),
+    ("When the Saints Go Marching In", &[60, 64, 65, 67, 60, 64, 65]),
+    ("F\u{fc}r Elise", &[76, 75, 76, 75, 76, 71, 74]),
+    ("Beethoven's 5th", &[67, 67, 67, 63, 65, 65, 65]),
+];
+
+/// Each note to find, right or not (any octave).
+pub fn check(q: &Question, played: &[u8]) -> Vec<bool> {
+    q.to_find().iter().enumerate().map(|(i, &n)| played.get(i).is_some_and(|&p| p % 12 == n % 12)).collect()
 }
 
-/// Points for a right answer: more for a longer streak (x1 to x4) and a
-/// higher level.
-pub fn points(streak: u32, level: usize) -> u32 {
-    let combo = 1 + (streak / 3).min(3);
-    10 * combo * (1 + level as u32 / 2)
+/// Points for a right answer: more for a longer streak (x1 to x4).
+pub fn points(streak: u32) -> u32 {
+    10 * (1 + (streak / 3).min(3))
 }
 
-/// The key, then (optionally) the question, as a project to render: the
-/// home chord moving I-IV-V-I when the scale has seven notes (just home's
-/// chord otherwise), a beat's rest, then the notes. Returns the project
-/// and the tick where the question starts.
-pub fn project(q: &Question, mask: u16, bpm: f64, cadence: bool, notes: bool) -> (crate::project::Project, i64) {
+/// Right answers in a row before suggesting the next step.
+pub const READY_STREAK: u32 = 5;
+
+pub const BPM: f64 = 90.0;
+
+/// How long each note takes, in seconds.
+pub fn note_secs() -> f32 {
+    60.0 / BPM as f32
+}
+
+/// The notes, one a beat, as a project to render.
+pub fn project(notes: &[u8]) -> crate::project::Project {
     let mut arr = empty_arrangement();
-    arr.tempo_map = TempoMap::constant(bpm, TimeSignature::FOUR_FOUR);
-    let tonic = home(q.key);
-    let mut out: Vec<MidiNote> = Vec::new();
-    let mut t = 0;
-    let note = |start: i64, length: i64, pitch: u8, velocity: u8| MidiNote { start, length, pitch, velocity };
-    if cadence {
-        let degrees = degrees_in_mask(mask | 1);
-        let chord = |root_index: usize| -> Vec<u8> {
-            if degrees.len() == 7 {
-                (0..3).map(|i| degrees[(root_index + 2 * i) % 7] + if root_index + 2 * i >= 7 { 12 } else { 0 }).collect()
-            } else {
-                let third = [4u8, 3].into_iter().find(|d| degrees.contains(d));
-                let fifth = [7u8].into_iter().find(|d| degrees.contains(d));
-                std::iter::once(0).chain(third).chain(fifth).collect()
-            }
-        };
-        let steps: Vec<(usize, i32)> = if degrees.len() == 7 { vec![(0, 0), (3, 0), (4, -12), (0, 0)] } else { vec![(0, 0), (0, 0)] };
-        for (root_index, shift) in steps {
-            for d in chord(root_index) {
-                let pitch = (tonic as i32 + d as i32 + shift).clamp(0, 127) as u8;
-                out.push(note(t, PPQ - PPQ / 8, pitch, 80));
-            }
-            // A low home note under each, so the key is unmistakable.
-            out.push(note(t, PPQ - PPQ / 8, tonic.saturating_sub(12), 70));
-            t += PPQ;
-        }
-        t += PPQ;
-    }
-    let start = t;
-    if notes {
-        let len = if q.notes.len() == 1 { 2 * PPQ } else { PPQ };
-        for &pitch in &q.notes {
-            out.push(note(t, len - PPQ / 8, pitch, 105));
-            t += len;
-        }
-    }
-    let bar = 4 * PPQ;
-    let bars = ((t + bar - 1) / bar).max(1);
+    arr.tempo_map = TempoMap::constant(BPM, TimeSignature::FOUR_FOUR);
+    let out: Vec<MidiNote> =
+        notes.iter().enumerate().map(|(i, &pitch)| MidiNote { start: i as i64 * PPQ, length: PPQ - PPQ / 8, pitch, velocity: 105 }).collect();
+    let bars = ((notes.len() as i64 + 3) / 4).max(1);
     let keys = add_track(&mut arr, "Piano", ClipColor::Violet, Instrument::Carve, 0.0);
     add_clip(&mut arr, keys, "Ear", 0, bars, bars, out);
-    (crate::project::Project { arrangement: arr, instruments: vec![(keys, crate::synth::recipes::piano())], synth: None }, start)
+    crate::project::Project { arrangement: arr, instruments: vec![(keys, crate::synth::recipes::piano())], synth: None }
 }
 
-/// The project's length in ticks (the last note's end).
-pub fn project_end(project: &crate::project::Project) -> i64 {
-    project
-        .arrangement
-        .clips
-        .iter()
-        .filter_map(|c| match &c.content {
-            crate::arrangement::ClipContent::Midi { notes, .. } => notes.iter().map(|n| n.start + n.length).max(),
-            _ => None,
-        })
-        .max()
-        .unwrap_or(0)
+/// The project's end in ticks.
+pub fn project_end(notes: &[u8]) -> i64 {
+    notes.len() as i64 * PPQ
 }
 
 /// Notes out of a stream of pitch readings from a mic (a guitar, a voice):
@@ -343,95 +351,82 @@ pub fn midi_of(hz: f32) -> f32 {
 mod tests {
     use super::*;
 
-    const MAJOR: u16 = 0b1010_1011_0101;
-    const PENTA_MINOR: u16 = 1 | 1 << 3 | 1 << 5 | 1 << 7 | 1 << 10;
-
-    #[test]
-    fn levels_start_from_home_and_grow() {
-        assert_eq!(pool(0, MAJOR), [0, 4, 7]);
-        assert_eq!(pool(1, MAJOR), [0, 2, 4, 5, 7]);
-        assert_eq!(pool(2, MAJOR), [0, 2, 4, 5, 7, 9, 11]);
-        // Minor pentatonic: 1 b3 5 first.
-        assert_eq!(pool(0, PENTA_MINOR), [0, 3, 7]);
-        assert_eq!(pool(1, PENTA_MINOR), [0, 3, 5, 7, 10]);
-        assert_eq!(label(3, false), "\u{266d}3");
-        assert_eq!(label(7, true), "Pa");
+    fn many(step: Step) -> Vec<Question> {
+        (1..400u32).map(|s| question(step, s.wrapping_mul(2_654_435_761), &[])).collect()
     }
 
     #[test]
-    fn questions_stay_in_the_key_and_the_level() {
-        for level in 0..LEVELS {
-            for seed in 1..200u32 {
-                for mode in Mode::ALL {
-                    let q = question(mode, level, 9, MAJOR, seed.wrapping_mul(2_654_435_761), &[]);
-                    let allowed = pool(level, MAJOR);
-                    assert!(q.degrees().iter().all(|d| allowed.contains(d)), "{mode:?} {level} {:?}", q.notes);
-                    match mode {
-                        Mode::Find => assert_eq!(q.notes.len(), 1),
-                        _ => {
-                            assert_eq!(q.notes.len(), length(level));
-                            assert!(q.notes.windows(2).all(|w| w[0] != w[1]), "repeats: {:?}", q.notes);
-                        }
-                    }
-                    assert!(q.notes.iter().all(|&n| (36..=84).contains(&n)));
-                }
-            }
+    fn the_first_two_steps_have_clear_answers() {
+        let qs = many(Step::Direction);
+        for q in &qs {
+            assert_eq!(q.notes.len(), 2);
+            assert!((q.notes[1] as i32 - q.notes[0] as i32).abs() <= 7);
+        }
+        for c in [Choice::Lower, Choice::Same, Choice::Higher] {
+            assert!(qs.iter().any(|q| q.choice() == Some(c)), "{c:?} never comes");
+        }
+        let qs = many(Step::Distance);
+        for q in &qs {
+            let d = (q.notes[1] as i32 - q.notes[0] as i32).abs();
+            assert!((1..=2).contains(&d) || (4..=7).contains(&d), "{d}: neither a step nor a clear jump");
+        }
+        assert!(qs.iter().any(|q| q.choice() == Some(Choice::Step)));
+        assert!(qs.iter().any(|q| q.choice() == Some(Choice::Jump)));
+    }
+
+    #[test]
+    fn one_string_stays_on_the_a_string() {
+        for q in many(Step::OneString) {
+            assert_eq!(q.given_at.0, 1);
+            assert_eq!(pitch_at(q.given_at.0, q.given_at.1), q.notes[0]);
+            let to = q.notes[1] as i32 - 45;
+            assert!((0..=12).contains(&to) && q.notes[1] != q.notes[0]);
+            assert!((q.notes[1] as i32 - q.notes[0] as i32).abs() <= 5);
         }
     }
 
     #[test]
-    fn the_same_question_doesnt_come_twice_running() {
-        let a = question(Mode::Find, 0, 0, MAJOR, 7, &[]);
-        let mut seed = 7u32;
-        for _ in 0..50 {
-            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-            assert_ne!(question(Mode::Find, 0, 0, MAJOR, seed, &a.notes).notes, a.notes);
+    fn short_tunes_stay_in_the_box_from_an_a() {
+        let box_pitches: Vec<u8> = BOX.iter().map(|&(s, f)| pitch_at(s, f)).collect();
+        for q in many(Step::Tunes) {
+            assert_eq!(q.notes.len(), 4);
+            assert_eq!(q.notes[0] % 12, 9, "starts on an A");
+            assert!(q.notes.iter().all(|n| box_pitches.contains(n)));
+            assert!(q.notes.windows(2).all(|w| w[0] != w[1]));
+            assert_eq!(pitch_at(q.given_at.0, q.given_at.1), q.notes[0]);
         }
     }
 
     #[test]
-    fn early_melodies_go_home() {
-        for seed in 1..100u32 {
-            let q = question(Mode::Echo, 0, 0, MAJOR, seed * 977, &[]);
-            assert_eq!(q.notes[0], home(0));
-            assert_eq!(*q.notes.last().unwrap(), home(0));
-            // The second level dips under home, and still ends there.
-            let q = question(Mode::Echo, 1, 0, MAJOR, seed * 977, &[]);
-            assert_eq!(*q.notes.last().unwrap(), home(0), "{:?}", q.notes);
+    fn known_tunes_start_on_the_lit_a_and_keep_their_shape() {
+        for q in many(Step::Known) {
+            assert_eq!(q.notes[0] % 12, 9);
+            assert!(q.notes.iter().all(|&n| (40..=76).contains(&n)), "{:?}", q.notes);
+            assert!(q.title.is_some());
+            assert!(!q.plays_all());
         }
-        // ...and its melodies aren't all the same shape.
-        let shapes: std::collections::HashSet<Vec<u8>> = (1..60u32).map(|s| question(Mode::Echo, 1, 0, MAJOR, s * 7919, &[]).notes).collect();
-        assert!(shapes.len() >= 6, "{shapes:?}");
+        // Ode to Joy, from A: A A Bb C C Bb A.
+        let ode = (1..400u32).map(|s| question(Step::Known, s * 7919, &[])).find(|q| q.title == Some("Ode to Joy")).unwrap();
+        assert_eq!(ode.notes.iter().map(|&n| name(n)).collect::<Vec<_>>(), ["A", "A", "A#", "C", "C", "A#", "A"]);
+        // Every tune comes up.
+        let titles: std::collections::HashSet<_> = many(Step::Known).iter().filter_map(|q| q.title).collect();
+        assert_eq!(titles.len(), KNOWN.len());
     }
 
     #[test]
     fn answers_count_in_any_octave() {
-        let q = Question { mode: Mode::Echo, key: 0, notes: vec![60, 64, 67] };
-        assert_eq!(check(&q, &[48, 76, 66]), [true, true, false]);
-        assert_eq!(check(&q, &[60]), [true, false, false]);
+        let q = Question { step: Step::Tunes, notes: vec![57, 60, 62, 64], given_at: (2, 7), title: None };
+        assert_eq!(check(&q, &[48, 74, 63]), [true, true, false]);
     }
 
     #[test]
-    fn the_key_comes_first_then_the_notes() {
-        let q = Question { mode: Mode::Echo, key: 0, notes: vec![60, 62, 64] };
-        let (with, start) = project(&q, MAJOR, 100.0, true, true);
-        assert_eq!(start, 5 * PPQ, "four chords and a beat's rest");
-        assert_eq!(project_end(&with), start + 3 * PPQ - PPQ / 8);
-        let (without, start) = project(&q, MAJOR, 100.0, false, true);
-        assert_eq!(start, 0);
-        assert!(project_end(&without) < project_end(&with));
-        // A pentatonic gets just home's chord, twice.
-        let (penta, start) = project(&q, PENTA_MINOR, 100.0, true, false);
-        assert_eq!(start, 3 * PPQ);
-        assert!(project_end(&penta) > 0);
-    }
-
-    #[test]
-    fn points_grow_with_the_streak() {
-        assert_eq!(points(0, 0), 10);
-        assert_eq!(points(3, 0), 20);
-        assert_eq!(points(30, 0), 40);
-        assert_eq!(points(0, 2), 20);
+    fn notes_are_shown_near_the_lit_one() {
+        assert_eq!(position_of(45, (1, 5)), Some((0, 5)), "A on the low E's 5th fret, not the open A");
+        assert_eq!(position_of(45, (1, 0)), Some((1, 0)));
+        assert_eq!(position_of(57, (2, 7)), Some((2, 7)));
+        assert_eq!(position_of(90, (2, 7)).map(|(s, f)| pitch_at(s, f) % 12), Some(90 % 12), "off the neck: an octave down");
+        assert_eq!(ordinal(0), "1st");
+        assert_eq!(ordinal(3), "4th");
     }
 
     #[test]
@@ -439,16 +434,15 @@ mod tests {
         let mut f = NoteFollower::default();
         let mut got = Vec::new();
         let readings = [
-            None, Some(59.6), Some(60.1), Some(59.9), Some(60.2), Some(60.0), // C held
-            Some(64.0), Some(64.1), Some(63.9),                              // E
-            Some(64.0), None, None, None, None, Some(64.0), Some(64.0), Some(64.1), // E again after a gap
-            Some(70.0), Some(65.0), // a blip: not held
+            None, Some(59.6), Some(60.1), Some(59.9), Some(60.2), Some(60.0),
+            Some(64.0), Some(64.1), Some(63.9),
+            Some(64.0), None, None, None, None, Some(64.0), Some(64.0), Some(64.1),
+            Some(70.0), Some(65.0),
         ];
         for r in readings {
             got.extend(f.push(r));
         }
         assert_eq!(got, [60, 64, 64]);
-        assert!((midi_of(440.0) - 69.0).abs() < 1e-4);
         assert!((midi_of(82.41) - 40.0).abs() < 0.01, "a guitar's low E");
     }
 }

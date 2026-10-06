@@ -1,27 +1,27 @@
-//! Ear: hear a melody inside, then find it on your instrument. Scale
-//! degrees in the song's key - find one note, echo a short melody, or
-//! imagine one from its numbers and play it - answered on the pads, a
-//! MIDI or computer keyboard, or a guitar (or voice) into the mic. The
-//! rules and questions are `shared::ear`; this plays them, listens and
-//! keeps score. A Practice tab, like Riyaz.
+//! Ear: learn to play on the guitar what you hear in your head, in five
+//! steps (`shared::ear`): which way a tune moves, how far, where that is
+//! on a string, short tunes, then tunes you know. Every sound is named on
+//! screen as it plays (1st note, 2nd note...), the question is one plain
+//! sentence, and you answer with a button or on a guitar neck - tapped,
+//! or played on your real guitar into the mic (or a MIDI keyboard). A
+//! Practice tab, like Riyaz.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vizia::prelude::*;
+use vizia::vg;
 
-use shared::ear::{self, Mode, NoteFollower, Question};
-use shared::theory::note_name_for_key;
+use shared::ear::{self, Choice, NoteFollower, Question, Step};
 
+use crate::hidpi::Logical;
 use crate::synth::state::SynthEvent;
-use crate::tokens;
+use crate::tokens::{self, ThemeId};
 
 /// Mic readings per second at most.
 const HOP_SECS: f32 = 1.0 / 40.0;
 /// After a right answer, the next question comes by itself.
-const NEXT_AFTER: Duration = Duration::from_millis(1100);
-/// The question's tempo.
-const BPM: f64 = 100.0;
+const NEXT_AFTER: Duration = Duration::from_millis(1300);
 /// Clarity a mic reading needs to count as a note.
 const CLEAR: f32 = 0.75;
 
@@ -30,77 +30,58 @@ pub enum Phase {
     Idle,
     /// The audio is being made.
     Loading,
-    /// The key and question are playing: no answers yet (the mic would
-    /// hear the speakers).
+    /// The question is playing: no answers yet (the mic would hear it).
     Playing,
     Answering,
     Done,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Purpose {
-    /// The question (and the key before it): answering opens after.
-    Question,
-    /// Anything else heard: a pad, your notes, the answer.
-    Listen,
-}
-
 pub enum EarEvent {
     ToggleOpen,
-    SetMode(Mode),
-    SetLevel(usize),
-    /// A new question.
+    SetStep(Step),
     Next,
-    /// The question again (Imagine: the answer).
+    /// The question again (Tunes you know: its first note, until answered).
     Again,
-    /// The key alone: home's chords.
-    Key,
-    /// What you played, to hear it against the question.
-    Mine,
-    /// A pad: this degree.
-    Pad(u8),
+    Choose(Choice),
+    /// The neck, tapped.
+    Tap { string: usize, fret: u8 },
     ToggleMic,
-    ToggleSargam,
-    Rendered { generation: u64, audio: Arc<[f32]>, purpose: Purpose },
+    Rendered { generation: u64, audio: Arc<[f32]>, notes: usize, question: bool },
     Tick,
 }
 
+/// A note you played, and where it shows on the neck.
+pub type Played = (u8, Option<(usize, u8)>);
+
 pub struct EarModel {
     pub open: Signal<bool>,
-    pub mode: Signal<Mode>,
-    pub level: Signal<usize>,
+    pub step: Signal<Step>,
     pub phase: Signal<Phase>,
     pub question: Signal<Option<Question>>,
-    /// What you've played for it, as pitches.
-    pub played: Signal<Vec<u8>>,
-    /// Each note right or not, once answered.
+    pub played: Signal<Vec<Played>>,
+    pub chose: Signal<Option<Choice>>,
+    /// Each answer right or not, once answered.
     pub result: Signal<Option<Vec<bool>>>,
     pub score: Signal<u32>,
     pub streak: Signal<u32>,
-    pub best: Signal<u32>,
-    /// What just happened, big: "Right! +20", "Level up!".
     pub banner: Signal<String>,
+    /// Which of the question's notes is sounding now.
+    pub sounding: Signal<Option<usize>>,
     pub mic_on: Signal<bool>,
     pub no_input: Signal<bool>,
     /// The note the mic hears now.
     pub hearing: Signal<Option<u8>>,
-    pub sargam: Signal<bool>,
-    key: Signal<u8>,
-    scale_mask: Signal<u16>,
     player: crate::preview_player::SharedPlayer,
     mic: crate::mic::SharedMic,
     sample_rate: u32,
     generation: u64,
     token: Option<u64>,
-    /// When the question finishes playing.
-    playing_until: Option<Instant>,
+    /// What's playing: since when, how many notes, and whether it's the
+    /// question (answering opens after).
+    playing: Option<(Instant, usize, bool)>,
     /// The mic ignores the speakers until then.
     quiet_until: Option<Instant>,
     next_at: Option<Instant>,
-    /// The key needs playing before the next question (first one, or the
-    /// song's key changed).
-    need_key: bool,
-    heard_key: (u8, u16),
     follower: NoteFollower,
     started: Instant,
     last_reading: f32,
@@ -108,41 +89,30 @@ pub struct EarModel {
 }
 
 impl EarModel {
-    pub fn new(
-        key: Signal<u8>,
-        scale_mask: Signal<u16>,
-        player: crate::preview_player::SharedPlayer,
-        mic: crate::mic::SharedMic,
-        sample_rate: u32,
-    ) -> Self {
+    pub fn new(player: crate::preview_player::SharedPlayer, mic: crate::mic::SharedMic, sample_rate: u32) -> Self {
         Self {
             open: Signal::new(false),
-            mode: Signal::new(Mode::Find),
-            level: Signal::new(0),
+            step: Signal::new(Step::Direction),
             phase: Signal::new(Phase::Idle),
             question: Signal::new(None),
             played: Signal::new(Vec::new()),
+            chose: Signal::new(None),
             result: Signal::new(None),
             score: Signal::new(0),
             streak: Signal::new(0),
-            best: Signal::new(0),
             banner: Signal::new(String::new()),
+            sounding: Signal::new(None),
             mic_on: Signal::new(false),
             no_input: Signal::new(false),
             hearing: Signal::new(None),
-            sargam: Signal::new(false),
-            key,
-            scale_mask,
             player,
             mic,
             sample_rate,
             generation: 0,
             token: None,
-            playing_until: None,
+            playing: None,
             quiet_until: None,
             next_at: None,
-            need_key: true,
-            heard_key: (255, 0),
             follower: NoteFollower::default(),
             started: Instant::now(),
             last_reading: 0.0,
@@ -155,128 +125,108 @@ impl EarModel {
         if let Some(token) = self.token.take() {
             self.player.borrow_mut().stop_if(token);
         }
-        self.playing_until = None;
+        self.playing = None;
+        self.sounding.set(None);
     }
 
-    /// Back to no question (a new mode or level, or closed).
     fn reset(&mut self) {
         self.stop_sound();
         self.next_at = None;
         self.question.set(None);
         self.played.set(Vec::new());
+        self.chose.set(None);
         self.result.set(None);
         self.banner.set(String::new());
         self.phase.set(Phase::Idle);
         self.streak.set(0);
     }
 
-    fn render(&mut self, cx: &mut EventContext, project: shared::project::Project, purpose: Purpose) {
+    /// Plays the question's first `count` notes.
+    fn play(&mut self, cx: &mut EventContext, count: usize, question: bool) {
+        let Some(q) = self.question.get() else { return };
         self.stop_sound();
+        let notes: Vec<u8> = q.notes.iter().take(count).copied().collect();
         let generation = self.generation;
         let sample_rate = self.sample_rate;
         cx.spawn(move |proxy| {
-            let mut project = project;
+            let mut project = ear::project(&notes);
             project.migrate();
-            let end = ear::project_end(&project);
             let patches = project.instruments.into_iter().collect();
             let job = engine::render::RenderJob { arrangement: project.arrangement, patches, sources: Default::default(), sample_rate };
-            let audio = engine::render::render_between(&job, 0, end, 0.6);
-            let _ = proxy.emit(EarEvent::Rendered { generation, audio: Arc::from(audio), purpose });
+            let audio = engine::render::render_between(&job, 0, ear::project_end(&notes), 0.6);
+            let _ = proxy.emit(EarEvent::Rendered { generation, audio: Arc::from(audio), notes: notes.len(), question });
         });
-    }
-
-    fn key_changed(&self) -> bool {
-        self.heard_key != (self.key.get(), self.scale_mask.get())
     }
 
     fn next(&mut self, cx: &mut EventContext) {
         self.next_at = None;
         self.seed = self.seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
         let avoid = self.question.get().map(|q| q.notes).unwrap_or_default();
-        let q = ear::question(self.mode.get(), self.level.get(), self.key.get(), self.scale_mask.get(), self.seed, &avoid);
-        let cadence = self.need_key || self.key_changed();
-        self.need_key = false;
-        self.heard_key = (self.key.get(), self.scale_mask.get());
-        // Imagine shows the numbers and plays only the key: the melody is
-        // yours to hear inside.
-        let notes = q.mode != Mode::Imagine;
-        self.question.set(Some(q.clone()));
+        let q = ear::question(self.step.get(), self.seed, &avoid);
+        let count = if q.plays_all() { q.notes.len() } else { 1 };
+        self.question.set(Some(q));
         self.played.set(Vec::new());
+        self.chose.set(None);
         self.result.set(None);
         self.banner.set(String::new());
-        if !cadence && !notes {
-            self.phase.set(Phase::Answering);
-            return;
-        }
         self.phase.set(Phase::Loading);
-        let (project, _) = ear::project(&q, self.scale_mask.get(), BPM, cadence, notes);
-        self.render(cx, project, Purpose::Question);
+        self.play(cx, count, true);
     }
 
-    /// Plays these notes, nothing else (a pad, your answer, the melody).
-    fn hear(&mut self, cx: &mut EventContext, notes: Vec<u8>) {
+    fn choose(&mut self, cx: &mut EventContext, choice: Choice) {
         let Some(q) = self.question.get() else { return };
-        let (project, _) = ear::project(&Question { notes, ..q }, self.scale_mask.get(), BPM, false, true);
-        self.render(cx, project, Purpose::Listen);
-    }
-
-    /// A note from the pads, a keyboard or the mic.
-    fn input(&mut self, cx: &mut EventContext, pitch: u8, from_pad: bool) {
-        if self.phase.get() != Phase::Answering {
+        if self.phase.get() != Phase::Answering || q.choice().is_none() {
             return;
         }
+        self.chose.set(Some(choice));
+        self.finish(cx, vec![q.choice() == Some(choice)]);
+    }
+
+    /// A note from the neck, a keyboard or the mic.
+    fn input(&mut self, cx: &mut EventContext, pitch: u8, at: Option<(usize, u8)>) {
         let Some(q) = self.question.get() else { return };
+        if self.phase.get() != Phase::Answering || q.choice().is_some() {
+            return;
+        }
+        let at = at.or_else(|| ear::position_of(pitch, q.given_at));
         let mut played = self.played.get();
-        played.push(pitch);
+        played.push((pitch, at));
         self.played.set(played.clone());
-        if played.len() < q.notes.len() {
-            // A pad sounds its note (a key or the guitar already did).
-            if from_pad {
-                self.hear(cx, vec![pitch]);
-            }
-            return;
+        if played.len() >= q.to_find().len() {
+            let pitches: Vec<u8> = played.iter().map(|p| p.0).collect();
+            self.finish(cx, ear::check(&q, &pitches));
         }
-        let result = ear::check(&q, &played);
+    }
+
+    fn finish(&mut self, cx: &mut EventContext, result: Vec<bool>) {
+        let Some(q) = self.question.get() else { return };
         let right = result.iter().all(|r| *r);
-        self.result.set(Some(result.clone()));
+        self.result.set(Some(result));
         self.phase.set(Phase::Done);
         if right {
             let streak = self.streak.get() + 1;
-            let points = ear::points(streak - 1, self.level.get());
+            let points = ear::points(streak - 1);
             self.streak.set(streak);
-            self.best.set(self.best.get().max(streak));
             self.score.set(self.score.get() + points);
-            let combo = 1 + ((streak - 1) / 3).min(3);
-            let mut banner = if combo > 1 { format!("Right! +{points}  \u{d7}{combo}") } else { format!("Right! +{points}") };
-            if streak % ear::LEVEL_UP_STREAK == 0 && self.level.get() + 1 < ear::LEVELS {
-                self.level.set(self.level.get() + 1);
-                banner = format!("Level up! {}", ear::level_name(self.level.get()));
-                // New notes: hear the key again with them.
-                self.need_key = true;
+            let mut banner = format!("Yes! +{points}");
+            if streak == ear::READY_STREAK && q.step != Step::Known {
+                banner = format!("{banner}  \u{b7}  {streak} in a row: ready for step {}", q.step.index() + 2);
             }
             self.banner.set(banner);
-            match q.mode {
-                // Hear what you imagined, then on.
-                Mode::Imagine => {
-                    self.hear(cx, q.notes.clone());
-                    self.next_at = Some(Instant::now() + NEXT_AFTER + Duration::from_millis(600 * q.notes.len() as u64));
-                }
-                _ => {
-                    if from_pad && q.mode == Mode::Echo {
-                        self.hear(cx, vec![pitch]);
-                    }
-                    self.next_at = Some(Instant::now() + NEXT_AFTER);
-                }
-            }
+            // A tune you know: hear it whole, then on.
+            let wait = if q.step == Step::Known {
+                self.play(cx, q.notes.len(), false);
+                Duration::from_secs_f32(ear::note_secs() * q.notes.len() as f32)
+            } else {
+                Duration::ZERO
+            };
+            self.next_at = Some(Instant::now() + NEXT_AFTER + wait);
         } else {
             self.streak.set(0);
-            self.banner.set(if q.mode == Mode::Find { "Not quite".into() } else { format!("{} of {}", result.iter().filter(|r| **r).count(), result.len()) });
-            match q.mode {
-                // Yours, then the right one: hear the difference.
-                Mode::Find => self.hear(cx, vec![played[0], q.notes[0]]),
-                // What it should have been.
-                Mode::Imagine => self.hear(cx, q.notes.clone()),
-                Mode::Echo => {}
+            self.banner.set("Not quite".to_string());
+            // On the neck: hear how it really goes, the dots lit as it plays.
+            if q.choice().is_none() {
+                self.play(cx, q.notes.len(), false);
             }
         }
     }
@@ -297,7 +247,7 @@ impl EarModel {
             self.hearing.set(hearing);
         }
         if let Some(note) = self.follower.push(midi) {
-            self.input(cx, note, false);
+            self.input(cx, note, None);
         }
     }
 
@@ -316,9 +266,9 @@ impl EarModel {
 
 impl Model for EarModel {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        // Notes from a MIDI or computer keyboard answer too.
+        // Notes from a MIDI or computer keyboard answer on the neck too.
         event.map(|event, _| match event {
-            SynthEvent::PlayNote(note, _) | SynthEvent::KeyPress(note) if self.open.get() => self.input(cx, *note, false),
+            SynthEvent::PlayNote(note, _) | SynthEvent::KeyPress(note) if self.open.get() => self.input(cx, *note, None),
             _ => {}
         });
         event.map(|event, _| match event {
@@ -326,7 +276,6 @@ impl Model for EarModel {
                 let open = !self.open.get();
                 self.open.set(open);
                 if open {
-                    // Listening again if it was before.
                     if self.mic_on.get() {
                         self.set_mic(true);
                     }
@@ -338,70 +287,38 @@ impl Model for EarModel {
                     self.mic_on.set(was);
                 }
             }
-            EarEvent::SetMode(mode) => {
-                if self.mode.get() != *mode {
-                    self.mode.set(*mode);
+            EarEvent::SetStep(step) => {
+                if self.step.get() != *step {
+                    self.step.set(*step);
                     self.reset();
                 }
-            }
-            EarEvent::SetLevel(level) => {
-                self.level.set(*level);
-                self.need_key = true;
-                self.reset();
             }
             EarEvent::Next => self.next(cx),
             EarEvent::Again => {
                 self.next_at = None;
                 if let Some(q) = self.question.get() {
-                    if q.mode == Mode::Imagine && self.phase.get() != Phase::Done {
-                        // Imagine: the key again (the melody's for after).
-                        let (project, _) = ear::project(&q, self.scale_mask.get(), BPM, true, false);
-                        self.render(cx, project, Purpose::Listen);
-                    } else {
-                        self.hear(cx, q.notes);
-                    }
+                    let phase = self.phase.get();
+                    let all = q.plays_all() || phase == Phase::Done;
+                    // Before answering, the question again (no answers while it plays).
+                    self.play(cx, if all { q.notes.len() } else { 1 }, phase != Phase::Done);
                 }
             }
-            EarEvent::Key => {
-                self.next_at = None;
-                let q = self.question.get().unwrap_or(Question { mode: self.mode.get(), key: self.key.get(), notes: Vec::new() });
-                let q = Question { key: self.key.get(), ..q };
-                let (project, _) = ear::project(&q, self.scale_mask.get(), BPM, true, false);
-                self.heard_key = (self.key.get(), self.scale_mask.get());
-                self.render(cx, project, Purpose::Listen);
-            }
-            EarEvent::Mine => {
-                self.next_at = None;
-                let played = self.played.get();
-                let Some(q) = self.question.get() else { return };
-                // Find: yours, then the right one.
-                match (q.mode, played.first()) {
-                    (Mode::Find, Some(&mine)) => self.hear(cx, vec![mine, q.notes[0]]),
-                    _ if !played.is_empty() => self.hear(cx, played),
-                    _ => {}
-                }
-            }
-            EarEvent::Pad(degree) => {
-                let Some(q) = self.question.get() else { return };
-                self.input(cx, ear::home(q.key) + degree, true);
-            }
+            EarEvent::Choose(choice) => self.choose(cx, *choice),
+            EarEvent::Tap { string, fret } => self.input(cx, ear::pitch_at(*string, *fret), Some((*string, *fret))),
             EarEvent::ToggleMic => self.set_mic(!self.mic_on.get()),
-            EarEvent::ToggleSargam => self.sargam.set(!self.sargam.get()),
-            EarEvent::Rendered { generation, audio, purpose } => {
+            EarEvent::Rendered { generation, audio, notes, question } => {
                 if *generation != self.generation || !self.open.get() {
                     return;
                 }
-                // The song stops for the ear.
                 cx.emit(crate::app::AppEvent::Stop);
                 let secs = audio.len() as f64 / 2.0 / self.sample_rate.max(1) as f64;
                 self.token = self.player.borrow_mut().play(audio.to_vec(), false);
                 let now = Instant::now();
                 self.quiet_until = Some(now + Duration::from_secs_f64(secs));
                 self.follower.clear();
-                if *purpose == Purpose::Question {
+                self.playing = Some((now, *notes, *question));
+                if *question {
                     self.phase.set(Phase::Playing);
-                    // The tail rings on; answering opens as the last note ends.
-                    self.playing_until = Some(now + Duration::from_secs_f64((secs - 0.6).max(0.0)));
                 }
             }
             EarEvent::Tick => {
@@ -409,10 +326,17 @@ impl Model for EarModel {
                     return;
                 }
                 let now = Instant::now();
-                if self.playing_until.is_some_and(|t| now >= t) {
-                    self.playing_until = None;
-                    if self.phase.get() == Phase::Playing {
-                        self.phase.set(Phase::Answering);
+                if let Some((since, count, question)) = self.playing {
+                    let at = (now - since).as_secs_f32() / ear::note_secs();
+                    let sounding = (at < count as f32).then_some(at as usize);
+                    if self.sounding.get() != sounding {
+                        self.sounding.set(sounding);
+                    }
+                    if sounding.is_none() {
+                        self.playing = None;
+                        if question && self.phase.get() == Phase::Playing {
+                            self.phase.set(Phase::Answering);
+                        }
                     }
                 }
                 if self.next_at.is_some_and(|t| now >= t) {
@@ -429,44 +353,40 @@ impl Model for EarModel {
 #[derive(Clone, Copy)]
 pub struct EarProps {
     pub open: Signal<bool>,
-    pub mode: Signal<Mode>,
-    pub level: Signal<usize>,
+    pub step: Signal<Step>,
     pub phase: Signal<Phase>,
     pub question: Signal<Option<Question>>,
-    pub played: Signal<Vec<u8>>,
+    pub played: Signal<Vec<Played>>,
+    pub chose: Signal<Option<Choice>>,
     pub result: Signal<Option<Vec<bool>>>,
     pub score: Signal<u32>,
     pub streak: Signal<u32>,
-    pub best: Signal<u32>,
     pub banner: Signal<String>,
+    pub sounding: Signal<Option<usize>>,
     pub mic_on: Signal<bool>,
     pub no_input: Signal<bool>,
     pub hearing: Signal<Option<u8>>,
-    pub sargam: Signal<bool>,
-    pub key: Signal<u8>,
-    pub scale_mask: Signal<u16>,
+    pub theme: Signal<ThemeId>,
 }
 
 impl EarProps {
-    pub fn of(m: &EarModel) -> Self {
+    pub fn of(m: &EarModel, theme: Signal<ThemeId>) -> Self {
         Self {
             open: m.open,
-            mode: m.mode,
-            level: m.level,
+            step: m.step,
             phase: m.phase,
             question: m.question,
             played: m.played,
+            chose: m.chose,
             result: m.result,
             score: m.score,
             streak: m.streak,
-            best: m.best,
             banner: m.banner,
+            sounding: m.sounding,
             mic_on: m.mic_on,
             no_input: m.no_input,
             hearing: m.hearing,
-            sargam: m.sargam,
-            key: m.key,
-            scale_mask: m.scale_mask,
+            theme,
         }
     }
 }
@@ -478,41 +398,34 @@ pub fn ear_view(cx: &mut Context, p: EarProps) {
         }
         VStack::new(cx, move |cx| {
             header(cx, p);
-            // One column, read top to bottom: what to do, the notes, the
-            // pads to answer on, what next.
-            VStack::new(cx, move |cx| {
-                // A melody's notes take the heading's place (the line under
-                // them says what to do), so the pads always fit.
-                let melody = Memo::new(move |_| p.question.get().is_some_and(|q| q.mode != Mode::Find));
-                Binding::new(cx, melody, move |cx| {
-                    if melody.get() {
-                        slots(cx, p);
-                    } else {
-                        Label::new(cx, Memo::new(move |_| prompt(p).0)).class("practice-status").width(Auto).height(Pixels(44.0)).alignment(Alignment::Center);
-                    }
-                });
-                Label::new(cx, Memo::new(move |_| prompt(p).1)).class("value").width(Auto).height(Pixels(16.0));
-                // The pads in the middle - staying put whatever the buttons
-                // beside them say - and what to do next to their right.
-                HStack::new(cx, move |cx| {
-                    Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-                    pads(cx, p);
+            HStack::new(cx, move |cx| {
+                // What to do, what's playing, how it went, what next.
+                VStack::new(cx, move |cx| {
+                    Label::new(cx, Memo::new(move |_| question_text(p))).class("label-lg").class("ear-question").text_wrap(true).width(Stretch(1.0));
+                    VStack::new(cx, move |cx| chips(cx, p)).height(Pixels(30.0)).width(Stretch(1.0));
+                    Label::new(cx, Memo::new(move |_| status_text(p))).class("value").text_wrap(true).width(Stretch(1.0)).height(Pixels(18.0));
                     HStack::new(cx, move |cx| {
-                        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(36.0));
-                        actions(cx, p);
+                        Button::new(cx, move |cx| Label::new(cx, p.question.map(|q| if q.is_none() { "\u{25b8} Start" } else { "Next \u{203a}" })))
+                            .class("btn")
+                            .class("lg")
+                            .class("is-on")
+                            .on_press(|cx| cx.emit(EarEvent::Next));
+                        Button::new(cx, |cx| Label::new(cx, "\u{21bb} Play again"))
+                            .class("btn")
+                            .class("lg")
+                            .toggle_class("hidden", p.question.map(|q| q.is_none()))
+                            .on_press(|cx| cx.emit(EarEvent::Again));
                     })
-                    .alignment(Alignment::Left)
-                    .gap(Pixels(tokens::SPACE_4))
-                    .width(Stretch(1.0))
+                    .gap(Pixels(tokens::SPACE_2))
                     .height(Auto);
                 })
-                .alignment(Alignment::Center)
-                .gap(Pixels(tokens::SPACE_4))
+                .gap(Pixels(6.0))
                 .width(Stretch(1.0))
                 .height(Auto);
+                // Where you answer.
+                VStack::new(cx, move |cx| answer_area(cx, p)).width(Pixels(560.0)).height(Pixels(124.0));
             })
-            .alignment(Alignment::TopCenter)
-            .gap(Pixels(tokens::SPACE_2))
+            .gap(Pixels(tokens::SPACE_4))
             .width(Stretch(1.0))
             .height(Auto);
         })
@@ -528,37 +441,13 @@ fn header(cx: &mut Context, p: EarProps) {
     HStack::new(cx, move |cx| {
         crate::synth::segmented::segmented(
             cx,
-            Mode::ALL.len(),
-            |cx, i| Label::new(cx, Mode::ALL[i].name()),
-            move |i| p.mode.map(move |m| *m == Mode::ALL[i]),
-            |cx, i| cx.emit(EarEvent::SetMode(Mode::ALL[i])),
+            Step::ALL.len(),
+            |cx, i| Label::new(cx, format!("{}  {}", i + 1, Step::ALL[i].title())),
+            move |i| p.step.map(move |s| *s == Step::ALL[i]),
+            |cx, i| cx.emit(EarEvent::SetStep(Step::ALL[i])),
         )
         .height(Pixels(tokens::SIZE_CONTROL));
-        Label::new(cx, "Level").class("label");
-        crate::synth::segmented::segmented(
-            cx,
-            ear::LEVELS,
-            |cx, i| Label::new(cx, format!("{}", i + 1)),
-            move |i| p.level.map(move |l| *l == i),
-            |cx, i| cx.emit(EarEvent::SetLevel(i)),
-        )
-        .height(Pixels(tokens::SIZE_CONTROL));
-        Label::new(cx, p.level.map(|l| ear::level_name(*l))).class("value");
-        Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(16.0));
-        // In the song's key and scale.
-        let key_text = Memo::new(move |_| {
-            format!(
-                "{} {}  \u{2304}",
-                shared::theory::note_name(p.key.get()),
-                crate::interval_input::state::scale_name(p.scale_mask.get()).to_lowercase()
-            )
-        });
-        Button::new(cx, move |cx| Label::new(cx, key_text)).class("btn").class("sm").on_press(crate::key_menu::open_from);
-        Button::new(cx, move |cx| Label::new(cx, p.sargam.map(|s| if *s { "Sargam" } else { "Numbers" })))
-            .class("btn")
-            .class("sm")
-            .on_press(|cx| cx.emit(EarEvent::ToggleSargam))
-            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Name the degrees as numbers or in sargam"); }).arrow(false));
+        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
         Button::new(cx, move |cx| {
             Label::new(
                 cx,
@@ -566,9 +455,9 @@ fn header(cx: &mut Context, p: EarProps) {
                     if p.no_input.get() {
                         "No mic".to_string()
                     } else if p.mic_on.get() {
-                        "\u{25cf} Listening".to_string()
+                        "\u{25cf} Hearing your guitar".to_string()
                     } else {
-                        "Guitar / voice".to_string()
+                        "Use my guitar (mic)".to_string()
                     }
                 }),
             )
@@ -577,177 +466,331 @@ fn header(cx: &mut Context, p: EarProps) {
         .class("sm")
         .toggle_class("is-rec", p.mic_on)
         .on_press(|cx| cx.emit(EarEvent::ToggleMic))
-        .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Answer by playing your guitar (or singing) into the mic. Keys and MIDI always work."); }).arrow(false));
-        Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+        .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Answer the neck steps by playing your guitar into the mic"); }).arrow(false));
         Label::new(
             cx,
             Memo::new(move |_| match p.streak.get() {
-                0 if p.best.get() == 0 => format!("{} points", p.score.get()),
-                0 => format!("{} points  \u{b7}  best {} in a row", p.score.get(), p.best.get()),
+                0 => format!("{} points", p.score.get()),
                 n => format!("{} points  \u{b7}  {n} in a row", p.score.get()),
             }),
         )
         .class("value");
     })
-    .gap(Pixels(tokens::SPACE_2))
+    .gap(Pixels(tokens::SPACE_3))
     .alignment(Alignment::Left)
     .width(Stretch(1.0))
     .height(Pixels(tokens::SIZE_CONTROL));
 }
 
-fn name_of(pitch: u8, key: u8, sargam: bool) -> String {
-    ear::label(ear::degree_of(pitch, key), sargam)
+/// The one thing to do, in a sentence.
+fn question_text(p: EarProps) -> String {
+    let step = p.step.get();
+    let Some(q) = p.question.get() else {
+        return format!("Step {}: {}. {}", step.index() + 1, step.title(), step.why());
+    };
+    match q.step {
+        Step::Direction => "Two notes play. Is the 2nd one higher or lower than the 1st?".to_string(),
+        Step::Distance => "Two notes play. Is the 2nd one a step away (1 or 2 frets) or a jump?".to_string(),
+        Step::OneString => format!("The 1st note is {}, lit on the A string. Find the 2nd on the same string.", ear::name(q.notes[0])),
+        Step::Tunes => format!("A {}-note tune starts on the lit {}. Play the other {}.", q.notes.len(), ear::name(q.notes[0]), q.to_find().len()),
+        Step::Known => format!(
+            "Play the start of {} from memory: {} notes, starting on the lit {}.",
+            q.title.unwrap_or("the tune"),
+            q.notes.len(),
+            ear::name(q.notes[0])
+        ),
+    }
 }
 
-/// What to do now, big, and a line under it.
-fn prompt(p: EarProps) -> (String, String) {
-    let sargam = p.sargam.get();
-    let played = p.played.get();
-    let hearing = p.hearing.get().filter(|_| p.mic_on.get());
-    let Some(q) = p.question.get() else {
-        return ("Ear training".to_string(), p.mode.get().how().to_string());
-    };
-    let heard = hearing.map(|h| format!("  \u{b7}  hearing {}", name_of(h, q.key, sargam))).unwrap_or_default();
-    let answer = q.notes.iter().map(|&n| name_of(n, q.key, sargam)).collect::<Vec<_>>().join(" ");
+/// What's happening, or how it went.
+fn status_text(p: EarProps) -> String {
+    let Some(q) = p.question.get() else { return "Press Start, then listen.".to_string() };
+    let on_neck = q.choice().is_none();
+    let hearing = p.hearing.get().filter(|_| p.mic_on.get() && on_neck).map(|h| format!("  (hearing {})", ear::name(h))).unwrap_or_default();
     match p.phase.get() {
-        Phase::Idle => ("Ear training".to_string(), q.mode.how().to_string()),
-        Phase::Loading | Phase::Playing => match q.mode {
-            Mode::Find => ("Listen\u{2026}".to_string(), String::new()),
-            Mode::Echo => (String::new(), "Listen\u{2026}".to_string()),
-            Mode::Imagine => (String::new(), "First, the key\u{2026}".to_string()),
-        },
-        Phase::Answering => match q.mode {
-            Mode::Find => ("Which note was it?".to_string(), format!("Tap it below, or play it.{heard}")),
-            Mode::Echo => (String::new(), format!("Play it back  \u{b7}  note {} of {}{heard}", played.len() + 1, q.notes.len())),
-            Mode::Imagine => (String::new(), format!("Hear it in your head, then play it  \u{b7}  note {} of {}{heard}", played.len() + 1, q.notes.len())),
-        },
+        Phase::Idle | Phase::Loading => "Listen\u{2026}".to_string(),
+        Phase::Playing if q.step == Step::Known => format!("This is your 1st note: {}. The rest is in your head.", ear::name(q.notes[0])),
+        Phase::Playing => "Listen\u{2026} (the lit box shows which note is playing)".to_string(),
+        Phase::Answering if !on_neck => "Pick one on the right.".to_string(),
+        Phase::Answering => {
+            let n = p.played.get().len();
+            format!("Tap the {} note on the neck, or play it on your guitar.{hearing}", ear::ordinal(n + 1))
+        }
         Phase::Done => {
-            let result = p.result.get().unwrap_or_default();
-            let right = result.iter().all(|r| *r);
+            let right = p.result.get().is_some_and(|r| r.iter().all(|x| *x));
+            let d = q.notes[1] as i32 - q.notes[0] as i32;
+            let frets = |d: i32| if d.abs() == 1 { "1 fret".to_string() } else { format!("{} frets", d.abs()) };
+            let how = match q.choice() {
+                Some(Choice::Same) => "It was the same note.".to_string(),
+                Some(Choice::Higher) => format!("It went higher, by {}.", frets(d)),
+                Some(Choice::Lower) => format!("It went lower, by {}.", frets(d)),
+                Some(Choice::Step) => format!("A step: {}.", frets(d)),
+                Some(Choice::Jump) => format!("A jump: {}.", frets(d)),
+                None => format!("It goes {}.", q.notes.iter().map(|&n| ear::name(n)).collect::<Vec<_>>().join(" ")),
+            };
             if right {
-                match q.mode {
-                    Mode::Find => (p.banner.get(), format!("It was {answer}.")),
-                    _ => (String::new(), p.banner.get()),
-                }
+                format!("{}  {how}", p.banner.get())
+            } else if on_neck {
+                format!("Not quite. {how} Green shows where.")
             } else {
-                match q.mode {
-                    Mode::Find => (
-                        format!("It was {answer}"),
-                        format!("You picked {}. Compare to hear both.", played.first().map(|&n| name_of(n, q.key, sargam)).unwrap_or_default()),
-                    ),
-                    _ => {
-                        let mine = played.iter().map(|&n| name_of(n, q.key, sargam)).collect::<Vec<_>>().join(" ");
-                        let after = if q.mode == Mode::Echo { "Play again to hear it." } else { "Listen to how it goes." };
-                        (
-                            String::new(),
-                            format!("{} of {} right  \u{b7}  you played {mine}. {after}", result.iter().filter(|r| **r).count(), result.len()),
-                        )
-                    }
-                }
+                format!("Not quite. {how} Play again to hear it.")
             }
         }
     }
 }
 
-/// A box per note of a melody (not for one note: the pads are the
-/// answer). Echo: "?" until you play each, then what you played.
-/// Imagine: the numbers to imagine. Once answered: the right notes, red
-/// where yours were off (the line under says what you played).
-fn slots(cx: &mut Context, p: EarProps) {
-    let shape = Memo::new(move |_| (p.question.get(), p.played.get(), p.result.get(), p.phase.get(), p.sargam.get()));
+/// A box for each note of the question, lit while it plays: "1st", "2nd"
+/// (the first's name always, the rest once answered).
+fn chips(cx: &mut Context, p: EarProps) {
+    let shape = Memo::new(move |_| (p.question.get(), p.result.get(), p.sounding.get()));
     Binding::new(cx, shape, move |cx| {
-        let (Some(q), played, result, phase, sargam) = shape.get() else { return };
+        let (Some(q), result, sounding) = shape.get() else { return };
+        let on_neck = q.choice().is_none();
         HStack::new(cx, move |cx| {
-            for (i, &note) in q.notes.iter().enumerate() {
-                let ok = result.as_ref().and_then(|r| r.get(i).copied());
-                let mine = played.get(i).copied();
-                let current = phase == Phase::Answering && i == played.len();
-                let text = match (ok, q.mode, mine) {
-                    (Some(_), _, _) | (None, Mode::Imagine, _) => name_of(note, q.key, sargam),
-                    (None, _, Some(m)) => name_of(m, q.key, sargam),
-                    (None, _, None) => "?".to_string(),
+            for i in 0..q.notes.len() {
+                let text = match (i, on_neck, result.is_some()) {
+                    (_, false, _) => format!("{} note", ear::ordinal(i)),
+                    (0, true, _) | (_, true, true) => format!("{} \u{b7} {}", ear::ordinal(i), ear::name(q.notes[i])),
+                    _ => format!("{} \u{b7} ?", ear::ordinal(i)),
                 };
+                let ok = if on_neck && i > 0 { result.as_ref().and_then(|r| r.get(i - 1).copied()) } else { None };
                 Label::new(cx, text)
-                    .class("ear-slot")
+                    .class("ear-chip")
+                    .height(Pixels(28.0))
+                    .padding_left(Pixels(12.0))
+                    .padding_right(Pixels(12.0))
                     .alignment(Alignment::Center)
+                    .toggle_class("is-sounding", sounding == Some(i))
+                    .toggle_class("is-given", i == 0 && on_neck)
                     .toggle_class("is-right", ok == Some(true))
-                    .toggle_class("is-wrong", ok == Some(false))
-                    .toggle_class("is-current", current)
-                    .toggle_class("is-filled", ok.is_none() && mine.is_some());
-            }
-        })
-        .gap(Pixels(8.0))
-        .size(Auto);
-    });
-}
-
-/// A pad for each degree the level uses: the degree big, its note under
-/// it (where it is on the neck is the next thing to learn).
-fn pads(cx: &mut Context, p: EarProps) {
-    let shape = Memo::new(move |_| (p.level.get(), p.scale_mask.get(), p.key.get(), p.sargam.get()));
-    // In a column of its own: a Binding rebuilt straight in a row lays out
-    // in the wrong place.
-    VStack::new(cx, move |cx| Binding::new(cx, shape, move |cx| {
-        let (level, mask, key, sargam) = shape.get();
-        HStack::new(cx, move |cx| {
-            for degree in ear::pool(level, mask) {
-                let marks = Memo::new(move |_| {
-                    // Find marks the answer, and a wrong pick.
-                    let (Some(q), Some(_)) = (p.question.get(), p.result.get()) else { return (false, false) };
-                    if q.mode != Mode::Find {
-                        return (false, false);
-                    }
-                    let target = q.degrees()[0];
-                    let picked = p.played.get().first().map(|&n| ear::degree_of(n, q.key));
-                    (target == degree, picked == Some(degree) && target != degree)
-                });
-                Button::new(cx, move |cx| {
-                    VStack::new(cx, move |cx| {
-                        Label::new(cx, ear::label(degree, sargam)).class("ear-pad-degree").hoverable(false);
-                        Label::new(cx, note_name_for_key((key + degree) % 12, key)).class("ear-pad-note").hoverable(false);
-                    })
-                    .alignment(Alignment::Center)
-                    .gap(Pixels(2.0))
-                    .hoverable(false)
-                })
-                .class("btn")
-                .class("ear-pad")
-                .toggle_class("is-right", marks.map(|m| m.0))
-                .toggle_class("is-wrong", marks.map(|m| m.1))
-                .on_press(move |cx| cx.emit(EarEvent::Pad(degree)));
+                    .toggle_class("is-wrong", ok == Some(false));
             }
         })
         .gap(Pixels(6.0))
         .size(Auto);
-    }))
-    .size(Auto);
+    });
 }
 
-/// One main button (Start, then Next), and the hearing aids beside it.
-fn actions(cx: &mut Context, p: EarProps) {
-    HStack::new(cx, move |cx| {
-        Button::new(cx, move |cx| Label::new(cx, p.question.map(|q| if q.is_none() { "\u{25b8} Start" } else { "Next \u{203a}" })))
-            .class("btn")
-            .class("lg")
-            .class("is-on")
-            .on_press(|cx| cx.emit(EarEvent::Next));
-        Button::new(cx, |cx| Label::new(cx, "Play again"))
-            .class("btn")
-            .class("quiet")
-            .toggle_class("hidden", p.question.map(|q| q.is_none()))
-            .on_press(|cx| cx.emit(EarEvent::Again));
-        Button::new(cx, |cx| Label::new(cx, "Hear the key"))
-            .class("btn")
-            .class("quiet")
-            .on_press(|cx| cx.emit(EarEvent::Key));
-        let wrong = Memo::new(move |_| p.phase.get() == Phase::Done && p.result.get().is_some_and(|r| r.iter().any(|x| !*x)));
-        Button::new(cx, move |cx| Label::new(cx, p.mode.map(|m| if *m == Mode::Find { "Compare" } else { "Hear mine" })))
-            .class("btn")
-            .class("quiet")
-            .toggle_class("hidden", wrong.map(|w| !*w))
-            .on_press(|cx| cx.emit(EarEvent::Mine));
-    })
-    .gap(Pixels(tokens::SPACE_2))
-    .alignment(Alignment::Center)
-    .size(Auto);
+/// Buttons for the first two steps, the neck for the rest.
+fn answer_area(cx: &mut Context, p: EarProps) {
+    let on_neck = Memo::new(move |_| matches!(p.step.get(), Step::OneString | Step::Tunes | Step::Known));
+    Binding::new(cx, on_neck, move |cx| {
+        if on_neck.get() {
+            Fretboard::new(cx, p).width(Stretch(1.0)).height(Stretch(1.0));
+            return;
+        }
+        let choices = Memo::new(move |_| match p.step.get() {
+            Step::Direction => vec![Choice::Lower, Choice::Same, Choice::Higher],
+            _ => vec![Choice::Step, Choice::Jump],
+        });
+        Binding::new(cx, choices, move |cx| {
+            HStack::new(cx, move |cx| {
+                for choice in choices.get() {
+                    let marks = Memo::new(move |_| {
+                        let (Some(q), Some(_)) = (p.question.get(), p.result.get()) else { return (false, false) };
+                        let picked = p.chose.get() == Some(choice);
+                        (q.choice() == Some(choice), picked && q.choice() != Some(choice))
+                    });
+                    let arrow = match choice {
+                        Choice::Lower => "\u{2193}  ",
+                        Choice::Higher => "\u{2191}  ",
+                        Choice::Same => "=  ",
+                        _ => "",
+                    };
+                    Button::new(cx, move |cx| Label::new(cx, format!("{arrow}{}", choice.name())).hoverable(false))
+                        .class("btn")
+                        .class("ear-choice")
+                        .toggle_class("is-right", marks.map(|m| m.0))
+                        .toggle_class("is-wrong", marks.map(|m| m.1))
+                        .on_press(move |cx| cx.emit(EarEvent::Choose(choice)));
+                }
+            })
+            .gap(Pixels(tokens::SPACE_2))
+            .alignment(Alignment::Center)
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
+        });
+    });
+}
+
+/// A guitar neck, open strings to the 12th fret, high e on top as in tab:
+/// the given note lit, your notes, and - once answered - where the right
+/// ones are. Tap a string at a fret to answer.
+struct Fretboard {
+    p: EarProps,
+}
+
+impl Fretboard {
+    fn new(cx: &mut Context, p: EarProps) -> Handle<'_, Self> {
+        Self { p }
+            .build(cx, |_| {})
+            .bind(p.question, |mut h| h.needs_redraw())
+            .bind(p.played, |mut h| h.needs_redraw())
+            .bind(p.result, |mut h| h.needs_redraw())
+            .bind(p.phase, |mut h| h.needs_redraw())
+            .bind(p.sounding, |mut h| h.needs_redraw())
+            .bind(p.theme, |mut h| h.needs_redraw())
+    }
+}
+
+/// The neck's layout in `b`: (left edge, a fret's width, top string's y,
+/// the gap between strings).
+fn neck(b: BoundingBox) -> (f32, f32, f32, f32) {
+    let left = b.x + 24.0;
+    let col = (b.w - 24.0 - 6.0) / (ear::FRETS as f32 + 1.0);
+    let top = b.y + 22.0;
+    let row = (b.h - 22.0 - 9.0) / 5.0;
+    (left, col, top, row)
+}
+
+fn spot(b: BoundingBox, (string, fret): (usize, u8)) -> (f32, f32) {
+    let (left, col, top, row) = neck(b);
+    (left + (fret as f32 + 0.5) * col, top + (5 - string) as f32 * row)
+}
+
+impl View for Fretboard {
+    fn element(&self) -> Option<&'static str> {
+        Some("fretboard")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, _| {
+            if let WindowEvent::MouseDown(MouseButton::Left) = window_event {
+                let b = cx.lbounds();
+                let (mx, my) = cx.lmouse();
+                let (left, col, top, row) = neck(b);
+                let fret = ((mx - left) / col).floor();
+                let from_top = ((my - top) / row).round();
+                if (0.0..=ear::FRETS as f32).contains(&fret) && (0.0..=5.0).contains(&from_top) && (my - (top + from_top * row)).abs() < row * 0.6 {
+                    cx.emit(EarEvent::Tap { string: 5 - from_top as usize, fret: fret as u8 });
+                }
+            }
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let b = cx.lbounds();
+        crate::hidpi::clip(canvas, b);
+        let pal = self.p.theme.get().palette();
+        let (left, col, top, row) = neck(b);
+        let bottom = top + 5.0 * row;
+        rrect(canvas, vg::Rect::new(b.x, b.y, b.x + b.w, b.y + b.h), 6.0, pal.bg_000);
+        let q = self.p.question.get();
+        let step = self.p.step.get();
+
+        // Fret numbers, inlays, frets and the nut.
+        for fret in 0..=ear::FRETS {
+            let cxm = left + (fret as f32 + 0.5) * col;
+            centered(canvas, &fret.to_string(), cxm, b.y + 13.0, 10.0, if [3, 5, 7, 9, 12].contains(&fret) { pal.ink_muted } else { pal.ink_faint });
+            if [3, 5, 7, 9].contains(&fret) {
+                dot(canvas, cxm, top + 2.5 * row, 3.0, pal.bg_300);
+            } else if fret == 12 {
+                dot(canvas, cxm, top + 1.5 * row, 3.0, pal.bg_300);
+                dot(canvas, cxm, top + 3.5 * row, 3.0, pal.bg_300);
+            }
+            let x = left + (fret as f32 + 1.0) * col;
+            fill(canvas, vg::Rect::new(x, top, x + if fret == 0 { 3.0 } else { 1.0 }, bottom), if fret == 0 { pal.ink_muted } else { pal.line_control });
+        }
+        // Strings, high e on top; the one to stay on in One string drawn bold.
+        for s in 0..6 {
+            let y = top + (5 - s) as f32 * row;
+            let active = step == Step::OneString && s == 1;
+            let w = if active { 2.5 } else { 1.0 + (5 - s) as f32 * 0.25 };
+            fill(canvas, vg::Rect::new(left, y - w / 2.0, b.x + b.w - 6.0, y + w / 2.0), if active { pal.ink } else { pal.ink_faint });
+            text(canvas, ear::STRING_NAMES[s], b.x + 8.0, y + 4.0, 11.0, if active { pal.ink } else { pal.ink_muted });
+        }
+        // The box at the 5th fret, faintly, for short tunes.
+        if step == Step::Tunes {
+            for &at in &ear::BOX {
+                let (x, y) = spot(b, at);
+                dot(canvas, x, y, row * 0.36, pal.bg_200);
+            }
+        }
+        let Some(q) = q else { return };
+        let r = (row * 0.42).min(col * 0.42);
+        let result = self.p.result.get();
+        let sounding = self.p.sounding.get();
+        // Once answered: where the ones you missed are (lit as each plays) -
+        // on the A string for One string.
+        if let Some(result) = &result {
+            for (i, &note) in q.notes.iter().enumerate().skip(1) {
+                if result.get(i - 1) == Some(&true) {
+                    continue;
+                }
+                let at = if q.step == Step::OneString { Some((1, note - ear::TUNING[1])) } else { ear::position_of(note, q.given_at) };
+                if let Some(at) = at {
+                    let (x, y) = spot(b, at);
+                    if sounding == Some(i) {
+                        dot(canvas, x, y, r + 3.0, pal.signal_soft);
+                    }
+                    ring(canvas, x, y, r, pal.signal);
+                    centered(canvas, ear::name(note), x, y + 4.0, 10.0, pal.signal);
+                }
+            }
+        }
+        // Yours.
+        for (i, &(pitch, at)) in self.p.played.get().iter().enumerate() {
+            let Some(at) = at else { continue };
+            let (x, y) = spot(b, at);
+            let color = match result.as_ref().and_then(|r| r.get(i).copied()) {
+                Some(true) => pal.signal,
+                Some(false) => pal.record,
+                None => pal.ink_muted,
+            };
+            dot(canvas, x, y, r, color);
+            centered(canvas, ear::name(pitch), x, y + 4.0, 10.0, pal.bg_000);
+        }
+        // The given note, on top.
+        let (x, y) = spot(b, q.given_at);
+        if sounding == Some(0) {
+            dot(canvas, x, y, r + 3.0, pal.signal_soft);
+        }
+        dot(canvas, x, y, r, pal.ink);
+        centered(canvas, ear::name(q.notes[0]), x, y + 4.0, 10.0, pal.bg_000);
+    }
+}
+
+fn rrect(canvas: &Canvas, rect: vg::Rect, r: f32, color: Color) {
+    let mut paint = vg::Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(color);
+    canvas.draw_rrect(vg::RRect::new_rect_xy(rect, r, r), &paint);
+}
+
+fn fill(canvas: &Canvas, rect: vg::Rect, color: Color) {
+    let mut paint = vg::Paint::default();
+    paint.set_color(color);
+    paint.set_anti_alias(true);
+    canvas.draw_rect(rect, &paint);
+}
+
+fn dot(canvas: &Canvas, x: f32, y: f32, r: f32, color: Color) {
+    let mut paint = vg::Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_color(color);
+    canvas.draw_circle(vg::Point::new(x, y), r, &paint);
+}
+
+fn ring(canvas: &Canvas, x: f32, y: f32, r: f32, color: Color) {
+    let mut paint = vg::Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_style(vg::PaintStyle::Stroke);
+    paint.set_stroke_width(2.0);
+    paint.set_color(color);
+    canvas.draw_circle(vg::Point::new(x, y), r, &paint);
+}
+
+fn text(canvas: &Canvas, s: &str, x: f32, y: f32, size: f32, color: Color) {
+    let font = crate::canvas_text::canvas_font(size);
+    let mut paint = vg::Paint::default();
+    paint.set_color(color);
+    paint.set_anti_alias(true);
+    canvas.draw_str(s, vg::Point::new(x, y), &font, &paint);
+}
+
+fn centered(canvas: &Canvas, s: &str, cx: f32, y: f32, size: f32, color: Color) {
+    let font = crate::canvas_text::canvas_font(size);
+    let (w, _) = font.measure_str(s, None);
+    text(canvas, s, cx - w / 2.0, y, size, color);
 }
