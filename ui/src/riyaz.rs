@@ -9,7 +9,6 @@ use std::time::Instant;
 use vizia::prelude::*;
 use vizia::vg;
 
-use shared::recorder::RecordParams;
 use shared::riyaz::{self, Held, Point, Tracker};
 use shared::theory::sargam_name;
 
@@ -47,10 +46,8 @@ pub struct RiyazModel {
     pub no_input: Signal<bool>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
-    voice_rx: rtrb::Consumer<f32>,
-    record_params: Arc<RecordParams>,
+    mic: crate::mic::SharedMic,
     tracker: Tracker,
-    listener: riyaz::Listener,
     started: Instant,
     last_analysis: f32,
     player: crate::preview_player::SharedPlayer,
@@ -63,8 +60,7 @@ impl RiyazModel {
     pub fn new(
         key: Signal<u8>,
         scale_mask: Signal<u16>,
-        voice_rx: rtrb::Consumer<f32>,
-        record_params: Arc<RecordParams>,
+        mic: crate::mic::SharedMic,
         player: crate::preview_player::SharedPlayer,
         sample_rate: u32,
     ) -> Self {
@@ -80,10 +76,8 @@ impl RiyazModel {
             no_input: Signal::new(false),
             key,
             scale_mask,
-            voice_rx,
-            record_params,
+            mic,
             tracker: Tracker::new(),
-            listener: riyaz::Listener::new(48_000),
             started: Instant::now(),
             last_analysis: 0.0,
             player,
@@ -94,11 +88,10 @@ impl RiyazModel {
     }
 
     fn set_listening(&mut self, on: bool) {
-        let on = on && self.record_params.input_rate() > 0;
-        self.no_input.set(self.record_params.input_rate() == 0);
-        self.record_params.set_listening(on);
-        while self.voice_rx.pop().is_ok() {}
-        self.listener = riyaz::Listener::new(self.record_params.input_rate().max(1));
+        let mut mic = self.mic.borrow_mut();
+        self.no_input.set(!mic.available());
+        let on = mic.set_listening(on);
+        drop(mic);
         if self.listening.get() != on {
             self.listening.set(on);
         }
@@ -140,13 +133,12 @@ impl RiyazModel {
 
     /// Reads what the mic sent since last frame and follows the voice.
     fn listen(&mut self) {
-        let rx = &mut self.voice_rx;
-        self.listener.feed(std::iter::from_fn(|| rx.pop().ok()));
+        self.mic.borrow_mut().feed();
         let t = self.started.elapsed().as_secs_f32();
         if t - self.last_analysis < HOP_SECS {
             return;
         }
-        let Some(pitch) = self.listener.read() else { return };
+        let Some(pitch) = self.mic.borrow().read() else { return };
         self.last_analysis = t;
         let sa = riyaz::sa_hz(self.key.get(), self.octave.get());
         self.tracker.push(t, pitch.map(|p| riyaz::cents(p.hz, sa)), self.scale_mask.get());

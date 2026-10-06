@@ -1,4 +1,4 @@
-//! The practice tools - Theory, Voice leading, Riyaz and Exercises - behind
+//! The practice tools - Theory, Voice leading, Ear, Riyaz and Exercises - behind
 //! one rail button, shown one at a time under the devices with tabs to
 //! switch. Each tool still opens and closes itself (Riyaz starts and stops
 //! listening that way), so this only sends their own toggles.
@@ -11,17 +11,19 @@ use crate::tokens;
 pub enum Tool {
     Theory,
     Voicing,
+    Ear,
     Riyaz,
     Exercises,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 4] = [Tool::Theory, Tool::Voicing, Tool::Riyaz, Tool::Exercises];
+    pub const ALL: [Tool; 5] = [Tool::Theory, Tool::Voicing, Tool::Ear, Tool::Riyaz, Tool::Exercises];
 
     pub fn name(self) -> &'static str {
         match self {
             Tool::Theory => "Theory",
             Tool::Voicing => "Voice leading",
+            Tool::Ear => "Ear",
             Tool::Riyaz => "Riyaz",
             Tool::Exercises => "Exercises",
         }
@@ -31,6 +33,7 @@ impl Tool {
         match self {
             Tool::Theory => cx.emit(crate::interval_input::state::IntervalInputEvent::ToggleOpen),
             Tool::Voicing => cx.emit(crate::voicing::VoicingEvent::ToggleOpen),
+            Tool::Ear => cx.emit(crate::ear::EarEvent::ToggleOpen),
             Tool::Riyaz => cx.emit(crate::riyaz::RiyazEvent::ToggleOpen),
             Tool::Exercises => cx.emit(crate::practice::PracticeEvent::ToggleOpen),
         }
@@ -47,7 +50,7 @@ pub enum ToolsEvent {
 /// Each tool's open signal, in `Tool::ALL` order.
 #[derive(Clone, Copy)]
 pub struct ToolsProps {
-    pub open: [Signal<bool>; 4],
+    pub open: [Signal<bool>; 5],
 }
 
 impl ToolsProps {
@@ -81,7 +84,7 @@ pub struct ToolsModel {
 impl ToolsModel {
     pub fn new(props: ToolsProps) -> Self {
         PROPS.set(Some(props));
-        Self { props, last: Tool::Exercises }
+        Self { props, last: Tool::Ear }
     }
 
     fn show(&mut self, cx: &mut EventContext, tool: Tool) {

@@ -19,6 +19,7 @@ pub mod classics;
 pub mod demo;
 pub mod diag;
 pub mod drums;
+pub mod ear;
 pub mod eq;
 pub mod guitar;
 pub mod lessons;

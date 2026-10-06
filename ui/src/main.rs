@@ -7,6 +7,8 @@ mod voicing;
 mod riyaz;
 mod midi_in;
 mod practice;
+mod ear;
+mod mic;
 mod tools;
 mod bpm_field;
 mod canvas_text;
@@ -286,11 +288,11 @@ fn main() -> Result<(), ApplicationError> {
         let voicing_model = voicing::VoicingModel::new(interval_key, interval_scale_mask, preview_player.clone(), engine_sample_rate);
         let voicing_props = voicing::VoicingProps::of(&voicing_model, theme);
         voicing_model.build(cx);
+        let mic = mic::Mic::new(recorder_bridge.voice_rx, record_params.clone());
         let riyaz_model = riyaz::RiyazModel::new(
             interval_key,
             interval_scale_mask,
-            recorder_bridge.voice_rx,
-            record_params.clone(),
+            mic.clone(),
             preview_player.clone(),
             engine_sample_rate,
         );
@@ -299,7 +301,10 @@ fn main() -> Result<(), ApplicationError> {
         let practice_model = practice::PracticeModel::new(interval_key, interval_scale_mask, preview_player.clone(), engine_sample_rate);
         let practice_props = practice::PracticeProps::of(&practice_model, theme);
         practice_model.build(cx);
-        let tools_props = tools::ToolsProps { open: [interval_open, voicing_props.open, riyaz_props.open, practice_props.open] };
+        let ear_model = ear::EarModel::new(interval_key, interval_scale_mask, preview_player.clone(), mic.clone(), engine_sample_rate);
+        let ear_props = ear::EarProps::of(&ear_model, theme);
+        ear_model.build(cx);
+        let tools_props = tools::ToolsProps { open: [interval_open, voicing_props.open, ear_props.open, riyaz_props.open, practice_props.open] };
         tools::ToolsModel::new(tools_props).build(cx);
         let midi_model = midi_in::MidiModel::new(tl_arrangement, selected_track);
         let midi_devices = midi_model.devices;
@@ -413,6 +418,7 @@ fn main() -> Result<(), ApplicationError> {
                 cx.emit(riyaz::RiyazEvent::Tick);
                 cx.emit(midi_in::MidiEvent::Tick);
                 cx.emit(practice::PracticeEvent::Tick);
+                cx.emit(ear::EarEvent::Tick);
                 cx.emit(project::ProjectEvent::Tick);
 
                 // Latest-wins: cheap to rebuild every tick, and avoids
@@ -679,6 +685,7 @@ fn main() -> Result<(), ApplicationError> {
                                     voicing: voicing_props,
                                     riyaz: riyaz_props,
                                     practice: practice_props,
+                                    ear: ear_props,
                                     tools: tools_props,
                                 },
                             );

@@ -217,6 +217,19 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
   font-size: 22px;
   font-weight: 600;
 }}
+/* Ear: a degree's pad - the degree big, its note small under it. */
+.ear-pad {{
+  width: 58px;
+  height: 52px;
+  padding: 0px;
+}}
+.ear-pad-degree {{
+  font-size: 20px;
+  font-weight: 600;
+}}
+.ear-pad-note {{
+  font-size: 11px;
+}}
 /* Riyaz: the swar being sung. */
 .riyaz-swar {{
   font-size: 32px;
@@ -884,6 +897,13 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".display-sm", vec![("color", c("ink"))]);
     rule(".riyaz-swar", vec![("color", c("ink"))]);
     rule(".practice-status", vec![("color", c("ink"))]);
+    rule(".ear-pad", vec![("background-color", c("bg-000")), ("border-color", c("line-control")), ("color", c("ink"))]);
+    rule(".ear-pad:hover", vec![("background-color", c("bg-200"))]);
+    rule(".ear-pad-note", vec![("color", c("ink-muted"))]);
+    rule(".ear-pad.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
+    rule(".ear-pad.is-right .ear-pad-note", vec![("color", c("on-signal"))]);
+    rule(".ear-pad.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
+    rule(".ear-pad.is-wrong .ear-pad-note", vec![("color", c("on-record"))]);
     rule(".course-map", vec![("background-color", c("bg-100"))]);
     rule(".map-card", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".map-card:hover", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);

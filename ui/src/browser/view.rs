@@ -208,7 +208,7 @@ fn rail(cx: &mut Context, p: BrowserProps) {
             let _ = p.theory_open.get();
             crate::tools::any_open()
         });
-        rail_button(cx, p, IconKind::Metronome, "Practice: theory, voice leading, riyaz and exercises", tools)
+        rail_button(cx, p, IconKind::Metronome, "Practice: theory, voice leading, ear training, riyaz and exercises", tools)
             .on_press(|cx| cx.emit(crate::tools::ToolsEvent::Toggle));
         Element::new(cx).height(Stretch(1.0)).width(Pixels(1.0));
         let open = Memo::new(move |_| p.open.get());

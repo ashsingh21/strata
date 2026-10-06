@@ -68,6 +68,7 @@ pub struct DeviceAreaProps {
     pub riyaz: crate::riyaz::RiyazProps,
     /// Practice, docked likewise.
     pub practice: crate::practice::PracticeProps,
+    pub ear: crate::ear::EarProps,
     /// Which of those is open (the tabs over them).
     pub tools: crate::tools::ToolsProps,
 }
@@ -205,6 +206,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
         p.show_note_names,
     );
     crate::voicing::voicing_view(cx, p.voicing);
+    crate::ear::ear_view(cx, p.ear);
     crate::riyaz::riyaz_view(cx, p.riyaz);
     crate::practice::practice_view(cx, p.practice);
 }
