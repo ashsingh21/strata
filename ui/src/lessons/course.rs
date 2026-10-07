@@ -13,7 +13,7 @@ use shared::lessons::{
     THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS, THEORY_TRIADS, OCTAVE_TUNE,
     THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, THEORY_BHAIRAV, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
     MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, SOUND_PITCH_NOTE,
-    TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE, TRAP_KICKS, TRAP_SNARE, TRAP_PHRASE, TRAP_GAP_BAR, MELODY_CALL, MELODY_MOTIF,
+    TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE, TRAP_KICKS, TRAP_SNARE, TRAP_PHRASE, TRAP_GAP_BAR, MELODY_CALL, MELODY_MOTIF, MELODY_RHYTHM, MELODY_SHAPE, MELODY_CHORD_TONES, MELODY_HOOK, MELODY_OWN,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -1332,6 +1332,309 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "One idea, repeated, moved and changed: that's a melody that hangs together. When you're stuck, don't \
                  look for new notes - take the idea you have and move it, flip it or change its ending.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_RHYTHM,
+        group: MELODY,
+        title: "Rhythm makes the melody",
+        steps: &[
+            act(
+                "Press Space: C, G, A minor and F, one chord a bar. Keep it looping while you write.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            quiz(
+                "Three notes, C, E and G. Play them: is this rhythm even, or does it bounce?",
+                "Even: every note the same length, one per beat. Fine, but it plods.",
+                &[(0, 60, 4), (4, 64, 4), (8, 67, 4)],
+                &["Even", "Bounces"],
+                0,
+            ),
+            quiz(
+                "The same three notes. And now?",
+                "It bounces: a long note, a short one, and the E lands between two beats. Same notes, a different tune.",
+                &[(0, 60, 6), (6, 64, 2), (8, 67, 6)],
+                &["Even", "Bounces"],
+                1,
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Bar 1: long, then short. Put C on beat 1 and drag its right edge out to halfway through beat 2; then E right where it ends.",
+                "Long-short is the rhythm most melodies lean on: the long note lands, the short one pushes on to the next.",
+                "C4 at 1.1, about one and a half beats long; E4 at the \u{201c}and\u{201d} of 2 (halfway between 1.2 and 1.3).",
+                |s| {
+                    let bar = melody_bar(s, 0);
+                    bar.iter().any(|n| n.start == 0 && n.length >= PPQ * 5 / 4) && bar.iter().any(|n| n.start == PPQ * 3 / 2)
+                },
+                |s| melody_row(s, 60),
+            ),
+            recipe(
+                "Bar 2: start a note between two beats, on an \u{201c}and\u{201d}. Any note of the scale.",
+                "A note between the beats arrives early, against the pulse. That small surprise is what makes a line bounce.",
+                "Halfway between two beat lines, like 2.2 and a half.",
+                |s| melody_bar(s, 1).iter().any(|n| off_beat(n)),
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Bar 3: leave beat 1 empty and start on beat 2.",
+                "Starting after the downbeat lets the chord sound on its own first; then the melody answers it. A breath makes people lean in.",
+                "Nothing at 3.1; your first note of the bar at 3.2.",
+                |s| {
+                    let bar = melody_bar(s, 2);
+                    !bar.is_empty() && bar.iter().all(|n| n.start - 2 * BAR >= PPQ)
+                },
+                |s| melody_row(s, 69),
+            ),
+            info(
+                "Rhythm carries a tune as much as the notes do: long-short, something on an \u{201c}and\u{201d}, a breath before you start. \
+                 Sing bar 1 with other notes: it still sounds like the same melody.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_SHAPE,
+        group: MELODY,
+        title: "Rise and fall",
+        steps: &[
+            act(
+                "Press Space: the chords again. This time, the melody\u{2019}s shape.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            quiz(
+                "Listen: where is this melody\u{2019}s high point?",
+                "In the middle: it climbs to one high C, then comes back down home. An arch.",
+                &[(0, 60, 4), (4, 64, 4), (8, 67, 4), (12, 72, 8), (20, 67, 4), (24, 64, 4), (28, 60, 4)],
+                &["In the middle", "At the end"],
+                0,
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Bars 1 and 2: climb. Four notes or more, each a little higher than the one before.",
+                "Rising builds energy: each note asks for one more.",
+                "For example C4 and E4 in bar 1, F4 and G4 in bar 2.",
+                |s| {
+                    let notes: Vec<_> = melody_bar(s, 0).into_iter().chain(melody_bar(s, 1)).collect();
+                    notes.len() >= 4 && notes.windows(2).all(|w| w[1].pitch > w[0].pitch)
+                },
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Bar 3, beat 1: the peak. The highest note of the whole melody, on A, C or E (the A minor chord), and only once.",
+                "One peak, on a chord note, on a strong beat: the moment everything led to. Hit it twice and it stops being special.",
+                "C5 at 3.1, higher than anything else.",
+                |s| {
+                    let notes = melody_notes(s);
+                    let Some(top) = notes.iter().map(|n| n.pitch).max() else { return false };
+                    let peaks: Vec<_> = notes.iter().filter(|n| n.pitch == top).collect();
+                    peaks.len() == 1 && peaks[0].start == 2 * BAR && [9, 0, 4].contains(&(top % 12))
+                },
+                |s| melody_row(s, 72),
+            ),
+            recipe(
+                "Bar 4: come back down, and end on C.",
+                "Falling lets the energy go; ending on C, home, closes the phrase.",
+                "G4, E4 and C4 on beats 1 to 3, for example.",
+                |s| {
+                    let bar = melody_bar(s, 3);
+                    let top = melody_notes(s).iter().map(|n| n.pitch).max().unwrap_or(0);
+                    match (bar.first(), bar.last()) {
+                        (Some(first), Some(last)) => bar.len() >= 2 && last.pitch < first.pitch && last.pitch % 12 == 0 && bar.iter().all(|n| n.pitch < top),
+                        _ => false,
+                    }
+                },
+                |s| melody_row(s, 60),
+            ),
+            info(
+                "An arch: build up, one peak, come home. Most melodies have a shape you could draw with one finger in the air. \
+                 Save your highest note for one moment, and it will be the one people remember.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_CHORD_TONES,
+        group: MELODY,
+        title: "Chord notes on the beat",
+        steps: &[
+            act(
+                "Press Space: the chords again. Which melody notes sit on a chord, and which rub against it?",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            quiz(
+                "A C chord, with a long F on top. Does the F fit, or rub?",
+                "It rubs: F isn\u{2019}t in the C chord (C, E, G). That tension is useful, as long as the melody moves on.",
+                &[(0, 60, 8), (0, 64, 8), (0, 67, 8), (0, 77, 8)],
+                &["Fits", "Rubs"],
+                1,
+            ),
+            quiz(
+                "The same chord, with a long E on top.",
+                "It fits: E is one of the chord\u{2019}s own notes, so it sits.",
+                &[(0, 60, 8), (0, 64, 8), (0, 67, 8), (0, 76, 8)],
+                &["Fits", "Rubs"],
+                0,
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Bar 1 is C: put C, E or G on beats 1 and 3, and one other note of the scale on an \u{201c}and\u{201d} between them.",
+                "Chord notes on the strong beats sound right. The note in between is a passing note: it can be any note of the scale, because it\u{2019}s gone before it can rub.",
+                "E4 at 1.1, D4 halfway to 1.2, G4 at 1.3, for example.",
+                |s| {
+                    let bar = melody_bar(s, 0);
+                    let on = |at: Ticks| bar.iter().any(|n| n.start == at && [0, 4, 7].contains(&(n.pitch % 12)));
+                    on(0) && on(2 * PPQ) && bar.iter().any(|n| off_beat(n) && ![0, 4, 7].contains(&(n.pitch % 12)))
+                },
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Bar 2 is G: land on G, B or D on beats 1 and 3.",
+                "Change chord, change where you land: the melody follows the harmony, and you didn\u{2019}t need any theory to do it.",
+                "D4 at 2.1 and B3 at 2.3, for example.",
+                |s| {
+                    let bar = melody_bar(s, 1);
+                    let on = |at: Ticks| bar.iter().any(|n| n.start == BAR + at && [7, 11, 2].contains(&(n.pitch % 12)));
+                    on(0) && on(2 * PPQ)
+                },
+                |s| melody_row(s, 62),
+            ),
+            info(
+                "Land on the chord\u{2019}s notes on the strong beats and walk between them with any note of the scale. \
+                 On guitar, that means knowing where the chord\u{2019}s notes are in the shape you\u{2019}re playing: aim for those.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_HOOK,
+        group: MELODY,
+        title: "Hooks: A A B A",
+        steps: &[
+            act(
+                "Press Space: the chords again. A hook is the bit you can\u{2019}t stop humming.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Bar 1, the hook: three or four notes, with at least one on an \u{201c}and\u{201d}.",
+                "Short and rhythmic: small enough to remember after hearing it once.",
+                "E4 at 1.1, G4 halfway between 1.2 and 1.3, A4 at 1.3, for example.",
+                |s| {
+                    let bar = melody_bar(s, 0);
+                    (3..=5).contains(&bar.len()) && bar.iter().any(off_beat)
+                },
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Bar 2: exactly the same again. Same notes, same places.",
+                "Repeating it straight away is what makes it stick: people have heard it twice before they notice.",
+                "Copy each note of bar 1 one bar later.",
+                |s| bar_shape(s, 1) == bar_shape(s, 0) && !bar_shape(s, 0).is_empty(),
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Bar 3: something different. New notes, or the same rhythm somewhere else.",
+                "The change keeps it from wearing out, and makes the hook\u{2019}s return feel good.",
+                "C5, B4 and A4 on beats 1 to 3, for example.",
+                |s| !bar_shape(s, 2).is_empty() && bar_shape(s, 2) != bar_shape(s, 0),
+                |s| melody_row(s, 72),
+            ),
+            recipe(
+                "Bar 4: the hook again, exactly as in bar 1.",
+                "A A B A: the shape of countless songs. The hook comes home at the end.",
+                "The notes of bar 1, three bars later.",
+                |s| bar_shape(s, 3) == bar_shape(s, 0) && !bar_shape(s, 0).is_empty(),
+                |s| melody_row(s, 64),
+            ),
+            info(
+                "A hook, repeated, something different, the hook again. Play it back a few times: if you\u{2019}re humming it afterwards, it works. \
+                 Try the same thing with a two-bar hook: A A B A over eight bars.",
+            ),
+        ],
+    },
+    Lesson {
+        id: MELODY_OWN,
+        group: MELODY,
+        title: "Your own melody",
+        steps: &[
+            act(
+                "Press Space: the chords again. Now four bars of your own, with what you\u{2019}ve learned.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            act(
+                "Open the Melody clip: double-click it (in the Melody lane).",
+                "Two quick clicks on the empty clip under the chords.",
+                |s| track_open(s, "Melody"),
+                |s| track_named(s, "Melody").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "Write at least eight notes, mostly steps: next door up or down, with a leap now and then.",
+                "Steps make it easy to sing; the odd leap is what you remember.",
+                "Any notes; most of them one row away from the note before.",
+                |s| {
+                    let notes = melody_notes(s);
+                    let steps = notes.windows(2).filter(|w| w[0].pitch.abs_diff(w[1].pitch) <= 2).count();
+                    notes.len() >= 8 && steps * 2 >= notes.len() - 1
+                },
+                |s| melody_row(s, 64),
+            ),
+            recipe(
+                "Give it one high point: a highest note that comes only once, on beat 1 or 3.",
+                "One peak, on a strong beat, is the moment the melody is about.",
+                "Move one note up so it\u{2019}s the highest, on a beat line.",
+                |s| {
+                    let notes = melody_notes(s);
+                    let Some(top) = notes.iter().map(|n| n.pitch).max() else { return false };
+                    let peaks: Vec<_> = notes.iter().filter(|n| n.pitch == top).collect();
+                    peaks.len() == 1 && peaks[0].start % (2 * PPQ) == 0
+                },
+                |s| melody_row(s, 72),
+            ),
+            recipe(
+                "Put at least one note on an \u{201c}and\u{201d}, between two beats.",
+                "That one early note gives the whole line its bounce.",
+                "Halfway between two beat lines.",
+                |s| melody_notes(s).iter().any(off_beat),
+                |s| melody_row(s, 69),
+            ),
+            recipe(
+                "End it in bar 4, on C.",
+                "Ending on C, home, makes it sound finished.",
+                "Your last note: a C, somewhere in bar 4.",
+                |s| melody_notes(s).last().is_some_and(|n| n.start >= 3 * BAR && n.pitch % 12 == 0),
+                |s| melody_row(s, 60),
+            ),
+            info(
+                "That\u{2019}s a melody of your own. Loop it a few times and change whatever doesn\u{2019}t sing. \
+                 Then try playing it on your guitar: the Ear trainer\u{2019}s One string and Short tunes drills are the way from here to there.",
             ),
         ],
     },
@@ -3780,7 +4083,7 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 pub const PATH: &[&str] = &[
     FIRST_BEAT, BASSLINE, CHORDS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
     THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, THEORY_BHAIRAV, MELODY_STEPS, MELODY_CALL,
-    MELODY_MOTIF, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
+    MELODY_MOTIF, MELODY_RHYTHM, MELODY_SHAPE, MELODY_CHORD_TONES, MELODY_HOOK, MELODY_OWN, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
     ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
     LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE,
@@ -4478,6 +4781,25 @@ fn melody_bar(s: &Snapshot, bar: i64) -> Vec<shared::arrangement::MidiNote> {
     let mut notes: Vec<_> = notes.iter().filter(|n| n.start / BAR == bar).copied().collect();
     notes.sort_by_key(|n| (n.start, n.pitch));
     notes
+}
+
+/// Every note of the Melody clip, in time order.
+fn melody_notes(s: &Snapshot) -> Vec<shared::arrangement::MidiNote> {
+    let Some(ClipContent::Midi { notes, .. }) = named_clip(s, "Melody").map(|c| &c.content) else { return Vec::new() };
+    let mut notes = notes.clone();
+    notes.sort_by_key(|n| (n.start, n.pitch));
+    notes
+}
+
+/// A note starting on an "and": halfway between two beats.
+fn off_beat(n: &shared::arrangement::MidiNote) -> bool {
+    n.start % PPQ == PPQ / 2
+}
+
+/// Bar `bar` of the melody as (where in the bar, pitch): two bars with the
+/// same shape play the same thing.
+fn bar_shape(s: &Snapshot, bar: i64) -> Vec<(Ticks, u8)> {
+    melody_bar(s, bar).iter().map(|n| (n.start - bar * BAR, n.pitch)).collect()
 }
 
 /// Where in its bar each note starts - a bar's rhythm.

@@ -193,7 +193,8 @@ pub const GOALS: &[Goal] = &[
         color: Some(shared::arrangement::ClipColor::Blue),
         items: &[
             l(THEORY_OCTAVES), l(THEORY_SCALES), l(THEORY_KEYS), l(THEORY_MAJOR_MINOR), THEORY_RING, l(THEORY_TRIADS),
-            l(THEORY_PROGRESSIONS), VOICE_LEADING, l(THEORY_MELODY), l(MELODY_STEPS), l(MELODY_CALL), l(MELODY_MOTIF),
+            l(THEORY_PROGRESSIONS), VOICE_LEADING, l(THEORY_MELODY), l(MELODY_STEPS), l(MELODY_CALL), l(MELODY_MOTIF), l(MELODY_RHYTHM), l(MELODY_SHAPE),
+            l(MELODY_CHORD_TONES), l(MELODY_HOOK), l(MELODY_OWN),
             l(THEORY_SEVENTHS),
         ],
     },

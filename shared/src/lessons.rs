@@ -74,6 +74,12 @@ pub const MATCH_NOTE_16THS: i64 = 12;
 pub const MELODY_STEPS: &str = "melody-steps";
 pub const MELODY_CALL: &str = "melody-call";
 pub const MELODY_MOTIF: &str = "melody-motif";
+/// More melody: rhythm, shape, chord notes, hooks, then one of your own.
+pub const MELODY_RHYTHM: &str = "melody-rhythm";
+pub const MELODY_SHAPE: &str = "melody-shape";
+pub const MELODY_CHORD_TONES: &str = "melody-chord-tones";
+pub const MELODY_HOOK: &str = "melody-hook";
+pub const MELODY_OWN: &str = "melody-own";
 /// "Piano roll": the notes you write, played with feeling.
 pub const ROLL_DYNAMICS: &str = "roll-dynamics";
 pub const ROLL_LENGTH: &str = "roll-length";

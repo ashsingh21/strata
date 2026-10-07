@@ -896,6 +896,93 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 b(bar([60, 62, 60], 3)),
             ]
         }
+        MELODY_RHYTHM => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+            b(|s| {
+                add_note_long(s, "Melody", 60, 0, PPQ * 3 / 2);
+                add_notes_on(s, "Melody", 64, &[PPQ * 3 / 2]);
+                add_notes_on(s, "Melody", 67, &[2 * PPQ]);
+            }),
+            b(|s| {
+                add_notes_on(s, "Melody", 62, &[BAR]);
+                add_notes_on(s, "Melody", 64, &[BAR + PPQ * 3 / 2]);
+                add_notes_on(s, "Melody", 60, &[BAR + 3 * PPQ]);
+            }),
+            b(|s| {
+                add_notes_on(s, "Melody", 69, &[2 * BAR + PPQ]);
+                add_notes_on(s, "Melody", 67, &[2 * BAR + 2 * PPQ]);
+            }),
+        ],
+        MELODY_SHAPE => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+            b(|s| {
+                add_notes_on(s, "Melody", 60, &[0]);
+                add_notes_on(s, "Melody", 64, &[2 * PPQ]);
+                add_notes_on(s, "Melody", 65, &[BAR]);
+                add_notes_on(s, "Melody", 67, &[BAR + 2 * PPQ]);
+            }),
+            b(|s| add_notes_on(s, "Melody", 72, &[2 * BAR])),
+            b(|s| {
+                add_notes_on(s, "Melody", 67, &[3 * BAR]);
+                add_notes_on(s, "Melody", 64, &[3 * BAR + PPQ]);
+                add_notes_on(s, "Melody", 60, &[3 * BAR + 2 * PPQ]);
+            }),
+        ],
+        MELODY_CHORD_TONES => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+            b(|s| {
+                add_notes_on(s, "Melody", 64, &[0]);
+                add_notes_on(s, "Melody", 62, &[PPQ / 2]);
+                add_notes_on(s, "Melody", 67, &[2 * PPQ]);
+            }),
+            b(|s| {
+                add_notes_on(s, "Melody", 62, &[BAR]);
+                add_notes_on(s, "Melody", 59, &[BAR + 2 * PPQ]);
+            }),
+        ],
+        MELODY_HOOK => {
+            let hook = |bar: i64| {
+                move |s: &mut Snapshot| {
+                    add_notes_on(s, "Melody", 64, &[bar * BAR]);
+                    add_notes_on(s, "Melody", 67, &[bar * BAR + PPQ * 3 / 2]);
+                    add_notes_on(s, "Melody", 69, &[bar * BAR + 2 * PPQ]);
+                }
+            };
+            vec![
+                b(play),
+                b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+                b(hook(0)),
+                b(hook(1)),
+                b(|s| {
+                    for (beat, p) in [72, 71, 69].into_iter().enumerate() {
+                        add_notes_on(s, "Melody", p, &[2 * BAR + beat as i64 * PPQ]);
+                    }
+                }),
+                b(hook(3)),
+            ]
+        }
+        MELODY_OWN => vec![
+            b(play),
+            b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
+            b(|s| {
+                for (at, p) in [(0, 60), (PPQ, 62), (2 * PPQ, 64), (3 * PPQ, 65), (BAR, 67), (BAR + PPQ, 65), (BAR + 2 * PPQ, 67), (BAR + 3 * PPQ, 64)] {
+                    add_notes_on(s, "Melody", p, &[at]);
+                }
+            }),
+            b(|s| {
+                add_notes_on(s, "Melody", 72, &[2 * BAR]);
+                add_notes_on(s, "Melody", 71, &[2 * BAR + 2 * PPQ]);
+            }),
+            b(|s| add_notes_on(s, "Melody", 69, &[2 * BAR + PPQ * 7 / 2])),
+            b(|s| {
+                add_notes_on(s, "Melody", 67, &[3 * BAR]);
+                add_notes_on(s, "Melody", 64, &[3 * BAR + PPQ]);
+                add_notes_on(s, "Melody", 60, &[3 * BAR + 2 * PPQ]);
+            }),
+        ],
         ROLL_DYNAMICS => {
             let soften = |at: &'static [i64], velocity: u8| {
                 move |s: &mut Snapshot| {
@@ -1110,6 +1197,12 @@ fn add_note_on(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks, length: Ti
 #[cfg(test)]
 pub(super) fn add_notes_on_track(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks) {
     add_notes_on(s, name, pitch, &[start]);
+}
+
+/// A note on `name`'s clip, drawn out to `length`.
+fn add_note_long(s: &mut Snapshot, name: &str, pitch: u8, start: Ticks, length: Ticks) {
+    let clip = clip_on_track(s, name);
+    Command::AddMidiNote { clip, note: MidiNote { start, length, pitch, velocity: 100 } }.apply(&mut s.arrangement);
 }
 
 /// Clicks on `name`'s clip, one note per start.
