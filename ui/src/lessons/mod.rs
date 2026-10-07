@@ -96,6 +96,8 @@ pub enum Target {
     FilterType,
     /// LFO 1 or 2's pill (drag it onto a knob).
     LfoPill(u8),
+    /// LFO 1 or 2's Sync switch.
+    LfoSync(u8),
     /// A track's Mute / Solo button.
     Mute(TrackId),
     Solo(TrackId),

@@ -6,7 +6,7 @@ use shared::arrangement::{Clip, ClipContent, EffectParam, Instrument, SnapGrid, 
 use shared::drums::{CLAP, CLOSED_HAT, KICK, OPEN_HAT, SNARE};
 use shared::lessons::{
     BAR, BASSLINE, BASS_NOTE, CARVE_ENVELOPES, CARVE_FILTER, CARVE_MIX, CARVE_MOVEMENT, CARVE_SYNC_FM, CARVE_WAVES, CHORDS, FIRST_BEAT,
-    RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
+    RECIPE_BASS, RECIPE_WOBBLE, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, ARRANGE_HOUSE, ARRANGE_BHAIRAV,
     PROJECT_ARRANGE, PROJECT_BASS, PROJECT_BASS_ROOTS, PROJECT_CHORDS, PROJECT_CHORDS_NOTES, PROJECT_FINISH, PROJECT_GROOVE,
     RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS, LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, LOFI_CHORDS, LOFI_BASS_ROOTS,
     SIXTEENTH, MATCH_WAVE, MATCH_CUTOFF, MATCH_RESONANCE, MATCH_SUB, MATCH_PLUCK, MATCH_SWELL, MATCH_MYSTERY,
@@ -1749,6 +1749,81 @@ pub const LESSONS: &[Lesson] = &[
             info(
                 "Deep bass: a low octave, a sub underneath, a closed filter that punches open, and mono. \
                  Compare with Carve's Deep Rave Bass preset, which adds a detuned second saw.",
+            ),
+        ],
+    },
+    Lesson {
+        id: RECIPE_WOBBLE,
+        group: RECIPES,
+        title: "Wobble bass",
+        steps: &[
+            act("Press Space: a beat and long notes on a plain saw.", "Or click the play button at the top.", |s| s.playing, |_| Some(Target::Play)),
+            recipe(
+                "Weight first: Oscillator 1 Octave to -1.",
+                "A wobble lives low: an octave down puts it under everything else in the track.",
+                "The Octave knob under Oscillator 1, one step down.",
+                |s| carve(s).is_some_and(|p| p.osc1.octave == -1),
+                |_| Some(Target::Knob(SynthParam::Osc1Octave)),
+            ),
+            recipe(
+                "Close the filter: Cutoff to about 300 Hz.",
+                "The wobble is the filter opening and closing. It starts from closed, so the sound is dull for now.",
+                "Between 150 and 500 Hz.",
+                |s| carve(s).is_some_and(|p| (150.0..=500.0).contains(&p.filter.cutoff_hz)),
+                |_| Some(Target::Knob(SynthParam::Cutoff)),
+            ),
+            recipe(
+                "Resonance to about 50%.",
+                "Resonance is a peak right at the cutoff. When the cutoff moves, the peak moves with it and the bass seems to say \u{201c}wow\u{201d}: that's what makes it talk.",
+                "Between 30% and 75%.",
+                |s| carve(s).is_some_and(|p| (0.3..=0.75).contains(&p.filter.resonance)),
+                |_| Some(Target::Knob(SynthParam::Resonance)),
+            ),
+            recipe(
+                "Drag the LFO 1 pill (top of Modulation) onto the Cutoff knob.",
+                "An LFO is a slow wave. Patched to Cutoff, it opens and closes the filter for you.",
+                "Press on \u{201c}LFO 1\u{201d}, hold, move onto Cutoff, let go.",
+                |s| carve(s).is_some_and(|p| p.lfo1.target == LfoTarget::Cutoff),
+                |_| Some(Target::LfoPill(1)),
+            ),
+            recipe(
+                "LFO 1 Depth past 60%.",
+                "Depth is how far it swings: deep enough and the filter goes from closed to wide open on every cycle.",
+                "Depth is under LFO 1 in Modulation.",
+                |s| carve(s).is_some_and(|p| p.lfo1.target == LfoTarget::Cutoff && p.lfo1.depth > 0.6),
+                |_| Some(Target::Knob(SynthParam::Lfo1Depth)),
+            ),
+            recipe(
+                "Switch on Sync, under LFO 1.",
+                "It drifted against the drums before. Synced, the LFO follows the song: each sweep starts on the beat, and Rate now reads in note lengths.",
+                "The Sync button under LFO 1's knobs.",
+                |s| carve(s).is_some_and(|p| p.lfo1.beat_sync),
+                |_| Some(Target::LfoSync(1)),
+            ),
+            recipe(
+                "Set LFO 1 Rate to 1/8: two wobbles a beat.",
+                "1/8 is the classic wobble. Try 1/4 for slow and heavy, 1/16 for a buzz, 1/8T for a lopsided triplet.",
+                "Turn Rate until it reads 1/8.",
+                |s| carve(s).is_some_and(|p| p.lfo1.beat_sync && shared::synth::lfo_division(p.lfo1.rate_norm).0 == "1/8"),
+                |_| Some(Target::Knob(SynthParam::Lfo1Rate)),
+            ),
+            recipe(
+                "Grit: Drive past 8 dB.",
+                "Distortion adds harmonics for the filter to sweep through, so the wobble is louder and nastier. In other apps this is a separate distortion after the synth.",
+                "Drive is in the Filter section.",
+                |s| carve(s).is_some_and(|p| p.filter.drive_db > 8.0),
+                |_| Some(Target::Knob(SynthParam::Drive)),
+            ),
+            recipe(
+                "Switch to Mono.",
+                "One note at a time, so held notes never stack into a muddy chord down low.",
+                "Mono is at the top right of Carve.",
+                |s| carve(s).is_some_and(|p| p.voice_mode == VoiceMode::Mono),
+                |_| Some(Target::VoiceMode),
+            ),
+            info(
+                "Wobble bass: a low saw, a closed filter with resonance, an LFO synced to the beat sweeping the cutoff, and drive. \
+                 Change the Rate to change the rhythm, or automate it to switch between 1/8 and 1/16 for the classic drop.",
             ),
         ],
     },
@@ -4689,6 +4764,7 @@ mod tests {
         // Loading the preset should satisfy every knob step of its recipe.
         for (id, preset) in [
             (RECIPE_BASS, "Deep Bass"),
+            (RECIPE_WOBBLE, "Wobble Bass"),
             (RECIPE_FLUTE, "Flute"),
             (RECIPE_HARP, "Indian Harp"),
             (RECIPE_TANPURA, "Tanpura"),

@@ -180,6 +180,20 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 }),
             ]
         }
+        RECIPE_WOBBLE => {
+            vec![
+                b(play),
+                b(move |s| s.synth.osc1.octave = -1),
+                b(move |s| s.synth.filter.cutoff_hz = 300.0),
+                b(move |s| s.synth.filter.resonance = 0.5),
+                b(move |s| s.synth.lfo1.target = LfoTarget::Cutoff),
+                b(move |s| s.synth.lfo1.depth = 0.8),
+                b(move |s| s.synth.lfo1.beat_sync = true),
+                b(move |s| knob(s, SynthParam::Lfo1Rate, shared::synth::division_norm("1/8"))),
+                b(move |s| s.synth.filter.drive_db = 12.0),
+                b(move |s| s.synth.voice_mode = VoiceMode::Mono),
+            ]
+        }
         RECIPE_PAD => {
             vec![
                 b(play),

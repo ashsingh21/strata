@@ -49,9 +49,12 @@ pub struct SynthParams {
     pub lfo1_rate_hz: f32,
     pub lfo1_depth: f32,
     pub lfo1_target: LfoTarget,
+    /// Synced to the song: cycles per beat (0 = free, at `lfo1_rate_hz`).
+    pub lfo1_per_beat: f32,
     pub lfo2_rate_hz: f32,
     pub lfo2_depth: f32,
     pub lfo2_target: LfoTarget,
+    pub lfo2_per_beat: f32,
     pub glide_ms: f32,
     pub volume_db: f32,
     pub unison: Unison,
@@ -91,9 +94,11 @@ impl SynthParams {
             lfo1_rate_hz: lfo_rate_hz(s.lfo1.rate_norm),
             lfo1_depth: s.lfo1.depth,
             lfo1_target: s.lfo1.target,
+            lfo1_per_beat: if s.lfo1.beat_sync { lfo_division(s.lfo1.rate_norm).1 } else { 0.0 },
             lfo2_rate_hz: lfo_rate_hz(s.lfo2.rate_norm),
             lfo2_depth: s.lfo2.depth,
             lfo2_target: s.lfo2.target,
+            lfo2_per_beat: if s.lfo2.beat_sync { lfo_division(s.lfo2.rate_norm).1 } else { 0.0 },
             glide_ms: s.output.glide_ms,
             volume_db: s.output.volume_db,
             unison: s.unison,
@@ -111,6 +116,34 @@ impl Default for SynthParams {
     fn default() -> Self {
         Self::from_state(&seed_synth())
     }
+}
+
+/// A synced LFO's lengths, slow to fast: what the Rate knob steps through
+/// with Sync on - (label, cycles per beat). The triplets sit between their
+/// neighbours, so turning the knob always speeds it up.
+pub const LFO_DIVISIONS: [(&str, f32); 9] = [
+    ("1 bar", 0.25),
+    ("1/2", 0.5),
+    ("1/4", 1.0),
+    ("1/4T", 1.5),
+    ("1/8", 2.0),
+    ("1/8T", 3.0),
+    ("1/16", 4.0),
+    ("1/16T", 6.0),
+    ("1/32", 8.0),
+];
+
+/// The Rate knob's position as a synced length.
+pub fn lfo_division(rate_norm: f32) -> (&'static str, f32) {
+    let i = (rate_norm.clamp(0.0, 1.0) * (LFO_DIVISIONS.len() - 1) as f32).round() as usize;
+    LFO_DIVISIONS[i]
+}
+
+/// Where the Rate knob sits for a synced length (the inverse of
+/// `lfo_division`).
+pub fn division_norm(label: &str) -> f32 {
+    let i = LFO_DIVISIONS.iter().position(|d| d.0 == label).unwrap_or(0);
+    i as f32 / (LFO_DIVISIONS.len() - 1) as f32
 }
 
 /// Maps the Rate knob's normalized 0..1 position to a free-running LFO
@@ -169,4 +202,29 @@ pub fn synth_bridge() -> SynthBridge {
     let (note_tx, note_rx) = rtrb::RingBuffer::new(NOTE_EVENT_CAPACITY);
     let (telemetry_tx, telemetry_rx) = rtrb::RingBuffer::new(SYNTH_TELEMETRY_CAPACITY);
     SynthBridge { params_tx, params_rx, note_tx, note_rx, telemetry_tx, telemetry_rx }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn synced_lengths_step_from_slow_to_fast() {
+        assert!(LFO_DIVISIONS.windows(2).all(|w| w[0].1 < w[1].1));
+        for (label, per_beat) in LFO_DIVISIONS {
+            assert_eq!(lfo_division(division_norm(label)), (label, per_beat));
+        }
+    }
+
+    #[test]
+    fn patches_saved_before_beat_sync_load_with_it_off() {
+        let warm = crate::synth::seed_synth();
+        let json = serde_json::to_string(&warm).unwrap().replace(",\"beat_sync\":false", "");
+        assert!(!json.contains("beat_sync"));
+        let old: crate::synth::SynthState = serde_json::from_str(&json).unwrap();
+        assert!(!old.lfo1.beat_sync && !old.lfo2.beat_sync);
+        // Warm Bass's old flag was never read, and still isn't.
+        assert!(old.lfo1.sync);
+        assert_eq!(SynthParams::from_state(&old).lfo1_per_beat, 0.0);
+    }
 }

@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::bridge::lfo_rate_hz;
+use super::bridge::{lfo_division, lfo_rate_hz};
 use super::model::{SynthState, MAX_UNISON};
 
 /// Osc octave knobs span -3..+3.
@@ -279,6 +279,8 @@ impl SynthParam {
             AmpDecay => format!("{:.0} ms", s.amp_env.decay_ms),
             AmpSustain => pct(s.amp_env.sustain),
             AmpRelease => format!("{:.0} ms", s.amp_env.release_ms),
+            Lfo1Rate if s.lfo1.beat_sync => lfo_division(s.lfo1.rate_norm).0.to_string(),
+            Lfo2Rate if s.lfo2.beat_sync => lfo_division(s.lfo2.rate_norm).0.to_string(),
             Lfo1Rate => format!("{:.2} Hz", lfo_rate_hz(s.lfo1.rate_norm)),
             Lfo2Rate => format!("{:.2} Hz", lfo_rate_hz(s.lfo2.rate_norm)),
             Lfo1Depth => pct(s.lfo1.depth),

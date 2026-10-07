@@ -177,8 +177,8 @@ fn house_stab() -> SynthState {
         },
         filter_env: Envelope { attack_ms: 1.0, decay_ms: 180.0, sustain: 0.0, release_ms: 150.0 },
         amp_env: Envelope { attack_ms: 1.0, decay_ms: 260.0, sustain: 0.0, release_ms: 160.0 },
-        lfo1: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Cutoff, target_count: 1 },
-        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1 },
+        lfo1: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Cutoff, target_count: 1, beat_sync: false },
+        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1, beat_sync: false },
         output: crate::synth::Output { glide_ms: 1.0, volume_db: -6.0, meter_l: 0.0, meter_r: 0.0 },
         unison: Unison { voices: 2, detune_cents: 12.0, width: 0.6 },
         fx: Fx { chorus_depth: 0.4, chorus_mix: 0.25, reverb_size: 0.6, reverb_mix: 0.25 },
@@ -204,7 +204,7 @@ fn pluck_lead() -> SynthState {
     s.filter_env = Envelope { attack_ms: 1.0, decay_ms: 220.0, sustain: 0.1, release_ms: 200.0 };
     s.amp_env = Envelope { attack_ms: 1.0, decay_ms: 350.0, sustain: 0.2, release_ms: 250.0 };
     s.lfo1.depth = 0.0;
-    s.lfo2 = Lfo { rate_label: "", rate_norm: 0.35, depth: 0.1, sync: false, target: LfoTarget::Pitch, target_count: 1 };
+    s.lfo2 = Lfo { rate_label: "", rate_norm: 0.35, depth: 0.1, sync: false, target: LfoTarget::Pitch, target_count: 1, beat_sync: false };
     s.output.glide_ms = 1.0;
     s.output.volume_db = -6.0;
     s.unison = Unison { voices: 2, detune_cents: 8.0, width: 0.5 };
@@ -467,7 +467,7 @@ fn reed_lead() -> SynthState {
     s.amp_env = Envelope { attack_ms: 35.0, decay_ms: 300.0, sustain: 0.85, release_ms: 220.0 };
     s.lfo1.depth = 0.0;
     // ~5.5 Hz on pitch: the singer's vibrato.
-    s.lfo2 = Lfo { rate_label: "", rate_norm: 0.785, depth: 0.16, sync: false, target: LfoTarget::Pitch, target_count: 1 };
+    s.lfo2 = Lfo { rate_label: "", rate_norm: 0.785, depth: 0.16, sync: false, target: LfoTarget::Pitch, target_count: 1, beat_sync: false };
     s.output.glide_ms = 70.0;
     // The band-pass filter that makes it nasal also takes a lot of level.
     s.output.volume_db = 0.0;

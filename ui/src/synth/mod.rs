@@ -620,6 +620,7 @@ fn lfo_column(
     params: (SynthParam, SynthParam),
     set_target: fn(LfoTarget) -> SynthEvent,
     phase: Signal<f32>,
+    which: u8,
 ) {
     VStack::new(cx, move |cx| {
         LfoScope::new(cx, state, theme, phase, lfo).width(Stretch(1.0)).height(Pixels(40.0)).class("synth-disp");
@@ -630,8 +631,20 @@ fn lfo_column(
         .gap(Pixels(tokens::SPACE_1))
         .size(Auto);
         HStack::new(cx, move |cx| {
-            // No tempo-sync button: the engine only ever runs the LFO at
-            // the Rate shown in Hz, so a Sync toggle here did nothing.
+            // Sync locks it to the song's beat: Rate then picks a length
+            // (1/4, 1/8...) instead of Hz.
+            Button::new(cx, |cx| Label::new(cx, "Sync"))
+                .class("btn")
+                .class("sm")
+                .toggle_class("is-on", state.map(move |s| lfo(s).beat_sync))
+                .lesson_target(crate::lessons::Target::LfoSync(which))
+                .on_press(move |cx| {
+                    cx.emit(SynthEvent::Update(Box::new(move |s| {
+                        let l = if which == 1 { &mut s.lfo1 } else { &mut s.lfo2 };
+                        l.beat_sync = !l.beat_sync;
+                    })))
+                })
+                .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Lock to the beat: Rate picks 1/4, 1/8, 1/16..."); }).arrow(false));
             let target_text = state.map(move |s| lfo(s).target.name());
             Button::new(cx, |cx| Label::new(cx, target_text))
                 .class("btn")
@@ -676,10 +689,10 @@ fn mod_section(
             // target - lined up under its own pill in the header.
             HStack::new(cx, move |cx| {
                 lfo_column(cx, state, theme, |s| &s.lfo1, (SynthParam::Lfo1Rate, SynthParam::Lfo1Depth),
-                    SynthEvent::SetLfo1Target, lfo_phases.0);
+                    SynthEvent::SetLfo1Target, lfo_phases.0, 1);
                 Element::new(cx).class("hairline").width(Pixels(1.0)).height(Stretch(1.0));
                 lfo_column(cx, state, theme, |s| &s.lfo2, (SynthParam::Lfo2Rate, SynthParam::Lfo2Depth),
-                    SynthEvent::SetLfo2Target, lfo_phases.1);
+                    SynthEvent::SetLfo2Target, lfo_phases.1, 2);
             })
             .gap(Stretch(1.0))
             .width(Stretch(1.0))

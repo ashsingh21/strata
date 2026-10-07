@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use shared::arrangement::{timed_notes_in_range, Arrangement, Ticks, TrackId};
+use shared::arrangement::{timed_notes_in_range, Arrangement, Ticks, TrackId, PPQ};
 use shared::playback::{instrument_params, DecodedSource, PlaybackPlan, MAX_BUS_TRACKS};
 use shared::synth::{NoteEvent, SynthState, MAX_INSTRUMENTS};
 
@@ -133,6 +133,12 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
                     smooth.reset(db_to_gain(clip.gain_db));
                 }
             }
+        }
+
+        // Synced LFOs lock to the song's beat.
+        let beats_per_sample = arr.tempo_map.bpm_at(tick) / 60.0 / srf as f64;
+        for synth in &mut synths {
+            synth.set_clock(Some(tick as f64 / PPQ as f64), beats_per_sample);
         }
 
         // This block's notes, each at its own sample.

@@ -38,6 +38,8 @@ pub const RECIPE_BASS: &str = "recipe-bass";
 pub const RECIPE_FLUTE: &str = "recipe-flute";
 pub const RECIPE_HARP: &str = "recipe-harp";
 pub const RECIPE_LEAD: &str = "recipe-lead";
+/// A wobble bass: an LFO synced to the beat sweeping a resonant filter.
+pub const RECIPE_WOBBLE: &str = "recipe-wobble";
 pub const RECIPE_PAD: &str = "recipe-pad";
 pub const RECIPE_TANPURA: &str = "recipe-tanpura";
 pub const RECIPE_REED: &str = "recipe-reed";
@@ -218,8 +220,8 @@ pub fn init_patch() -> SynthState {
         },
         filter_env: Envelope { attack_ms: 1.0, decay_ms: 400.0, sustain: 0.0, release_ms: 200.0 },
         amp_env: Envelope { attack_ms: 8.0, decay_ms: 200.0, sustain: 1.0, release_ms: 150.0 },
-        lfo1: Lfo { rate_label: "", rate_norm: 0.6, depth: 0.0, sync: false, target: LfoTarget::PulseWidth, target_count: 1 },
-        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1 },
+        lfo1: Lfo { rate_label: "", rate_norm: 0.6, depth: 0.0, sync: false, target: LfoTarget::PulseWidth, target_count: 1, beat_sync: false },
+        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1, beat_sync: false },
         output: crate::synth::Output { glide_ms: 1.0, volume_db: -6.0, meter_l: 0.0, meter_r: 0.0 },
         unison: Unison { voices: 1, detune_cents: 12.0, width: 0.6 },
         fx: Fx { chorus_depth: 0.4, chorus_mix: 0.0, reverb_size: 0.5, reverb_mix: 0.0 },
@@ -264,6 +266,8 @@ fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
         // hear its tail.
         _ if lesson.starts_with("match-") => ("Note", steps(&[(0, MATCH_NOTE, MATCH_NOTE_16THS)]), 1),
         RECIPE_BASS => ("Bassline", steps(&[(2, 45, 1), (6, 45, 1), (10, 45, 1), (14, 57, 1)]), 1),
+        // Long notes: a wobble needs a held note to move.
+        RECIPE_WOBBLE => ("Wobble line", steps(&[(0, 45, 7), (8, 45, 4), (12, 48, 4)]), 1),
         // Slow and singing, in A minor pentatonic.
         RECIPE_FLUTE => ("Melody", steps(&[(0, 69, 3), (4, 72, 3), (8, 74, 7), (16, 76, 11), (28, 74, 3)]), 2),
         // Raga Malkauns in A (A C D F G): a descending cascade, then a phrase.
@@ -301,7 +305,7 @@ fn carve_riff(lesson: &str) -> (&'static str, Vec<MidiNote>, i64) {
 /// that sit in a beat) with the Init patch, looping a riff.
 fn carve_lesson(lesson: &str) -> Project {
     let mut arr = empty_arrangement();
-    if lesson == RECIPE_BASS || lesson == RECIPE_LEAD {
+    if lesson == RECIPE_BASS || lesson == RECIPE_LEAD || lesson == RECIPE_WOBBLE {
         let drums = add_track(&mut arr, "Drums", ClipColor::Coral, Instrument::Drums, -8.0);
         add_loop(&mut arr, drums, "Beat", lesson_one_beat(), 1, CARVE_BARS);
     }
@@ -904,7 +908,7 @@ mod tests {
 
     #[test]
     fn carve_lessons_start_on_the_init_patch_with_a_riff() {
-        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, RECIPE_KEYS] {
+        for id in [CARVE_WAVES, CARVE_MIX, CARVE_FILTER, CARVE_ENVELOPES, CARVE_MOVEMENT, RECIPE_BASS, RECIPE_WOBBLE, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_TANPURA, RECIPE_REED, RECIPE_KEYS] {
             let p = starting_project(id);
             let synth = p.arrangement.tracks.last().unwrap();
             assert_eq!(synth.instrument, Some(Instrument::Carve), "{id}");

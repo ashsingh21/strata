@@ -653,6 +653,13 @@ fn write_block<T>(
     let live = monitoring && plan.monitor.is_some();
     monitor.begin_block(live, output.len() / channels.max(1));
 
+    // Synced LFOs lock to the song's beat.
+    let beats_per_sample = 1.0 / samples_per_beat;
+    let beat = playing.then(|| *sample_counter as f64 / samples_per_beat);
+    for engine in synth_engines.iter_mut() {
+        engine.set_clock(beat, beats_per_sample);
+    }
+
     for frame in output.chunks_mut(channels) {
 
         let mut synth_l = 0.0f32;

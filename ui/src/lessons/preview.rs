@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use shared::arrangement::{Arrangement, Ticks, TrackId};
 use shared::lessons::{
     BAR, BASSLINE, CHORDS, FIRST_BEAT, PROJECT_ARRANGE, PROJECT_BASS, PROJECT_CHORDS, PROJECT_FINISH, PROJECT_GROOVE,
-    ARRANGE_BHAIRAV, ARRANGE_HOUSE, RECIPE_BASS, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_REED, RECIPE_TANPURA,
+    ARRANGE_BHAIRAV, ARRANGE_HOUSE, RECIPE_BASS, RECIPE_WOBBLE, RECIPE_FLUTE, RECIPE_HARP, RECIPE_LEAD, RECIPE_PAD, RECIPE_REED, RECIPE_TANPURA,
 };
 use shared::project::Project;
 use shared::synth::SynthState;
@@ -133,6 +133,7 @@ pub fn lesson_key_mask(lesson: &str) -> (u8, u16) {
 pub fn goal(lesson: &str, snap: &Snapshot, patches: &BTreeMap<TrackId, SynthState>) -> Option<Take> {
     let preset = match lesson {
         RECIPE_BASS => Some("Deep Bass"),
+        RECIPE_WOBBLE => Some("Wobble Bass"),
         RECIPE_PAD => Some("Soft Pad"),
         RECIPE_FLUTE => Some("Flute"),
         RECIPE_HARP => Some("Indian Harp"),

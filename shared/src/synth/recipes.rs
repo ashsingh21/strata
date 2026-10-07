@@ -85,6 +85,20 @@ pub fn deep_bass() -> SynthState {
     s
 }
 
+pub fn wobble_bass() -> SynthState {
+    let mut s = init("Wobble Bass");
+    s.osc1.octave = -1;
+    s.filter.cutoff_hz = 300.0;
+    s.filter.resonance = 0.5;
+    s.lfo1.target = LfoTarget::Cutoff;
+    s.lfo1.depth = 0.8;
+    s.lfo1.beat_sync = true;
+    s.lfo1.rate_norm = super::bridge::division_norm("1/8");
+    s.filter.drive_db = 12.0;
+    s.voice_mode = VoiceMode::Mono;
+    s
+}
+
 pub fn flute() -> SynthState {
     let mut s = init("Flute");
     s.osc1.waveform = Waveform::Triangle;

@@ -152,12 +152,17 @@ pub struct Lfo {
     pub rate_label: &'static str,
     pub rate_norm: f32,
     pub depth: f32,
-    /// Tempo sync - not implemented by the engine (it always runs at
-    /// `rate_norm`'s Hz) and not exposed in the UI; kept so existing saved
-    /// projects/presets still deserialize.
+    /// Unused: an old tempo-sync flag the engine never read. Some patches
+    /// (Warm Bass) and saved projects have it on, so honouring it would
+    /// change how they sound; `beat_sync` is the real switch.
     pub sync: bool,
     pub target: LfoTarget,
     pub target_count: u32,
+    /// Locked to the song's beat: Rate picks a length (`LFO_DIVISIONS`)
+    /// instead of Hz, and each cycle starts on its beat. Off in anything
+    /// saved before it existed.
+    #[serde(default)]
+    pub beat_sync: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -262,8 +267,8 @@ pub fn seed_synth() -> SynthState {
         },
         filter_env: Envelope { attack_ms: 4.0, decay_ms: 320.0, sustain: 0.35, release_ms: 280.0 },
         amp_env: Envelope { attack_ms: 2.0, decay_ms: 140.0, sustain: 0.80, release_ms: 220.0 },
-        lfo1: Lfo { rate_label: "1/8", rate_norm: 0.45, depth: 0.6, sync: true, target: LfoTarget::Cutoff, target_count: 1 },
-        lfo2: Lfo { rate_label: "3.2 Hz", rate_norm: 0.3, depth: 0.4, sync: false, target: LfoTarget::Pitch, target_count: 1 },
+        lfo1: Lfo { rate_label: "1/8", rate_norm: 0.45, depth: 0.6, sync: true, target: LfoTarget::Cutoff, target_count: 1, beat_sync: false },
+        lfo2: Lfo { rate_label: "3.2 Hz", rate_norm: 0.3, depth: 0.4, sync: false, target: LfoTarget::Pitch, target_count: 1, beat_sync: false },
         output: Output { glide_ms: 40.0, volume_db: -3.0, meter_l: 0.62, meter_r: 0.58 },
         unison: Unison::default(),
         fx: Fx::default(),
@@ -280,12 +285,13 @@ pub fn seed_synth() -> SynthState {
 /// From "Deep Bass" on they are the lessons' sounds (see `super::recipes`).
 /// "Init" comes first: the blank starting point (one plain saw, filter
 /// open, nothing moving) for building a sound from scratch.
-pub const PRESETS: [(&str, fn() -> SynthState); 13] = [
+pub const PRESETS: [(&str, fn() -> SynthState); 14] = [
     ("Init", crate::lessons::init_patch),
     ("Warm Bass", seed_synth),
     ("Deep Rave Bass", deep_rave_bass),
     ("Soft Pad", soft_pad),
     ("Deep Bass", super::recipes::deep_bass),
+    ("Wobble Bass", super::recipes::wobble_bass),
     ("Flute", super::recipes::flute),
     ("Indian Harp", super::recipes::indian_harp),
     ("Tanpura", super::recipes::tanpura),
@@ -316,8 +322,8 @@ pub fn soft_pad() -> SynthState {
     };
     s.filter_env = Envelope { attack_ms: 900.0, decay_ms: 1500.0, sustain: 0.5, release_ms: 1200.0 };
     s.amp_env = Envelope { attack_ms: 450.0, decay_ms: 800.0, sustain: 0.9, release_ms: 1400.0 };
-    s.lfo1 = Lfo { rate_label: "", rate_norm: 0.25, depth: 0.12, sync: false, target: LfoTarget::Cutoff, target_count: 1 };
-    s.lfo2 = Lfo { rate_label: "", rate_norm: 0.35, depth: 0.25, sync: false, target: LfoTarget::PulseWidth, target_count: 1 };
+    s.lfo1 = Lfo { rate_label: "", rate_norm: 0.25, depth: 0.12, sync: false, target: LfoTarget::Cutoff, target_count: 1, beat_sync: false };
+    s.lfo2 = Lfo { rate_label: "", rate_norm: 0.35, depth: 0.25, sync: false, target: LfoTarget::PulseWidth, target_count: 1, beat_sync: false };
     s.unison = Unison { voices: 3, detune_cents: 18.0, width: 0.9 };
     s.fx = Fx { chorus_depth: 0.5, chorus_mix: 0.35, reverb_size: 0.8, reverb_mix: 0.35 };
     s.output.glide_ms = 1.0;
@@ -363,8 +369,8 @@ pub fn deep_rave_bass() -> SynthState {
         },
         filter_env: Envelope { attack_ms: 1.0, decay_ms: 220.0, sustain: 0.15, release_ms: 150.0 },
         amp_env: Envelope { attack_ms: 2.0, decay_ms: 400.0, sustain: 0.85, release_ms: 90.0 },
-        lfo1: Lfo { rate_label: "", rate_norm: 0.2, depth: 0.05, sync: false, target: LfoTarget::Cutoff, target_count: 1 },
-        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1 },
+        lfo1: Lfo { rate_label: "", rate_norm: 0.2, depth: 0.05, sync: false, target: LfoTarget::Cutoff, target_count: 1, beat_sync: false },
+        lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1, beat_sync: false },
         output: Output { glide_ms: 70.0, volume_db: -3.0, meter_l: 0.0, meter_r: 0.0 },
         // Bass stays mono and dry: width and reverb in the low end smear it.
         unison: Unison { voices: 1, detune_cents: 14.0, width: 0.0 },

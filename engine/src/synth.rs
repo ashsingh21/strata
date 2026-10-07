@@ -584,6 +584,10 @@ pub struct SynthEngine {
     mono_stack: Vec<u8>,
     lfo1_phase: f32,
     lfo2_phase: f32,
+    /// Where the song is, in beats, while it plays (synced LFOs lock to
+    /// it); `None` while stopped, when they run on at the tempo.
+    beat: Option<f64>,
+    beats_per_sample: f64,
     params: SynthParams,
     smoothed: Smoothed,
     derived: Derived,
@@ -612,6 +616,8 @@ impl SynthEngine {
             mono_stack: Vec::with_capacity(MAX_VOICES),
             lfo1_phase: 0.0,
             lfo2_phase: 0.0,
+            beat: None,
+            beats_per_sample: 2.0 / sample_rate as f64,
             smoothed: Smoothed::new(&params, sample_rate),
             derived: Derived::EMPTY,
             drift_coeff: 1.0 - (-1.0 / (2.0 * sample_rate)).exp(),
@@ -625,6 +631,13 @@ impl SynthEngine {
 
     pub fn set_params(&mut self, params: SynthParams) {
         self.params = params;
+    }
+
+    /// The song's clock, once a block: where it is in beats (`None` while
+    /// stopped) and how far one sample moves it.
+    pub fn set_clock(&mut self, beat: Option<f64>, beats_per_sample: f64) {
+        self.beat = beat;
+        self.beats_per_sample = beats_per_sample;
     }
 
     /// Each LFO's position in its cycle, 0..1.
@@ -758,10 +771,28 @@ impl SynthEngine {
         let uni_width = sm.unison_width.next(p.unison.width);
 
         // --- LFOs: each adds into whichever target it's patched to. ---
-        self.lfo1_phase = fract_fast(self.lfo1_phase + p.lfo1_rate_hz / sr);
-        self.lfo2_phase = fract_fast(self.lfo2_phase + p.lfo2_rate_hz / sr);
-        let lfo1 = if p.lfo1_depth == 0.0 { 0.0 } else { (self.lfo1_phase * std::f32::consts::TAU).sin() };
-        let lfo2 = if p.lfo2_depth == 0.0 { 0.0 } else { (self.lfo2_phase * std::f32::consts::TAU).sin() };
+        // A synced one follows the song's beat (or, stopped, runs on at
+        // the tempo) and starts each cycle at its lowest, so a wobble on
+        // Cutoff opens up from closed on every beat it's locked to.
+        let (beat, per_sample) = (self.beat, self.beats_per_sample);
+        let advance = |phase: f32, hz: f32, per_beat: f32| -> f32 {
+            match (per_beat > 0.0, beat) {
+                (false, _) => fract_fast(phase + hz / sr),
+                (true, Some(b)) => (b * per_beat as f64).rem_euclid(1.0) as f32,
+                (true, None) => fract_fast(phase + (per_beat as f64 * per_sample) as f32),
+            }
+        };
+        self.lfo1_phase = advance(self.lfo1_phase, p.lfo1_rate_hz, p.lfo1_per_beat);
+        self.lfo2_phase = advance(self.lfo2_phase, p.lfo2_rate_hz, p.lfo2_per_beat);
+        if let Some(b) = &mut self.beat {
+            *b += per_sample;
+        }
+        let wave = |phase: f32, synced: bool| {
+            let t = phase * std::f32::consts::TAU;
+            if synced { -t.cos() } else { t.sin() }
+        };
+        let lfo1 = if p.lfo1_depth == 0.0 { 0.0 } else { wave(self.lfo1_phase, p.lfo1_per_beat > 0.0) };
+        let lfo2 = if p.lfo2_depth == 0.0 { 0.0 } else { wave(self.lfo2_phase, p.lfo2_per_beat > 0.0) };
         let mut cutoff_lfo_oct = 0.0f32;
         let mut pitch_lfo_cents = 0.0f32;
         for (lfo, depth, target) in [(lfo1, p.lfo1_depth, p.lfo1_target), (lfo2, p.lfo2_depth, p.lfo2_target)] {
@@ -979,6 +1010,49 @@ mod tests {
     use shared::synth::{seed_synth, Envelope as EnvParams, SynthState};
 
     const SR: f32 = 48_000.0;
+
+    /// A synced LFO starts every cycle on its beat, wherever the song was
+    /// started from, and runs on at the tempo while stopped.
+    #[test]
+    fn a_synced_lfo_locks_to_the_beat() {
+        let mut s = seed_synth();
+        s.lfo1.beat_sync = true;
+        s.lfo1.rate_norm = shared::synth::division_norm("1/8");
+        s.lfo1.depth = 1.0;
+        let mut e = SynthEngine::new(SR);
+        e.set_params(SynthParams::from_state(&s));
+        e.handle_note_event(NoteEvent { slot: 0, note: 45, on: true, velocity: 100 });
+        // 120 BPM: a beat is 24 000 samples, an 8th 12 000.
+        let per_sample = 1.0 / 24_000.0;
+        // Started from beat 3.25: half an 8th past beat 3, so half a cycle.
+        e.set_clock(Some(3.25), per_sample);
+        e.process();
+        assert!((e.lfo_phases().0 - 0.5).abs() < 1e-3, "{}", e.lfo_phases().0);
+        // Another 8th on: the same place in the next cycle.
+        for _ in 0..12_000 {
+            e.process();
+        }
+        assert!((e.lfo_phases().0 - 0.5).abs() < 1e-3, "{}", e.lfo_phases().0);
+        // Seek to a beat: the cycle starts there.
+        e.set_clock(Some(8.0), per_sample);
+        e.process();
+        assert!(e.lfo_phases().0 < 1e-3);
+        // Stopped: it keeps going at the tempo, an 8th per cycle.
+        e.set_clock(None, per_sample);
+        let before = e.lfo_phases().0;
+        for _ in 0..6_000 {
+            e.process();
+        }
+        assert!((e.lfo_phases().0 - (before + 0.5)).abs() < 1e-3);
+        // Off: the Rate knob's Hz again.
+        s.lfo1.beat_sync = false;
+        assert_eq!(SynthParams::from_state(&s).lfo1_per_beat, 0.0);
+        // The old, never-used flag changes nothing: Warm Bass has it on
+        // and must sound as it always did.
+        let warm = seed_synth();
+        assert!(warm.lfo1.sync && !warm.lfo1.beat_sync);
+        assert_eq!(SynthParams::from_state(&warm).lfo1_per_beat, 0.0);
+    }
 
     /// A single raw oscillator straight to the output: everything else
     /// (osc 2, sub, noise, drive, resonance, envelopes, LFOs) neutralised,
