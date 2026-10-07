@@ -285,7 +285,7 @@ pub fn seed_synth() -> SynthState {
 /// From "Deep Bass" on they are the lessons' sounds (see `super::recipes`).
 /// "Init" comes first: the blank starting point (one plain saw, filter
 /// open, nothing moving) for building a sound from scratch.
-pub const PRESETS: [(&str, fn() -> SynthState); 14] = [
+pub const PRESETS: [(&str, fn() -> SynthState); 15] = [
     ("Init", crate::lessons::init_patch),
     ("Warm Bass", seed_synth),
     ("Deep Rave Bass", deep_rave_bass),
@@ -297,6 +297,7 @@ pub const PRESETS: [(&str, fn() -> SynthState); 14] = [
     ("Tanpura", super::recipes::tanpura),
     ("Reed", super::recipes::reed),
     ("Lead", super::recipes::lead),
+    ("Sweet Lead", super::recipes::sweet_lead),
     ("Lo-fi Keys", super::recipes::lofi_keys),
     ("Piano", super::recipes::piano),
     ("808", super::recipes::eight_oh_eight),
@@ -327,7 +328,7 @@ pub fn soft_pad() -> SynthState {
     s.unison = Unison { voices: 3, detune_cents: 18.0, width: 0.9 };
     s.fx = Fx { chorus_depth: 0.5, chorus_mix: 0.35, reverb_size: 0.8, reverb_mix: 0.35 };
     s.output.glide_ms = 1.0;
-    s.output.volume_db = -6.0;
+    s.output.volume_db = -3.5;
     s
 }
 
@@ -371,7 +372,7 @@ pub fn deep_rave_bass() -> SynthState {
         amp_env: Envelope { attack_ms: 2.0, decay_ms: 400.0, sustain: 0.85, release_ms: 90.0 },
         lfo1: Lfo { rate_label: "", rate_norm: 0.2, depth: 0.05, sync: false, target: LfoTarget::Cutoff, target_count: 1, beat_sync: false },
         lfo2: Lfo { rate_label: "", rate_norm: 0.3, depth: 0.0, sync: false, target: LfoTarget::Pitch, target_count: 1, beat_sync: false },
-        output: Output { glide_ms: 70.0, volume_db: -3.0, meter_l: 0.0, meter_r: 0.0 },
+        output: Output { glide_ms: 70.0, volume_db: -5.0, meter_l: 0.0, meter_r: 0.0 },
         // Bass stays mono and dry: width and reverb in the low end smear it.
         unison: Unison { voices: 1, detune_cents: 14.0, width: 0.0 },
         fx: Fx { chorus_depth: 0.4, chorus_mix: 0.0, reverb_size: 0.4, reverb_mix: 0.0 },

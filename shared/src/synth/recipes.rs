@@ -32,6 +32,8 @@ pub fn lofi_keys() -> SynthState {
     s.lfo2.depth = 0.08;
     s.fx.chorus_mix = 0.3;
     s.fx.reverb_mix = 0.3;
+    // Level with the other presets (a note about -24 dB).
+    s.output.volume_db = -1.5;
     s
 }
 
@@ -127,6 +129,8 @@ pub fn indian_harp() -> SynthState {
     s.fx.chorus_mix = 0.3;
     s.fx.reverb_mix = 0.4;
     s.fx.reverb_size = 0.8;
+    // Level with the other presets (a note about -24 dB).
+    s.output.volume_db = 1.0;
     s
 }
 
@@ -148,6 +152,8 @@ pub fn tanpura() -> SynthState {
     s.fx.chorus_mix = 0.3;
     s.fx.reverb_mix = 0.45;
     s.fx.reverb_size = 0.85;
+    // Level with the other presets (a note about -24 dB).
+    s.output.volume_db = -9.5;
     s
 }
 
@@ -166,6 +172,8 @@ pub fn reed() -> SynthState {
     s.lfo2.rate_norm = rate_for_hz(5.5);
     s.lfo2.depth = 0.15;
     s.fx.reverb_mix = 0.3;
+    // Level with the other presets (a note about -24 dB).
+    s.output.volume_db = -1.5;
     s
 }
 
@@ -183,6 +191,49 @@ pub fn lead() -> SynthState {
     s.lfo2.depth = 0.15;
     s.fx.chorus_mix = 0.2;
     s.fx.reverb_mix = 0.25;
+    s
+}
+
+/// A sweet, singing lead: two saws a few cents apart with a soft
+/// triangle an octave up for air, through a warm 24 dB filter that blooms
+/// a little on each note; mono with a glide between notes, a gentle
+/// vibrato, and a little unison, chorus and reverb around it.
+pub fn sweet_lead() -> SynthState {
+    let mut s = init("Sweet Lead");
+    s.osc1.waveform = Waveform::Saw;
+    s.osc1.knob_c = 0.15;
+    s.osc2.waveform = Waveform::Saw;
+    s.osc2.knob_a_cents = 6.0;
+    s.mix.osc1_db = 0.0;
+    s.mix.osc2_db = -3.0;
+    s.mix.sub_db = -200.0;
+    s.filter.filter_type = FilterType::Lp24;
+    s.filter.cutoff_hz = 1800.0;
+    s.filter.resonance = 0.2;
+    s.filter.key_track = 0.5;
+    s.filter.env_amount_oct = 1.0;
+    s.filter_env.attack_ms = 20.0;
+    s.filter_env.decay_ms = 600.0;
+    s.filter_env.sustain = 0.35;
+    s.filter_env.release_ms = 400.0;
+    s.amp_env.attack_ms = 12.0;
+    s.amp_env.decay_ms = 400.0;
+    s.amp_env.sustain = 0.85;
+    s.amp_env.release_ms = 350.0;
+    s.voice_mode = VoiceMode::Mono;
+    s.output.glide_ms = 70.0;
+    s.lfo2.target = LfoTarget::Pitch;
+    s.lfo2.rate_norm = rate_for_hz(5.5);
+    s.lfo2.depth = 0.2;
+    s.lfo1.depth = 0.0;
+    s.unison.voices = 3;
+    s.unison.detune_cents = 12.0;
+    s.unison.width = 0.6;
+    s.fx.chorus_mix = 0.3;
+    s.fx.chorus_depth = 0.4;
+    s.fx.reverb_mix = 0.3;
+    s.fx.reverb_size = 0.6;
+    s.output.volume_db = -5.0;
     s
 }
 

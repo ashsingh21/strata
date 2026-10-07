@@ -86,8 +86,8 @@ impl Envelope {
         match self.stage {
             EnvStage::Idle => self.level = 0.0,
             EnvStage::Attack => {
-                self.level += (1.0 - self.level) * c.attack;
-                if self.level >= 0.999 {
+                self.level += (ATTACK_TARGET - self.level) * c.attack;
+                if self.level >= 1.0 {
                     self.level = 1.0;
                     self.stage = EnvStage::Decay;
                 }
@@ -121,10 +121,30 @@ struct EnvCoeffs {
     release: f32,
 }
 
+/// The attack heads for a level past full and stops at full, as analog
+/// envelopes do: quick to start, and done on time instead of creeping up
+/// on full forever.
+const ATTACK_TARGET: f32 = 1.3;
+
+/// A one-pole approach that covers its stage in `ms`: `span` time
+/// constants fit in it (ln of how far the level must get).
+fn approach(ms: f32, span: f32, sample_rate: f32) -> f32 {
+    1.0 - (-span / (ms.max(0.5) * 0.001 * sample_rate)).exp()
+}
+
 impl EnvCoeffs {
+    /// Each knob is the stage's real length: attack reaches full at its
+    /// time, decay and release get 60 dB of the way there at theirs. (They
+    /// were time constants, so a "300 ms" decay took over a second and a
+    /// "500 ms" release rang for three.)
     fn new(params: &shared::synth::Envelope, sample_rate: f32) -> Self {
-        let coeff = |ms: f32| 1.0 - (-1.0 / (ms.max(0.5) * 0.001 * sample_rate)).exp();
-        Self { attack: coeff(params.attack_ms), decay: coeff(params.decay_ms), release: coeff(params.release_ms) }
+        let attack_span = (ATTACK_TARGET / (ATTACK_TARGET - 1.0)).ln();
+        let settle = 1000f32.ln();
+        Self {
+            attack: approach(params.attack_ms, attack_span, sample_rate),
+            decay: approach(params.decay_ms, settle, sample_rate),
+            release: approach(params.release_ms, settle, sample_rate),
+        }
     }
 }
 
@@ -159,13 +179,13 @@ struct SvfCoeffs {
 impl SvfCoeffs {
     fn new(cutoff_hz: f32, resonance: f32, sample_rate: f32) -> Self {
         let g = tan_fast(std::f32::consts::PI * cutoff_hz / sample_rate);
-        let q = 0.5 + resonance * resonance * 19.5;
+        let q = shared::synth::svf_q(resonance);
         let k = 1.0 / q;
         let a1 = 1.0 / (1.0 + g * (g + k));
         let a2 = g * a1;
         let lg = g / (1.0 + g);
         let inv = 1.0 / (1.0 + g);
-        let lk = LADDER_MAX_K * resonance.clamp(0.0, 1.0).powf(0.7);
+        let lk = shared::synth::ladder_k(resonance);
         let g4 = lg * lg * lg * lg;
         Self {
             k,
@@ -180,10 +200,6 @@ impl SvfCoeffs {
         }
     }
 }
-
-/// The ladder's feedback at full resonance: right at the edge of ringing
-/// on its own, held there by the soft clip in the loop.
-const LADDER_MAX_K: f32 = 4.0;
 
 /// A cheap, smooth tanh-like curve for the ladder's loop: linear for small
 /// signals, easing into +-1.
@@ -246,7 +262,9 @@ impl Filter {
         let (lp, bp, hp) = self.svf.process(x, c);
         match filter_type {
             FilterType::Lp12 | FilterType::Lp24 => lp,
-            FilterType::Bp => bp,
+            // Normalised: the peak stays at full level and resonance only
+            // narrows it (it was 6 dB down with none, 24 dB up at full).
+            FilterType::Bp => c.k * bp,
             FilterType::Hp => hp,
         }
     }
@@ -889,7 +907,8 @@ impl SynthEngine {
         let resonance = resonance.clamp(0.0, 1.0);
         let vibrato_ratio = d.vibrato.get(pitch_lfo_cents, |c| 2f32.powf(c / 1200.0));
 
-        let glide_coeff = d.glide.get(p.glide_ms, |ms| 1.0 - (-1.0 / (ms.max(0.5) * 0.001 * sr)).exp());
+        // Glide arrives (within 1%) in its time.
+        let glide_coeff = d.glide.get(p.glide_ms, |ms| approach(ms, 100f32.ln(), sr));
         let amp_coeffs = d.amp_env.get([p.amp_env.attack_ms, p.amp_env.decay_ms, p.amp_env.release_ms], |_| EnvCoeffs::new(&p.amp_env, sr));
         let filter_coeffs =
             d.filter_env.get([p.filter_env.attack_ms, p.filter_env.decay_ms, p.filter_env.release_ms], |_| EnvCoeffs::new(&p.filter_env, sr));
@@ -1090,6 +1109,47 @@ mod tests {
     use shared::synth::{seed_synth, Envelope as EnvParams, SynthState};
 
     const SR: f32 = 48_000.0;
+
+    /// The envelope and glide knobs are the real lengths of their stages.
+    #[test]
+    fn times_are_what_the_knobs_say() {
+        let env = |a: f32, d: f32, s: f32, r: f32| shared::synth::Envelope { attack_ms: a, decay_ms: d, sustain: s, release_ms: r };
+        let p = env(100.0, 300.0, 0.5, 500.0);
+        let c = EnvCoeffs::new(&p, SR);
+        let mut e = Envelope::new();
+        e.note_on();
+        let mut n = 0;
+        while e.stage == EnvStage::Attack {
+            e.tick(&p, &c);
+            n += 1;
+        }
+        let attack_ms = n as f32 / SR * 1000.0;
+        assert!((95.0..=105.0).contains(&attack_ms), "attack {attack_ms}");
+        // Decay: 300 ms on, within 0.1% of the way to sustain.
+        for _ in 0..(0.3 * SR) as usize {
+            e.tick(&p, &c);
+        }
+        assert!((e.level - 0.5).abs() < 0.001, "decay {}", e.level);
+        // Release: 500 ms on, 60 dB down.
+        e.note_off();
+        for _ in 0..(0.5 * SR) as usize {
+            e.tick(&p, &c);
+        }
+        assert!(e.level <= 0.5 * 0.0011, "release {}", e.level);
+        // Glide: 100 ms covers 99% of the way.
+        let mut s = seed_synth();
+        s.voice_mode = VoiceMode::Mono;
+        s.output.glide_ms = 100.0;
+        let mut eng = SynthEngine::new(SR);
+        eng.set_params(SynthParams::from_state(&s));
+        eng.handle_note_event(NoteEvent { slot: 0, note: 57, on: true, velocity: 100 });
+        eng.process();
+        eng.handle_note_event(NoteEvent { slot: 0, note: 69, on: true, velocity: 100 });
+        for _ in 0..(0.1 * SR) as usize {
+            eng.process();
+        }
+        assert!((eng.voices[0].current_note - 69.0).abs() < 0.13, "glide at {}", eng.voices[0].current_note);
+    }
 
     /// A free LFO starts its cycle with each phrase, so the same note
     /// sounds the same every time - but a chord's notes, played together,
@@ -1401,6 +1461,23 @@ mod tests {
         assert!(bump(0.75) > bump(0.5) + 3.0);
         // Even ringing at full resonance, a full-level note stays near it.
         assert!(filter_gain(1000.0, 1000.0, 1.0, FilterType::Lp24, 1.0) < 3.0);
+        // The other modes follow the same curve, and band-pass keeps its
+        // peak at full level whatever the resonance.
+        let svf_bump = |res: f32| db(filter_gain(1000.0, 1000.0, res, FilterType::Lp12, 0.1)) - db(filter_gain(100.0, 1000.0, res, FilterType::Lp12, 0.1));
+        assert!((3.0..=12.0).contains(&svf_bump(0.5)), "{}", svf_bump(0.5));
+        assert!(svf_bump(1.0) < 20.0, "{}", svf_bump(1.0));
+        for res in [0.0, 0.5, 1.0] {
+            let bp = db(filter_gain(1000.0, 1000.0, res, FilterType::Bp, 0.1));
+            assert!(bp.abs() < 0.5, "band-pass peak {bp} dB at resonance {res}");
+        }
+        // The drawing agrees with the sound.
+        for (ft, res) in [(FilterType::Lp24, 0.0), (FilterType::Lp24, 0.6), (FilterType::Lp12, 0.6), (FilterType::Bp, 0.6), (FilterType::Hp, 0.6)] {
+            for hz in [200.0, 1000.0, 3000.0] {
+                let heard = db(filter_gain(hz, 1000.0, res, ft, 0.05));
+                let drawn = db(shared::synth::filter_gain(ft, 1000.0, res, hz));
+                assert!((heard - drawn).abs() < 1.5, "{ft:?} res {res} at {hz} Hz: heard {heard:.1} dB, drawn {drawn:.1} dB");
+            }
+        }
         // Resonance doesn't hollow out the bass: within a few dB of none.
         let low = |res: f32| db(filter_gain(100.0, 1000.0, res, FilterType::Lp24, 0.1));
         assert!((low(0.75) - low(0.0)).abs() < 6.0, "{} vs {}", low(0.75), low(0.0));
@@ -1423,4 +1500,5 @@ mod tests {
         assert!(peak <= 1.0, "{peak}");
     }
 }
+
 

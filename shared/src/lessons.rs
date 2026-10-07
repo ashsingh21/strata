@@ -329,6 +329,7 @@ pub fn theory_keys() -> SynthState {
     p.amp_env = Envelope { attack_ms: 3.0, decay_ms: 700.0, sustain: 0.35, release_ms: 350.0 };
     p.fx.reverb_mix = 0.12;
     p.fx.reverb_size = 0.35;
+    p.output.volume_db = -2.0;
     p
 }
 

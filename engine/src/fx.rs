@@ -308,9 +308,21 @@ impl Reverb {
             - self.delay_b.tap(o[4])
             - self.ap_b.line.tap(o[5])
             - self.delay_b2.tap(o[6]);
+        // The plate's two sides come out partly opposed (correlation about
+        // -0.5), so on a phone or any mono speaker the reverb half
+        // cancelled. Narrowing the difference brings it to about 0 - still
+        // wide in stereo, whole in mono - and the gain keeps its loudness.
+        let mid = (wet_l + wet_r) * 0.5;
+        let side = (wet_l - wet_r) * 0.5 * REVERB_SIDE;
+        let (wet_l, wet_r) = ((mid + side) * REVERB_MS_GAIN, (mid - side) * REVERB_MS_GAIN);
         (l + wet_l * REVERB_WET_GAIN * mix, r + wet_r * REVERB_WET_GAIN * mix)
     }
 }
+
+/// How much of the plate's left-right difference is kept.
+const REVERB_SIDE: f32 = 0.58;
+/// Makes up the level the narrowing takes away (it halves the side's power).
+const REVERB_MS_GAIN: f32 = 1.41;
 
 /// A stereo-linked lookahead peak limiter: the signal is delayed by a
 /// couple of milliseconds, so the gain is already down by the time a peak

@@ -80,7 +80,7 @@ pub fn target(lesson: &str) -> Option<SynthState> {
             p.amp_env.decay_ms = 250.0;
             p.amp_env.sustain = 0.0;
         }
-        MATCH_SWELL => p.amp_env.attack_ms = 500.0,
+        MATCH_SWELL => p.amp_env.attack_ms = 1500.0,
         MATCH_MYSTERY => {
             p.osc1.waveform = Waveform::Square;
             p.filter.cutoff_hz = 1500.0;

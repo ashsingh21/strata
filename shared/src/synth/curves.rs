@@ -98,8 +98,33 @@ fn gain_db(gain: f32) -> f32 {
 
 /// How much the filter passes at `freq` (linear gain; 1 = untouched).
 pub fn filter_gain(filter_type: FilterType, cutoff_hz: f32, resonance: f32, freq: f32) -> f32 {
-    let q = 0.5 + resonance.clamp(0.0, 1.0) * 8.0;
-    resonant_magnitude(filter_type, freq / cutoff_hz.max(1.0), q)
+    let ratio = freq / cutoff_hz.max(1.0);
+    if filter_type == FilterType::Lp24 {
+        return ladder_magnitude(ratio, ladder_k(resonance));
+    }
+    resonant_magnitude(filter_type, ratio, svf_q(resonance))
+}
+
+/// The state-variable filter's Q (LP 12, BP, HP) for the Resonance knob:
+/// a gentle start, about +7 dB at the cutoff by half way, +18 dB at full.
+pub fn svf_q(resonance: f32) -> f32 {
+    let r = resonance.clamp(0.0, 1.0);
+    0.5 + r * r * 7.5
+}
+
+/// The LP 24 ladder's feedback for the Resonance knob: 4 at full, the edge
+/// of ringing on its own.
+pub fn ladder_k(resonance: f32) -> f32 {
+    4.0 * resonance.clamp(0.0, 1.0).powf(0.7)
+}
+
+/// The ladder's response (four one-pole stages in a feedback loop, with
+/// its bass make-up gain): |1 / ((1 + jr)^4 + k)| x (1 + k/2).
+fn ladder_magnitude(ratio: f32, k: f32) -> f32 {
+    // (1 + jr)^2 = (1 - r^2) + j2r, squared again.
+    let (a, b) = (1.0 - ratio * ratio, 2.0 * ratio);
+    let (re, im) = (a * a - b * b + k, 2.0 * a * b);
+    (1.0 + 0.5 * k) / (re * re + im * im).sqrt().max(1e-6)
 }
 
 /// The harmonics a wave holds, as (multiple of the note, level): a sine
