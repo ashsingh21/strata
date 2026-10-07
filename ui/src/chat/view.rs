@@ -101,14 +101,15 @@ fn settings(cx: &mut Context, p: ChatProps) {
                     .toggle_class("hidden", p.has_key.map(|k| !*k))
                     .on_press(|cx| cx.emit(ChatEvent::SetKey(String::new())));
                 Label::new(cx, "Workspace ID").class("label");
-                Label::new(cx, "Only for an Anthropic key that isn\u{2019}t in a workspace: its ID (wrkspc_\u{2026}), from the Console\u{2019}s Workspaces page. Enter to use it.")
+                Label::new(cx, "Only for an Anthropic key that isn\u{2019}t in a workspace: its ID (wrkspc_\u{2026}), from the Console\u{2019}s Workspaces page.")
                     .class("value")
                     .text_wrap(true)
                     .width(Stretch(1.0));
                 let ws = Signal::new(p.workspace.get());
                 Textbox::new(cx, ws)
                     .placeholder("wrkspc_...")
-                    .on_submit(|cx, text, _| cx.emit(ChatEvent::SetWorkspace(text)))
+                    // Saved as you type: no Enter needed.
+                    .on_edit(|cx, text| cx.emit(ChatEvent::SetWorkspace(text)))
                     .width(Stretch(1.0))
                     .height(Pixels(tokens::SIZE_CONTROL));
             })
