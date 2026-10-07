@@ -4,8 +4,9 @@
 //! band-limited (PolyBLEP on edges, PolyBLAMP on corners, a BLEP on every
 //! hard-sync reset) and panned across the stereo field; a sine sub and
 //! white noise; a DC blocker, a 2x-oversampled anti-aliased (ADAA) `tanh`
-//! drive and a stereo pair of Andrew Simper "TPT" state-variable filters
-//! (cascaded twice for 24 dB/oct); exponential ADSRs for amp and filter. Every
+//! drive, then per channel a 4-pole ladder for LP 24 (zero-delay feedback,
+//! soft-clipped resonance) or an Andrew Simper "TPT" state-variable filter
+//! for LP 12 / BP / HP; exponential ADSRs for amp and filter. Every
 //! continuous parameter is smoothed per sample so knob moves don't click.
 //! The voice sum runs through a chorus, a reverb and a lookahead limiter.
 //!
@@ -135,22 +136,83 @@ struct SvfStage {
     ic2eq: f32,
 }
 
-/// Coefficients shared by every stage running at one cutoff/Q.
-#[derive(Clone, Copy)]
+/// Coefficients for one cutoff and resonance: the state-variable stage's
+/// (LP 12, BP, HP) and the ladder's (LP 24).
+#[derive(Clone, Copy, Default)]
 struct SvfCoeffs {
     k: f32,
     a1: f32,
     a2: f32,
     a3: f32,
+    /// The ladder's one-pole gain, G = g / (1 + g).
+    lg: f32,
+    /// How each stage's state feeds the output, for the zero-delay loop.
+    beta: [f32; 4],
+    /// Resonance feedback (4 is where it starts to ring on its own).
+    lk: f32,
+    /// 1 / (1 + k G^4): solves the loop.
+    norm: f32,
+    /// Gives back some of the low end resonance takes away.
+    comp: f32,
 }
 
 impl SvfCoeffs {
-    fn new(cutoff_hz: f32, q: f32, sample_rate: f32) -> Self {
+    fn new(cutoff_hz: f32, resonance: f32, sample_rate: f32) -> Self {
         let g = tan_fast(std::f32::consts::PI * cutoff_hz / sample_rate);
+        let q = 0.5 + resonance * resonance * 19.5;
         let k = 1.0 / q;
         let a1 = 1.0 / (1.0 + g * (g + k));
         let a2 = g * a1;
-        Self { k, a1, a2, a3: g * a2 }
+        let lg = g / (1.0 + g);
+        let inv = 1.0 / (1.0 + g);
+        let lk = LADDER_MAX_K * resonance.clamp(0.0, 1.0).powf(0.7);
+        let g4 = lg * lg * lg * lg;
+        Self {
+            k,
+            a1,
+            a2,
+            a3: g * a2,
+            lg,
+            beta: [lg * lg * lg * inv, lg * lg * inv, lg * inv, inv],
+            lk,
+            norm: 1.0 / (1.0 + lk * g4),
+            comp: 1.0 + 0.5 * lk,
+        }
+    }
+}
+
+/// The ladder's feedback at full resonance: right at the edge of ringing
+/// on its own, held there by the soft clip in the loop.
+const LADDER_MAX_K: f32 = 4.0;
+
+/// A cheap, smooth tanh-like curve for the ladder's loop: linear for small
+/// signals, easing into +-1.
+#[inline]
+fn soft_clip(x: f32) -> f32 {
+    let x = x.clamp(-3.0, 3.0);
+    x * (27.0 + x * x) / (27.0 + 9.0 * x * x)
+}
+
+/// A 4-pole transistor-ladder low-pass (Zavalishin's zero-delay-feedback
+/// form): four one-pole stages in a loop with the resonance feedback,
+/// soft-clipped where the feedback meets the input. Resonance rings and
+/// growls instead of whistling, and stays bounded however far it's turned.
+#[derive(Clone, Copy, Default)]
+struct Ladder([f32; 4]);
+
+impl Ladder {
+    #[inline]
+    fn process(&mut self, x: f32, c: &SvfCoeffs) -> f32 {
+        let s = &mut self.0;
+        let sum = c.beta[0] * s[0] + c.beta[1] * s[1] + c.beta[2] * s[2] + c.beta[3] * s[3];
+        let mut y = soft_clip((x - c.lk * sum) * c.norm);
+        for st in s.iter_mut() {
+            let v = (y - *st) * c.lg;
+            let out = v + *st;
+            *st = out + v;
+            y = out;
+        }
+        y * c.comp
     }
 }
 
@@ -167,17 +229,23 @@ impl SvfStage {
     }
 }
 
-/// One channel's filter: two stages, used as one (12 dB) or two (24 dB).
+/// One channel's filter: the ladder for LP 24, a state-variable stage for
+/// the rest.
 #[derive(Clone, Copy, Default)]
-struct Filter([SvfStage; 2]);
+struct Filter {
+    svf: SvfStage,
+    ladder: Ladder,
+}
 
 impl Filter {
     #[inline]
     fn process(&mut self, x: f32, filter_type: FilterType, c: &SvfCoeffs) -> f32 {
-        let (lp, bp, hp) = self.0[0].process(x, c);
+        if filter_type == FilterType::Lp24 {
+            return self.ladder.process(x, c);
+        }
+        let (lp, bp, hp) = self.svf.process(x, c);
         match filter_type {
-            FilterType::Lp24 => self.0[1].process(lp, c).0,
-            FilterType::Lp12 => lp,
+            FilterType::Lp12 | FilterType::Lp24 => lp,
             FilterType::Bp => bp,
             FilterType::Hp => hp,
         }
@@ -662,6 +730,19 @@ impl SynthEngine {
     }
 
     fn note_on(&mut self, note: u8, velocity: u8) {
+        // A phrase starting (no key held): free LFOs start their cycle
+        // again, so every first note gets the same sweep instead of
+        // wherever the wave happened to be. Chords and legato lines keep
+        // one sweep going; synced ones follow the beat instead.
+        let held = self.voices.iter().any(|v| v.active && v.amp_env.stage != EnvStage::Release);
+        if !held {
+            if self.params.lfo1_per_beat == 0.0 {
+                self.lfo1_phase = 0.0;
+            }
+            if self.params.lfo2_per_beat == 0.0 {
+                self.lfo2_phase = 0.0;
+            }
+        }
         let velocity_gain = velocity_to_gain(velocity);
         if self.params.voice_mode == VoiceMode::Mono {
             self.mono_stack.retain(|n| *n != note);
@@ -807,7 +888,6 @@ impl SynthEngine {
         let osc2_shape = osc2_shape.clamp(0.0, 1.0);
         let resonance = resonance.clamp(0.0, 1.0);
         let vibrato_ratio = d.vibrato.get(pitch_lfo_cents, |c| 2f32.powf(c / 1200.0));
-        let q = 0.5 + resonance * resonance * 19.5;
 
         let glide_coeff = d.glide.get(p.glide_ms, |ms| 1.0 - (-1.0 / (ms.max(0.5) * 0.001 * sr)).exp());
         let amp_coeffs = d.amp_env.get([p.amp_env.attack_ms, p.amp_env.decay_ms, p.amp_env.release_ms], |_| EnvCoeffs::new(&p.amp_env, sr));
@@ -835,7 +915,7 @@ impl SynthEngine {
         // the drive stage's input.
         let mut live = [false; MAX_VOICES];
         let mut pre = [[0.0f32; 2]; MAX_VOICES];
-        let mut coeffs = [SvfCoeffs { k: 0.0, a1: 0.0, a2: 0.0, a3: 0.0 }; MAX_VOICES];
+        let mut coeffs = [SvfCoeffs::default(); MAX_VOICES];
         let mut level = [0.0f32; MAX_VOICES];
 
         for (vi, voice) in self.voices.iter_mut().enumerate() {
@@ -961,9 +1041,9 @@ impl SynthEngine {
             let key_oct = key_track * ((voice.note as f32 - REF_NOTE) / 12.0);
             let env_oct = env_amount * filter_level;
             let cutoff_arg = cutoff_log2 + key_oct + env_oct + cutoff_lfo_oct;
-            coeffs[vi] = voice.coeff_memo.get((cutoff_arg, q), |(arg, q)| {
+            coeffs[vi] = voice.coeff_memo.get((cutoff_arg, resonance), |(arg, resonance)| {
                 let cutoff = 2f32.powf(arg).clamp(20.0, 20_000.0).min(sr * 0.45);
-                SvfCoeffs::new(cutoff, q, sr)
+                SvfCoeffs::new(cutoff, resonance, sr)
             });
             level[vi] = amp_level * voice.velocity_gain;
             for (ch, dry) in [dry_l, dry_r].into_iter().enumerate() {
@@ -1010,6 +1090,32 @@ mod tests {
     use shared::synth::{seed_synth, Envelope as EnvParams, SynthState};
 
     const SR: f32 = 48_000.0;
+
+    /// A free LFO starts its cycle with each phrase, so the same note
+    /// sounds the same every time - but a chord's notes, played together,
+    /// share one sweep.
+    #[test]
+    fn a_free_lfo_restarts_with_each_phrase() {
+        let mut s = seed_synth();
+        s.lfo1.depth = 1.0;
+        let mut e = SynthEngine::new(SR);
+        e.set_params(SynthParams::from_state(&s));
+        let on = |e: &mut SynthEngine, note| e.handle_note_event(NoteEvent { slot: 0, note, on: true, velocity: 100 });
+        on(&mut e, 45);
+        for _ in 0..10_000 {
+            e.process();
+        }
+        let moved = e.lfo_phases().0;
+        assert!(moved > 0.01);
+        // Another note while one's held: the sweep carries on.
+        on(&mut e, 52);
+        assert_eq!(e.lfo_phases().0, moved);
+        // Let go of everything, then a new phrase: back to the start.
+        e.handle_note_event(NoteEvent { slot: 0, note: ALL_NOTES_OFF, on: false, velocity: 0 });
+        e.process();
+        on(&mut e, 45);
+        assert_eq!(e.lfo_phases().0, 0.0);
+    }
 
     /// A synced LFO starts every cycle on its beat, wherever the song was
     /// started from, and runs on at the tempo while stopped.
@@ -1265,6 +1371,41 @@ mod tests {
         }
     }
 
+    /// A sine through the filter: its steady peak level.
+    fn filter_gain(hz: f32, cutoff: f32, resonance: f32, ft: FilterType, level: f32) -> f32 {
+        let c = SvfCoeffs::new(cutoff, resonance, SR);
+        let mut f = Filter::default();
+        let mut peak = 0.0f32;
+        for i in 0..SR as usize {
+            let y = f.process(level * (i as f32 * hz / SR * std::f32::consts::TAU).sin(), ft, &c);
+            if i > SR as usize / 2 {
+                peak = peak.max(y.abs());
+            }
+        }
+        peak / level
+    }
+
+    /// The LP 24 ladder's resonance is a musical bump, not a whistle: at
+    /// 50% a few dB over the low end (it was +29 dB with two resonant
+    /// stages in a row), and bounded at full - while no resonance is the
+    /// same gentle slope as before.
+    #[test]
+    fn ladder_resonance_is_musical() {
+        let db = |g: f32| 20.0 * g.max(1e-9).log10();
+        let bump = |res: f32| db(filter_gain(1000.0, 1000.0, res, FilterType::Lp24, 0.1)) - db(filter_gain(100.0, 1000.0, res, FilterType::Lp24, 0.1));
+        for res in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            println!("resonance {res:.2}: {:+.1} dB at the cutoff over the low end; full-level peak {:.2}", bump(res), filter_gain(1000.0, 1000.0, res, FilterType::Lp24, 1.0));
+        }
+        assert!((bump(0.0) + 12.0).abs() < 0.6, "{}", bump(0.0));
+        assert!((3.0..=12.0).contains(&bump(0.5)), "{}", bump(0.5));
+        assert!(bump(0.75) > bump(0.5) + 3.0);
+        // Even ringing at full resonance, a full-level note stays near it.
+        assert!(filter_gain(1000.0, 1000.0, 1.0, FilterType::Lp24, 1.0) < 3.0);
+        // Resonance doesn't hollow out the bass: within a few dB of none.
+        let low = |res: f32| db(filter_gain(100.0, 1000.0, res, FilterType::Lp24, 0.1));
+        assert!((low(0.75) - low(0.0)).abs() < 6.0, "{} vs {}", low(0.75), low(0.0));
+    }
+
     #[test]
     fn output_never_exceeds_full_scale() {
         let mut s = raw_osc(Waveform::Saw, 0.0);
@@ -1282,3 +1423,4 @@ mod tests {
         assert!(peak <= 1.0, "{peak}");
     }
 }
+
