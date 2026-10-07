@@ -146,7 +146,16 @@ pub fn commands() -> Vec<Command> {
         command("Play / Pause", "Transport", "Space", "start stop", |cx| cx.emit(AppEvent::TogglePlay)),
         command("Stop", "Transport", "", "halt", |cx| cx.emit(AppEvent::Stop)),
         command("Return to start", "Transport", "Home", "rewind beginning playhead", |cx| cx.emit(AppEvent::Rewind)),
-        command("Show lessons", "Learn", "", "learn teach tutorial course help beginner", |cx| cx.emit(BrowserEvent::ShowLearn)),
+        command("Learn", "Learn", "", "lessons teach tutorial course help beginner goals practice", |cx| {
+            cx.emit(BrowserEvent::ShowLearn);
+            cx.emit(crate::learn::LearnEvent::Open(Some(crate::learn::Page::Home)));
+        }),
+        command("Today's practice", "Learn", "", "daily drill exercise five minutes streak", |cx| cx.emit(crate::learn::LearnEvent::StartToday)),
+        command("Ear trainer", "Learn", "", "ear training intervals by ear guitar find the note", |cx| cx.emit(crate::tools::ToolsEvent::Show(crate::tools::Tool::Ear))),
+        command("Rhythm and melody exercises", "Learn", "", "practice rhythm tap melody play back classics", |cx| cx.emit(crate::tools::ToolsEvent::Show(crate::tools::Tool::Exercises))),
+        command("Theory ring", "Learn", "", "scale chord circle notes theory", |cx| cx.emit(crate::tools::ToolsEvent::Show(crate::tools::Tool::Theory))),
+        command("Voice leading", "Learn", "", "chords voicing smooth progression", |cx| cx.emit(crate::tools::ToolsEvent::Show(crate::tools::Tool::Voicing))),
+        command("Riyaz", "Learn", "", "sing tanpura swar pitch indian raag", |cx| cx.emit(crate::tools::ToolsEvent::Show(crate::tools::Tool::Riyaz))),
         command("Search the library", "View", "Ctrl+F", "find sounds samples browser", |cx| cx.emit(BrowserEvent::FocusSearch)),
         command("Save", "File", "Ctrl+S", "", |cx| cx.emit(ProjectEvent::Save)),
         command("Export audio...", "File", "", "render bounce wav mixdown", |cx| cx.emit(ProjectEvent::ExportDialog)),
@@ -361,7 +370,9 @@ mod tests {
         let top = |q: &str| results(q, &table, &[]).first().map(|r| r.label.clone());
         assert_eq!(top("save").as_deref(), Some("Save"));
         assert_eq!(top("export").as_deref(), Some("Export audio..."));
-        assert_eq!(top("lesson").as_deref(), Some("Show lessons"));
+        assert_eq!(top("lesson").as_deref(), Some("Learn"));
+        assert_eq!(top("ear").as_deref(), Some("Ear trainer"));
+        assert_eq!(top("riyaz").as_deref(), Some("Riyaz"));
         assert_eq!(top("metronome").as_deref(), Some("Metronome on / off"));
         assert_eq!(top("snap 1/8").as_deref(), Some("Snap: 1/8"));
     }

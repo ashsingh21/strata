@@ -203,6 +203,8 @@ impl EarModel {
         let right = result.iter().all(|r| *r);
         self.result.set(Some(result));
         self.phase.set(Phase::Done);
+        // A drill from Learn counts it.
+        cx.emit(crate::learn::LearnEvent::Answered(right));
         if right {
             let streak = self.streak.get() + 1;
             let points = ear::points(streak - 1);
@@ -446,6 +448,8 @@ fn header(cx: &mut Context, p: EarProps) {
             move |i| p.step.map(move |s| *s == Step::ALL[i]),
             |cx, i| cx.emit(EarEvent::SetStep(Step::ALL[i])),
         )
+        // A drill from Learn has its own bar naming the step.
+        .toggle_class("hidden", Memo::new(|_| crate::learn::props().is_some_and(|l| l.run.get().is_some_and(|r| matches!(r.drill, crate::learn::goals::Drill::Ear(_))))))
         .height(Pixels(tokens::SIZE_CONTROL));
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
         Button::new(cx, move |cx| {

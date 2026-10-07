@@ -448,6 +448,10 @@ pub enum TimelineEvent {
     /// A MIDI clip's swing, 0 (straight) to 1 (see `Clip::swing`). Like
     /// a knob, not an undo step.
     SetClipSwing { clip: ClipId, swing: f32 },
+    /// Every MIDI clip on a track: its swing (like a knob), or humanized
+    /// (one undo step).
+    SetTrackSwing { track: TrackId, swing: f32 },
+    HumanizeTrack(TrackId),
     ToggleFollow,
     SetTool(TimelineTool),
     /// A clip drawn directly on empty MIDI-track space (Draw tool), rather
@@ -1053,6 +1057,28 @@ impl Model for TimelineState {
                 let removes = moved.iter().map(|(from, _)| Command::RemoveMidiNote { clip: *clip, start: from.start, pitch: from.pitch });
                 let adds = moved.iter().map(|(_, to)| Command::AddMidiNote { clip: *clip, note: *to });
                 self.do_command(Command::Batch(removes.chain(adds).collect()));
+            }
+            TimelineEvent::SetTrackSwing { track, swing } => {
+                let swing = swing.clamp(0.0, 1.0);
+                self.with_arrangement(|arr, _| {
+                    for c in arr.clips.iter_mut().filter(|c| c.track == *track && matches!(c.content, ClipContent::Midi { .. })) {
+                        c.swing = swing;
+                    }
+                });
+            }
+            TimelineEvent::HumanizeTrack(track) => {
+                let arr = self.arrangement.get();
+                let mut batch = Vec::new();
+                for c in arr.clips.iter().filter(|c| c.track == *track) {
+                    let ClipContent::Midi { notes, .. } = &c.content else { continue };
+                    let len = c.content_len();
+                    let moved: Vec<(MidiNote, MidiNote)> = notes.iter().map(|n| (*n, humanized(n, len))).collect();
+                    batch.extend(moved.iter().map(|(from, _)| Command::RemoveMidiNote { clip: c.id, start: from.start, pitch: from.pitch }));
+                    batch.extend(moved.iter().map(|(_, to)| Command::AddMidiNote { clip: c.id, note: *to }));
+                }
+                if !batch.is_empty() {
+                    self.do_command(Command::Batch(batch));
+                }
             }
             TimelineEvent::SetClipSwing { clip, swing } => {
                 let swing = swing.clamp(0.0, 1.0);

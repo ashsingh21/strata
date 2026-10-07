@@ -416,12 +416,17 @@ impl Model for BrowserModel {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
             BrowserEvent::Rail(section) => {
-                if self.open.get() && self.section.get() == *section {
+                // Learn already showing its goal in the panel, but no page
+                // over the arrangement: the click opens the Learn home.
+                let learn_page_shut = crate::learn::props().is_some_and(|l| l.page.get().is_none() && l.lessons_active.get().is_none());
+                if self.open.get() && self.section.get() == Section::Learn && *section == Section::Learn && learn_page_shut {
+                    cx.emit(crate::learn::LearnEvent::Open(Some(crate::learn::Page::Home)));
+                } else if self.open.get() && self.section.get() == *section {
                     cx.emit(crate::app::AppEvent::ToggleSidebar);
-                    cx.emit(crate::lessons::LessonEvent::ShowMap(false));
+                    cx.emit(crate::learn::LearnEvent::Open(None));
                 } else {
-                    // Learn opens the course map over the arrangement.
-                    cx.emit(crate::lessons::LessonEvent::ShowMap(*section == Section::Learn));
+                    // Learn opens the Learn home over the arrangement.
+                    cx.emit(crate::learn::LearnEvent::Open((*section == Section::Learn).then_some(crate::learn::Page::Home)));
                     self.section.set(*section);
                     if !self.open.get() {
                         cx.emit(crate::app::AppEvent::ToggleSidebar);

@@ -81,8 +81,6 @@ pub struct BrowserProps {
     pub theme: Signal<ThemeId>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
-    /// The Theory view (the scale explorer, docked under the devices).
-    theory_open: Signal<bool>,
     lessons_active: Signal<Option<(usize, usize)>>,
     lessons_done: Signal<Vec<String>>,
     ghost: Signal<Option<(f32, f32, String)>>,
@@ -99,7 +97,6 @@ impl BrowserProps {
         theme: Signal<ThemeId>,
         key: Signal<u8>,
         scale_mask: Signal<u16>,
-        theory_open: Signal<bool>,
         lessons_active: Signal<Option<(usize, usize)>>,
         lessons_done: Signal<Vec<String>>,
         zoom: Signal<f64>,
@@ -135,7 +132,6 @@ impl BrowserProps {
             theme,
             key,
             scale_mask,
-            theory_open,
             lessons_active,
             lessons_done,
             ghost,
@@ -201,15 +197,6 @@ fn rail(cx: &mut Context, p: BrowserProps) {
             let on = Memo::new(move |_| p.open.get() && p.section.get() == section);
             rail_button(cx, p, section.icon(), section.title(), on).on_press(move |cx| cx.emit(BrowserEvent::Rail(section)));
         }
-        // Theory, Voice leading, Riyaz and Exercises: one button, the
-        // tools open under the devices (too wide for the panel) with tabs.
-        let tools = Memo::new(move |_| {
-            // Read the signals so the button follows them.
-            let _ = p.theory_open.get();
-            crate::tools::any_open()
-        });
-        rail_button(cx, p, IconKind::Metronome, "Practice: theory, voice leading, ear training, riyaz and exercises", tools)
-            .on_press(|cx| cx.emit(crate::tools::ToolsEvent::Toggle));
         Element::new(cx).height(Stretch(1.0)).width(Pixels(1.0));
         let open = Memo::new(move |_| p.open.get());
         rail_button(cx, p, IconKind::Panel, "Show or hide the panel", open).on_press(|cx| cx.emit(crate::app::AppEvent::ToggleSidebar));
@@ -317,17 +304,29 @@ fn results_memo(p: BrowserProps) -> Memo<Vec<Item>> {
     })
 }
 
-/// The panel beside the rail: Learn's lesson pane while a lesson runs
-/// (it has its own header, scrolling and buttons), the browser otherwise.
+/// The panel beside the rail: in Learn, the lesson pane while a lesson
+/// runs (it has its own header, scrolling and buttons) and the goal's path
+/// otherwise; the browser in the other sections.
 fn panel(cx: &mut Context, p: BrowserProps) {
-    let lesson_mode = Memo::new(move |_| p.section.get() == Section::Learn && p.lessons_active.get().is_some());
+    #[derive(Clone, Copy, PartialEq)]
+    enum Shows {
+        Lesson,
+        Goal,
+        Browser,
+    }
+    let shows = Memo::new(move |_| match (p.section.get() == Section::Learn, p.lessons_active.get().is_some()) {
+        (true, true) => Shows::Lesson,
+        (true, false) => Shows::Goal,
+        _ => Shows::Browser,
+    });
     VStack::new(cx, move |cx| {
-        Binding::new(cx, lesson_mode, move |cx| {
-            if lesson_mode.get() {
-                crate::lessons::panel::lesson_panel(cx, p.lesson);
-            } else {
-                browser_panel(cx, p);
-            }
+        Binding::new(cx, shows, move |cx| match shows.get() {
+            Shows::Lesson => crate::lessons::panel::lesson_panel(cx, p.lesson),
+            Shows::Goal => match crate::learn::props() {
+                Some(learn) => crate::learn::side::goal_path(cx, learn),
+                None => browser_panel(cx, p),
+            },
+            Shows::Browser => browser_panel(cx, p),
         });
     })
     .class("brw-panel")

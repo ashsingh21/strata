@@ -9,7 +9,6 @@
 
 pub mod bar;
 pub mod panel;
-pub mod map;
 pub mod match_view;
 pub mod course;
 pub mod preview;
@@ -207,9 +206,6 @@ pub enum LessonEvent {
     /// Done reading why the step just finished sounds as it does: on to
     /// the next one.
     NextStep,
-    /// Show or hide the course map (over the arrangement, while no lesson
-    /// runs).
-    ShowMap(bool),
     /// Open one of `course::EXPLAINERS` under the bar (again: close it).
     Explain(Option<usize>),
     /// A preview finished rendering; `generation` drops a stale one.
@@ -239,8 +235,6 @@ pub struct LessonModel {
     export_status: Signal<String>,
     analyzer_open: Signal<bool>,
     snap: Signal<shared::arrangement::SnapGrid>,
-    /// The course map is asked for (it shows while no lesson runs).
-    pub map_open: Signal<bool>,
     /// The notes the current step adds (see `Ghost`).
     pub ghosts: Signal<Vec<Ghost>>,
     /// Of those, how many are in place now: (placed, all). `None` for a
@@ -347,7 +341,6 @@ impl LessonModel {
             export_status,
             analyzer_open,
             snap,
-            map_open: Signal::new(false),
             ghosts,
             ghost_progress: Signal::new(None),
             example: None,
@@ -645,7 +638,6 @@ impl Model for LessonModel {
                 }
                 // A tidy workspace to start from: stopped, nothing open,
                 // the sidebar (which steps point at) showing.
-                self.map_open.set(false);
                 cx.emit(AppEvent::Stop);
                 cx.emit(PianoRollEvent::Close);
                 cx.emit(TimelineEvent::SetTool(TimelineTool::Select));
@@ -751,11 +743,6 @@ impl Model for LessonModel {
                 }
             }
             LessonEvent::TryYourself => self.try_yourself(cx),
-            LessonEvent::ShowMap(open) => {
-                if self.map_open.get() != *open {
-                    self.map_open.set(*open);
-                }
-            }
             LessonEvent::Explain(which) => {
                 let open = self.explaining.get();
                 self.explaining.set(if *which == open { None } else { *which });

@@ -171,7 +171,7 @@ impl PracticeModel {
         4.0 * 60_000.0 / self.bpm.get() as f32
     }
 
-    fn finish(&mut self) {
+    fn finish(&mut self, cx: &mut EventContext) {
         let Some(ex) = self.exercise.get() else { return };
         let bpm = self.bpm.get() as f64;
         let your_bar = ex.your_bar() as f32 * self.bar_ms();
@@ -188,6 +188,8 @@ impl PracticeModel {
         let outcome = Outcome { hits, extra, notes, played };
         let perfect = outcome.perfect(ex.kind);
         self.streak.set(if perfect { self.streak.get() + 1 } else { 0 });
+        // A drill from Learn counts it.
+        cx.emit(crate::learn::LearnEvent::Answered(perfect));
         self.outcome.set(Some(outcome));
         self.started = None;
         self.position.set(None);
@@ -297,7 +299,7 @@ impl Model for PracticeModel {
                 let ms = t0.elapsed().as_secs_f32() * 1000.0;
                 let bars = ms / self.bar_ms();
                 if ms > total * self.bar_ms() + GRACE_MS {
-                    self.finish();
+                    self.finish(cx);
                 } else if self.position.get().is_none_or(|p| (p - bars).abs() > 0.02) {
                     self.position.set(Some(bars.min(total)));
                 }

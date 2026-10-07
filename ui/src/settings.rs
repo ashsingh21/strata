@@ -227,3 +227,34 @@ pub fn load_lower_panel_height() -> Option<f32> {
 pub fn save_lower_panel_height(height: f32) {
     save_key("lower_panel_height", serde_json::json!(height));
 }
+
+/// The Learn goal being worked through.
+pub fn load_learn_goal() -> Option<usize> {
+    load_all().get("learn_goal").and_then(|v| v.as_u64()).map(|v| v as usize)
+}
+
+pub fn save_learn_goal(goal: usize) {
+    save_key("learn_goal", serde_json::json!(goal));
+}
+
+/// Today's practice: the day (days since 1970) and the slots done on it.
+pub fn load_practice_today() -> Option<(u64, Vec<usize>)> {
+    let all = load_all();
+    let v = all.get("practice_today")?;
+    let day = v.get("day")?.as_u64()?;
+    let slots = v.get("done")?.as_array()?.iter().filter_map(|s| s.as_u64().map(|s| s as usize)).collect();
+    Some((day, slots))
+}
+
+pub fn save_practice_today(day: u64, slots: &[usize]) {
+    save_key("practice_today", serde_json::json!({ "day": day, "done": slots }));
+}
+
+/// The days today's practice was finished, for the streak.
+pub fn load_practice_days() -> Vec<u64> {
+    load_all().get("practice_days").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_u64()).collect()).unwrap_or_default()
+}
+
+pub fn save_practice_days(days: &[u64]) {
+    save_key("practice_days", serde_json::json!(days));
+}

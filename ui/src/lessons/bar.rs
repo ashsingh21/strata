@@ -29,7 +29,6 @@ pub struct LessonBarProps {
     pub has_example: Signal<bool>,
     pub ghost_progress: Signal<Option<(usize, usize)>>,
     pub done: Signal<Vec<String>>,
-    pub map_open: Signal<bool>,
 }
 
 impl LessonBarProps {
@@ -52,7 +51,6 @@ impl LessonBarProps {
             has_example: model.has_example,
             ghost_progress: model.ghost_progress,
             done: model.done,
-            map_open: model.map_open,
         }
     }
 }

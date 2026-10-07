@@ -250,6 +250,41 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 .map-card.is-next {{
   border-width: 2px;
 }}
+/* Learn: the home's hero, goals, rows, progress and drill dots. */
+.learn-hero {{
+  border-radius: {radius_md}px;
+}}
+.learn-big {{
+  font-size: 18px;
+  font-weight: 600;
+}}
+.learn-ring {{
+  border-width: 1px;
+  border-radius: 6px;
+}}
+.learn-swatch {{
+  border-radius: 2px;
+}}
+.learn-track {{
+  border-radius: 2px;
+}}
+.learn-row {{
+  border-radius: {radius_sm}px;
+}}
+.learn-num {{
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  border-width: 1px;
+  font-size: 11px;
+  font-weight: 600;
+}}
+.learn-step {{
+  border-radius: {radius_sm}px;
+}}
+.learn-dot {{
+  border-radius: 2px;
+}}
 /* The Sound match score: the one big number on screen. */
 .match-score {{
   font-size: 28px;
@@ -911,6 +946,22 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".ear-choice.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
     rule(".ear-choice.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
     rule(".course-map", vec![("background-color", c("bg-100"))]);
+    rule(".learn-muted", vec![("color", c("ink-muted"))]);
+    rule(".learn-hero", vec![("background-color", c("bg-200"))]);
+    rule(".learn-big", vec![("color", c("ink"))]);
+    rule(".learn-ring", vec![("border-color", c("line-control"))]);
+    rule(".learn-track", vec![("background-color", c("bg-300"))]);
+    rule(".learn-fill", vec![("background-color", c("ink"))]);
+    rule(".learn-row:hover", vec![("background-color", c("bg-200"))]);
+    rule(".learn-row.is-current", vec![("background-color", c("bg-200"))]);
+    rule(".learn-num", vec![("border-color", c("line-control")), ("color", c("ink-muted"))]);
+    rule(".learn-num.is-current", vec![("background-color", c("ink")), ("border-color", c("ink")), ("color", c("bg-100"))]);
+    rule(".learn-step:hover", vec![("background-color", c("bg-200"))]);
+    rule(".learn-step.is-current", vec![("background-color", c("bg-300"))]);
+    rule(".learn-dot.is-right", vec![("background-color", c("signal"))]);
+    rule(".learn-dot.is-wrong", vec![("background-color", c("record"))]);
+    rule(".learn-dot.is-now", vec![("background-color", c("ink"))]);
+    rule(".learn-dot.is-later", vec![("background-color", c("bg-300"))]);
     rule(".map-card", vec![("background-color", c("bg-100")), ("border-color", c("line"))]);
     rule(".map-card:hover", vec![("background-color", c("bg-200")), ("border-color", c("line-control"))]);
     rule(".map-card.is-next", vec![("border-color", c("ink"))]);

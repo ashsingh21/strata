@@ -1,11 +1,10 @@
-//! The practice tools - Theory, Voice leading, Ear, Riyaz and Exercises - behind
-//! one rail button, shown one at a time under the devices with tabs to
-//! switch. Each tool still opens and closes itself (Riyaz starts and stops
-//! listening that way), so this only sends their own toggles.
+//! The practice tools - Theory, Voice leading, Ear, Riyaz and Exercises -
+//! docked under the devices, one at a time. They open from Learn (a goal's
+//! drill, today's practice, the Learn home's tool links) and from Search;
+//! each still opens and closes itself (Riyaz starts and stops listening
+//! that way), so this only sends their own toggles.
 
 use vizia::prelude::*;
-
-use crate::tokens;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
@@ -21,11 +20,11 @@ impl Tool {
 
     pub fn name(self) -> &'static str {
         match self {
-            Tool::Theory => "Theory",
+            Tool::Theory => "Theory ring",
             Tool::Voicing => "Voice leading",
-            Tool::Ear => "Ear",
+            Tool::Ear => "Ear trainer",
             Tool::Riyaz => "Riyaz",
-            Tool::Exercises => "Exercises",
+            Tool::Exercises => "Rhythm and melody exercises",
         }
     }
 
@@ -43,8 +42,8 @@ impl Tool {
 pub enum ToolsEvent {
     /// Show this tool (closing whichever else is open).
     Show(Tool),
-    /// The rail button: close what's open, or open the one used last.
-    Toggle,
+    /// Close whatever is open.
+    CloseAll,
 }
 
 /// Each tool's open signal, in `Tool::ALL` order.
@@ -57,10 +56,6 @@ impl ToolsProps {
     fn is_open(&self, tool: Tool) -> bool {
         self.open[index(tool)].get()
     }
-
-    pub fn any_open(&self) -> bool {
-        self.open.iter().any(|o| o.get())
-    }
 }
 
 fn index(tool: Tool) -> usize {
@@ -71,77 +66,47 @@ thread_local! {
     static PROPS: std::cell::Cell<Option<ToolsProps>> = const { std::cell::Cell::new(None) };
 }
 
-/// Whether any tool is open, for the rail button.
+/// Whether any tool is open.
 pub fn any_open() -> bool {
-    PROPS.get().is_some_and(|p| p.any_open())
+    Tool::ALL.iter().any(|t| is_open(*t))
+}
+
+/// Whether `tool` is open.
+pub fn is_open(tool: Tool) -> bool {
+    PROPS.get().is_some_and(|p| p.is_open(tool))
 }
 
 pub struct ToolsModel {
     props: ToolsProps,
-    last: Tool,
 }
 
 impl ToolsModel {
     pub fn new(props: ToolsProps) -> Self {
         PROPS.set(Some(props));
-        Self { props, last: Tool::Ear }
-    }
-
-    fn show(&mut self, cx: &mut EventContext, tool: Tool) {
-        for other in Tool::ALL {
-            if other != tool && self.props.is_open(other) {
-                other.toggle(cx);
-            }
-        }
-        if !self.props.is_open(tool) {
-            tool.toggle(cx);
-        }
-        self.last = tool;
+        Self { props }
     }
 }
 
 impl Model for ToolsModel {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
-            ToolsEvent::Show(tool) => self.show(cx, *tool),
-            ToolsEvent::Toggle => {
-                if self.props.any_open() {
-                    for tool in Tool::ALL {
-                        if self.props.is_open(tool) {
-                            self.last = tool;
-                            tool.toggle(cx);
-                        }
+            ToolsEvent::Show(tool) => {
+                for other in Tool::ALL {
+                    if other != *tool && self.props.is_open(other) {
+                        other.toggle(cx);
                     }
-                } else {
-                    self.show(cx, self.last);
+                }
+                if !self.props.is_open(*tool) {
+                    tool.toggle(cx);
+                }
+            }
+            ToolsEvent::CloseAll => {
+                for tool in Tool::ALL {
+                    if self.props.is_open(tool) {
+                        tool.toggle(cx);
+                    }
                 }
             }
         });
     }
-}
-
-/// The tabs over the open tool (nothing while none is open).
-pub fn tabs(cx: &mut Context, p: ToolsProps) {
-    let any = Memo::new(move |_| p.any_open());
-    Binding::new(cx, any, move |cx| {
-        if !any.get() {
-            return;
-        }
-        HStack::new(cx, move |cx| {
-            Label::new(cx, "Practice").class("label");
-            crate::synth::segmented::segmented(
-                cx,
-                Tool::ALL.len(),
-                |cx, i| Label::new(cx, Tool::ALL[i].name()),
-                move |i| p.open[i].map(|o| *o),
-                |cx, i| cx.emit(ToolsEvent::Show(Tool::ALL[i])),
-            )
-            .height(Pixels(tokens::SIZE_CONTROL));
-        })
-        .gap(Pixels(tokens::SPACE_2))
-        .alignment(Alignment::Left)
-        .padding_left(Pixels(tokens::SPACE_1))
-        .width(Stretch(1.0))
-        .height(Pixels(tokens::SIZE_CONTROL));
-    });
 }

@@ -10,7 +10,6 @@ use super::bar::{preview_button, segments, LessonBarProps};
 use super::course::{Kind, Lesson, Step, EXPLAINERS, LESSONS};
 use super::preview::Which;
 use super::LessonEvent;
-use crate::project::ProjectEvent;
 use crate::tokens;
 
 pub fn lesson_panel(cx: &mut Context, p: LessonBarProps) {
@@ -236,12 +235,12 @@ fn finish_section(cx: &mut Context, p: LessonBarProps, lesson: usize) {
         .gap(Pixels(tokens::SPACE_2))
         .width(Stretch(1.0))
         .height(Auto);
-        if let Some(next) = next_after(p, lesson) {
-            let n = &LESSONS[next];
+        if let Some((g, i)) = next_after(lesson) {
+            let n = crate::learn::goals::GOALS[g].items[i];
             VStack::new(cx, move |cx| {
-                Label::new(cx, "Up next").class("label");
-                Label::new(cx, n.title).class("title");
-                Label::new(cx, format!("{} \u{b7} {} steps", n.group, n.steps.len())).class("value");
+                Label::new(cx, format!("Up next in {}", crate::learn::goals::GOALS[g].title)).class("label");
+                Label::new(cx, n.title()).class("title");
+                Label::new(cx, format!("{} \u{b7} {}", n.kind(), n.what())).class("value");
             })
             .class("lesson-card")
             .gap(Pixels(2.0))
@@ -255,9 +254,9 @@ fn finish_section(cx: &mut Context, p: LessonBarProps, lesson: usize) {
     .height(Auto);
 }
 
-/// The lesson to take after `lesson`: the first unfinished one on the path.
-fn next_after(p: LessonBarProps, lesson: usize) -> Option<usize> {
-    super::course::next_lesson(&p.done.get()).filter(|&n| n != lesson)
+/// What to take after `lesson`: the next step of its goal.
+fn next_after(lesson: usize) -> Option<(usize, usize)> {
+    crate::learn::next_after_lesson(LESSONS[lesson].id)
 }
 
 /// The step just done, held until Next step: what you did, why it sounds
@@ -351,11 +350,11 @@ fn footer(cx: &mut Context, p: LessonBarProps) {
                     }
                     Kind::Quiz { .. } => skip(cx),
                     Kind::Info if last => {
-                        if let Some(next) = next_after(p, lesson) {
+                        if let Some((goal, item)) = next_after(lesson) {
                             Button::new(cx, |cx| Label::new(cx, "Start next"))
                                 .class("btn")
                                 .class("is-on")
-                                .on_press(move |cx| cx.emit(ProjectEvent::StartLesson(next)));
+                                .on_press(move |cx| cx.emit(crate::learn::LearnEvent::Start { goal, item }));
                         }
                         Button::new(cx, |cx| Label::new(cx, "Done")).class("btn").on_press(|cx| cx.emit(LessonEvent::Continue));
                     }
@@ -368,12 +367,14 @@ fn footer(cx: &mut Context, p: LessonBarProps) {
                 }
             }
             Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
-            Button::new(cx, |cx| Label::new(cx, "All lessons"))
+            Button::new(cx, |cx| Label::new(cx, "Learn"))
                 .class("btn")
                 .class("quiet")
-                .on_press(|cx| {
+                .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Leave the lesson and see its goal"); }).arrow(false))
+                .on_press(move |cx| {
                     cx.emit(LessonEvent::Exit);
-                    cx.emit(LessonEvent::ShowMap(true));
+                    let goal = crate::learn::goals::goals_with(LESSONS[lesson].id).next();
+                    cx.emit(crate::learn::LearnEvent::Open(Some(goal.map_or(crate::learn::Page::Home, crate::learn::Page::Goal))));
                 });
         })
         .gap(Pixels(tokens::SPACE_2))

@@ -70,7 +70,7 @@ pub struct DeviceAreaProps {
     pub practice: crate::practice::PracticeProps,
     pub ear: crate::ear::EarProps,
     /// Which of those is open (the tabs over them).
-    pub tools: crate::tools::ToolsProps,
+    pub learn: crate::learn::LearnProps,
 }
 
 pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
@@ -190,12 +190,12 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
             }),
             // Just a note - left out while a practice tool is open, so the
             // tool gets the room.
-            Panel::Audio => quiet_note(cx, p, "An audio track plays its clips; add effects with the buttons above"),
-            Panel::Nothing => quiet_note(cx, p, "Select a track to see its instrument and effects"),
+            Panel::Audio => quiet_note(cx, "An audio track plays its clips; add effects with the buttons above"),
+            Panel::Nothing => quiet_note(cx, "Select a track to see its instrument and effects"),
         });
     });
 
-    crate::tools::tabs(cx, p.tools);
+    crate::learn::bar::drill_bar(cx, p.learn);
     interval_input::interval_input_view(
         cx,
         p.theme,
@@ -440,8 +440,8 @@ fn device_chain(cx: &mut Context, p: DeviceAreaProps, panel: Memo<Panel>) {
 }
 
 /// A quiet, short panel standing in for a device the track doesn't have.
-fn quiet_note(cx: &mut Context, p: DeviceAreaProps, message: &'static str) {
-    let tools = Memo::new(move |_| p.tools.any_open());
+fn quiet_note(cx: &mut Context, message: &'static str) {
+    let tools = Memo::new(move |_| crate::tools::any_open());
     Binding::new(cx, tools, move |cx| {
         if !tools.get() {
             empty_state(cx, message, |_| {});

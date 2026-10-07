@@ -9,6 +9,7 @@ mod midi_in;
 mod practice;
 mod ear;
 mod mic;
+mod learn;
 mod tools;
 mod bpm_field;
 mod canvas_text;
@@ -338,6 +339,9 @@ fn main() -> Result<(), ApplicationError> {
         let lessons_active = lesson_model.active;
         let lessons_done = lesson_model.done;
         lesson_model.build(cx);
+        let learn_model = learn::LearnModel::new(lessons_done);
+        let learn_props = learn::LearnProps::of(&learn_model, lessons_active, theme);
+        learn_model.build(cx);
 
         // The sidebar: rail, browser panel, preview dock.
         let browser_model = browser::BrowserModel::new(
@@ -350,7 +354,7 @@ fn main() -> Result<(), ApplicationError> {
         );
         let browser_all = browser_model.all;
         let browser_props =
-            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, interval_open, lessons_active, lessons_done, zoom, lesson_bar_props);
+            browser::view::BrowserProps::of(&browser_model, theme, interval_key, interval_scale_mask, lessons_active, lessons_done, zoom, lesson_bar_props);
         // Whether the lesson panel (the sidebar on Learn) is on screen.
         let (browser_open, browser_section) = (browser_model.open, browser_model.section);
         let lesson_panel_shown = Memo::new(move |_| browser_open.get() && browser_section.get() == browser::Section::Learn);
@@ -415,6 +419,7 @@ fn main() -> Result<(), ApplicationError> {
                 midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing, loop_params.seek_count());
                 cx.emit(SynthEvent::Tick(dt));
                 cx.emit(lessons::LessonEvent::Tick);
+                cx.emit(learn::LearnEvent::Tick);
                 cx.emit(riyaz::RiyazEvent::Tick);
                 cx.emit(midi_in::MidiEvent::Tick);
                 cx.emit(practice::PracticeEvent::Tick);
@@ -686,7 +691,7 @@ fn main() -> Result<(), ApplicationError> {
                                     riyaz: riyaz_props,
                                     practice: practice_props,
                                     ear: ear_props,
-                                    tools: tools_props,
+                                    learn: learn_props,
                                 },
                             );
                         });
@@ -709,7 +714,7 @@ fn main() -> Result<(), ApplicationError> {
                     .height(lower_panel_height.map(|h| Pixels(*h)));
 
                     // The course map, over the arrangement while it's open.
-                    lessons::map::course_map(cx, lesson_bar_props);
+                    learn::home::learn_page(cx, learn_props);
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));

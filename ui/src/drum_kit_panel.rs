@@ -43,9 +43,27 @@ pub fn drum_kit_panel(cx: &mut Context, color: ClipColor, track: TrackId, arrang
             )
             .class("value")
             .class("empty-note");
+            Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
+            // Swing and Humanize for the whole track (the clip editor has
+            // them per clip): the first clip's swing shows.
+            let swing = Memo::new(move |_| {
+                let arr = arrangement.get();
+                arr.clips.iter().find(|c| c.track == track && matches!(c.content, shared::arrangement::ClipContent::Midi { .. })).map(|c| c.swing).unwrap_or(0.0)
+            });
+            Label::new(cx, "Swing").class("label");
+            crate::knob::Knob::plain(cx, swing, 0.0, theme, move |cx, value| cx.emit(TimelineEvent::SetTrackSwing { track, swing: value }))
+                .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Pushes the off-beat 16ths late in every clip on this track, for a shuffle"); }).arrow(false))
+                .size(Pixels(20.0));
+            Label::new(cx, swing.map(|s| format!("{:.0}%", s * 100.0))).class("value").width(Pixels(30.0));
+            Button::new(cx, |cx| Label::new(cx, "Humanize"))
+                .class("btn")
+                .class("sm")
+                .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Nudges every hit on this track a little, like a drummer. Undo takes it back."); }).arrow(false))
+                .on_press(move |cx| cx.emit(TimelineEvent::HumanizeTrack(track)));
         })
         .gap(Pixels(tokens::SPACE_2))
         .alignment(Alignment::Left)
+        .width(Stretch(1.0))
         .height(Auto);
         // The pads, rebuilt when the kit changes.
         Binding::new(cx, kit, move |cx| pads(cx, color, track, kit.get(), arrangement, theme));
