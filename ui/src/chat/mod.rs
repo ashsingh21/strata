@@ -20,8 +20,9 @@ pub const DEFAULT_MODEL: &str = "claude-sonnet-5";
 /// Models offered in Settings (any other name can be typed).
 pub const MODELS: &[(&str, &str)] = &[
     ("claude-sonnet-5", "Claude Sonnet 5 (Anthropic)"),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5 (Anthropic)"),
     ("claude-opus-5-5", "Claude Opus 5.5 (Anthropic)"),
-    ("claude-haiku-4-5", "Claude Haiku 4.5 (Anthropic, fast)"),
+    ("claude-haiku-5-5", "Claude Haiku 5.5 (Anthropic, fast)"),
     ("gpt-5.4-mini", "GPT-5.4 mini (OpenAI)"),
     ("gemini-3-flash-preview", "Gemini 3 Flash (Google)"),
     ("llama3.2", "Llama 3.2 (Ollama, on this computer)"),
@@ -362,4 +363,5 @@ impl ChatProps {
         p
     }
 }
+
 
