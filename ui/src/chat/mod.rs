@@ -64,6 +64,8 @@ pub enum ChatEvent {
     SetModel(String),
     /// A key typed in Settings ("" forgets it).
     SetKey(String),
+    /// The Anthropic workspace ID, for a key that isn't in a workspace.
+    SetWorkspace(String),
 }
 
 pub struct ChatModel {
@@ -75,6 +77,8 @@ pub struct ChatModel {
     /// A key was pasted in (else the provider's environment variable).
     pub has_key: Signal<bool>,
     pub settings_open: Signal<bool>,
+    /// The Anthropic workspace ID ("" for none).
+    pub workspace: Signal<String>,
     generation: u64,
     stop: Arc<AtomicBool>,
     arrangement: Signal<Arrangement>,
@@ -125,6 +129,7 @@ impl ChatModel {
             model: Signal::new(crate::settings::load_ai_model().unwrap_or_else(|| DEFAULT_MODEL.to_string())),
             has_key: Signal::new(load_key().is_some()),
             settings_open: Signal::new(false),
+            workspace: Signal::new(crate::settings::load_ai_workspace().unwrap_or_default()),
             generation: 0,
             stop: Arc::new(AtomicBool::new(false)),
             arrangement,
@@ -172,8 +177,9 @@ impl ChatModel {
             m[..m.len() - 1].to_vec()
         };
         let key = load_key();
+        let workspace = Some(self.workspace.get()).filter(|w| !w.is_empty()).or_else(|| std::env::var("ANTHROPIC_WORKSPACE_ID").ok());
         cx.spawn(move |proxy| {
-            let result = ask(&model, key, system, history, |chunk| {
+            let result = ask(&model, key, workspace, system, history, |chunk| {
                 let _ = proxy.emit(ChatEvent::Chunk { generation, text: chunk.to_string() });
                 !stop.load(Ordering::Relaxed)
             });
@@ -188,7 +194,14 @@ impl ChatModel {
 /// Asks `model`, calling `on_chunk` with the answer as it streams in
 /// (return false from it to stop). Runs on its own thread: a one-off
 /// runtime for the request.
-fn ask(model: &str, key: Option<String>, system: String, history: Vec<Message>, mut on_chunk: impl FnMut(&str) -> bool) -> Result<(), String> {
+fn ask(
+    model: &str,
+    key: Option<String>,
+    workspace: Option<String>,
+    system: String,
+    history: Vec<Message>,
+    mut on_chunk: impl FnMut(&str) -> bool,
+) -> Result<(), String> {
     use futures::StreamExt;
     use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatStreamEvent};
     use genai::resolver::{AuthData, AuthResolver};
@@ -207,7 +220,11 @@ fn ask(model: &str, key: Option<String>, system: String, history: Vec<Message>, 
         for m in history {
             request = request.append_message(if m.mine { ChatMessage::user(m.text) } else { ChatMessage::assistant(m.text) });
         }
-        let options = ChatOptions::default().with_max_tokens(1500);
+        let mut options = ChatOptions::default().with_max_tokens(1500);
+        // An Anthropic key that isn't in a workspace has to name one.
+        if let Some(workspace) = workspace.filter(|_| model.starts_with("claude")) {
+            options = options.with_extra_headers(("anthropic-workspace-id", workspace));
+        }
         let response = client.exec_chat_stream(model, request, Some(&options)).await.map_err(|e| friendly(&e.to_string()))?;
         let mut stream = response.stream;
         while let Some(event) = stream.next().await {
@@ -227,7 +244,12 @@ fn ask(model: &str, key: Option<String>, system: String, history: Vec<Message>, 
 
 /// An error, in words: a missing key is the usual one.
 fn friendly(raw: &str) -> String {
-    if raw.contains("ApiKeyEnvNotFound") || raw.contains("api_key") || raw.contains("API_KEY") || raw.contains("401") {
+    if raw.contains("anthropic-workspace-id") {
+        "This Anthropic key isn't in a workspace. Either make a key inside a workspace in the Anthropic Console \
+         (API keys, in the Default workspace) and paste that, or put the workspace's ID (wrkspc_...) in the chat's \
+         Settings under Workspace ID."
+            .to_string()
+    } else if raw.contains("ApiKeyEnvNotFound") || raw.contains("api_key") || raw.contains("API_KEY") || raw.contains("401") {
         format!(
             "No working API key for this model. Set ANTHROPIC_API_KEY (or the provider's own variable) before starting Shor, \
              or paste a key in the chat's Settings. ({raw})"
@@ -290,6 +312,11 @@ impl Model for ChatModel {
                     self.model.set(model);
                 }
             }
+            ChatEvent::SetWorkspace(id) => {
+                let id = id.trim().to_string();
+                crate::settings::save_ai_workspace(&id);
+                self.workspace.set(id);
+            }
             ChatEvent::SetKey(key) => {
                 save_key(key.trim());
                 self.has_key.set(load_key().is_some());
@@ -307,6 +334,7 @@ pub struct ChatProps {
     pub model: Signal<String>,
     pub has_key: Signal<bool>,
     pub settings_open: Signal<bool>,
+    pub workspace: Signal<String>,
 }
 
 thread_local! {
@@ -328,6 +356,7 @@ impl ChatProps {
             model: m.model,
             has_key: m.has_key,
             settings_open: m.settings_open,
+            workspace: m.workspace,
         };
         PROPS.set(Some(p));
         p

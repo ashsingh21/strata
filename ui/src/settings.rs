@@ -267,3 +267,12 @@ pub fn load_ai_model() -> Option<String> {
 pub fn save_ai_model(model: &str) {
     save_key("ai_model", serde_json::json!(model));
 }
+
+/// The Anthropic workspace to bill, for an API key not scoped to one.
+pub fn load_ai_workspace() -> Option<String> {
+    load_all().get("ai_workspace").and_then(|v| v.as_str()).map(str::to_string).filter(|s| !s.is_empty())
+}
+
+pub fn save_ai_workspace(id: &str) {
+    save_key("ai_workspace", serde_json::json!(id));
+}
