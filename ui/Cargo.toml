@@ -18,6 +18,12 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 # Timestamps in the log and crash reports (see logging.rs).
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 midir = "0.11.0"
+# The chat: one API over Anthropic, OpenAI, Gemini, Ollama, Groq,
+# DeepSeek and xAI (see chat/). Async, so a small tokio runtime runs each
+# request on its own thread.
+genai = "=0.6.5"
+tokio = { version = "1", features = ["rt"] }
+futures = "0.3"
 
 # Copying stderr into the log file (see logging.rs).
 [target.'cfg(unix)'.dependencies]

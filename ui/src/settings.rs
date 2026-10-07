@@ -258,3 +258,12 @@ pub fn load_practice_days() -> Vec<u64> {
 pub fn save_practice_days(days: &[u64]) {
     save_key("practice_days", serde_json::json!(days));
 }
+
+/// The chat's model name (see `chat::MODELS`).
+pub fn load_ai_model() -> Option<String> {
+    load_all().get("ai_model").and_then(|v| v.as_str()).map(str::to_string)
+}
+
+pub fn save_ai_model(model: &str) {
+    save_key("ai_model", serde_json::json!(model));
+}

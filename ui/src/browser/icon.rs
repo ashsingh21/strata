@@ -14,6 +14,7 @@ pub enum IconKind {
     Browse,
     Files,
     Learn,
+    Chat,
     Panel,
     Settings,
     /// Strata's mark: layers, like rock strata.
@@ -42,7 +43,7 @@ impl IconKind {
     fn view_box(self) -> f32 {
         use IconKind::*;
         match self {
-            Browse | Files | Learn | Panel | Settings | Logo => 16.0,
+            Browse | Files | Learn | Chat | Panel | Settings | Logo => 16.0,
             _ => 12.0,
         }
     }
@@ -155,6 +156,10 @@ pub fn draw_icon(canvas: &Canvas, kind: IconKind, x: f32, y: f32, size: f32, col
             poly(canvas, &[(8.0, 5.0), (6.5, 3.5), (2.0, 3.5), (2.0, 12.0), (7.0, 12.0), (8.0, 13.0)], false, &paint);
             poly(canvas, &[(8.0, 5.0), (9.5, 3.5), (14.0, 3.5), (14.0, 12.0), (9.0, 12.0), (8.0, 13.0)], false, &paint);
             lines(canvas, &[((8.0, 5.0), (8.0, 13.0))], &paint);
+        }
+        // A speech bubble.
+        Chat => {
+            poly(canvas, &[(2.0, 3.0), (14.0, 3.0), (14.0, 11.0), (7.0, 11.0), (4.0, 14.0), (4.0, 11.0), (2.0, 11.0)], true, &paint);
         }
         Panel => {
             rect(canvas, 2.0, 2.5, 12.0, 11.0, 1.5, &paint);

@@ -250,6 +250,16 @@ fn render_base_css(scalars: &ScalarMap, fonts: &Fonts, colors: &ColorMap) -> Str
 .map-card.is-next {{
   border-width: 2px;
 }}
+/* Chat: your messages in a soft box, the answers plain. */
+.chat-mine {{
+  border-radius: {radius_md}px;
+}}
+.chat-settings {{
+  border-radius: {radius_md}px;
+}}
+.chat-quick {{
+  padding: 6px 8px;
+}}
 /* Learn: the home's hero, goals, rows, progress and drill dots. */
 .learn-hero {{
   border-radius: {radius_md}px;
@@ -947,6 +957,10 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".ear-choice.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
     rule(".course-map", vec![("background-color", c("bg-100"))]);
     rule(".learn-muted", vec![("color", c("ink-muted"))]);
+    rule(".chat-mine", vec![("background-color", c("bg-200")), ("color", c("ink"))]);
+    rule(".chat-theirs", vec![("color", c("ink"))]);
+    rule(".chat-error", vec![("color", c("record"))]);
+    rule(".chat-settings", vec![("background-color", c("bg-000"))]);
     rule(".learn-hero", vec![("background-color", c("bg-200"))]);
     rule(".learn-big", vec![("color", c("ink"))]);
     rule(".learn-ring", vec![("border-color", c("line-control"))]);

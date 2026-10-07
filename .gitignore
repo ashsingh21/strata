@@ -27,3 +27,4 @@ assets/rec_*.wav
 
 # Presets saved from Carve, when run from the repo.
 /Presets/
+/ai_key

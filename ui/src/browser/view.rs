@@ -312,11 +312,13 @@ fn panel(cx: &mut Context, p: BrowserProps) {
     enum Shows {
         Lesson,
         Goal,
+        Chat,
         Browser,
     }
-    let shows = Memo::new(move |_| match (p.section.get() == Section::Learn, p.lessons_active.get().is_some()) {
-        (true, true) => Shows::Lesson,
-        (true, false) => Shows::Goal,
+    let shows = Memo::new(move |_| match (p.section.get(), p.lessons_active.get().is_some()) {
+        (Section::Learn, true) => Shows::Lesson,
+        (Section::Learn, false) => Shows::Goal,
+        (Section::Chat, _) => Shows::Chat,
         _ => Shows::Browser,
     });
     VStack::new(cx, move |cx| {
@@ -324,6 +326,10 @@ fn panel(cx: &mut Context, p: BrowserProps) {
             Shows::Lesson => crate::lessons::panel::lesson_panel(cx, p.lesson),
             Shows::Goal => match crate::learn::props() {
                 Some(learn) => crate::learn::side::goal_path(cx, learn),
+                None => browser_panel(cx, p),
+            },
+            Shows::Chat => match crate::chat::props() {
+                Some(chat) => crate::chat::view::chat_panel(cx, chat),
                 None => browser_panel(cx, p),
             },
             Shows::Browser => browser_panel(cx, p),

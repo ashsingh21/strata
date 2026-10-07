@@ -10,6 +10,7 @@ mod practice;
 mod ear;
 mod mic;
 mod learn;
+mod chat;
 mod tools;
 mod bpm_field;
 mod canvas_text;
@@ -342,6 +343,9 @@ fn main() -> Result<(), ApplicationError> {
         let learn_model = learn::LearnModel::new(lessons_done);
         let learn_props = learn::LearnProps::of(&learn_model, lessons_active, theme);
         learn_model.build(cx);
+        let chat_model = chat::ChatModel::new(tl_arrangement, interval_key, interval_scale_mask, piano_roll_open_clip, selected_track);
+        let _chat_props = chat::ChatProps::of(&chat_model);
+        chat_model.build(cx);
 
         // The sidebar: rail, browser panel, preview dock.
         let browser_model = browser::BrowserModel::new(

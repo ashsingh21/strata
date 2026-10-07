@@ -40,18 +40,21 @@ pub enum Section {
     Browse,
     Files,
     Learn,
+    /// Ask the AI about what you're making.
+    Chat,
 }
 
 impl Section {
     /// The rail's top group, in order. Samples and Presets are Browse's
     /// chips, History its Recent order - not buttons of their own.
-    pub const RAIL: [Section; 3] = [Section::Browse, Section::Files, Section::Learn];
+    pub const RAIL: [Section; 4] = [Section::Browse, Section::Files, Section::Learn, Section::Chat];
 
     pub fn title(self) -> &'static str {
         match self {
             Section::Browse => "Browse",
             Section::Files => "Project files",
             Section::Learn => "Learn",
+            Section::Chat => "Chat",
         }
     }
 
@@ -60,6 +63,7 @@ impl Section {
             Section::Browse => icon::IconKind::Browse,
             Section::Files => icon::IconKind::Files,
             Section::Learn => icon::IconKind::Learn,
+            Section::Chat => icon::IconKind::Chat,
         }
     }
 
@@ -68,6 +72,7 @@ impl Section {
             Section::Browse => "browse",
             Section::Files => "files",
             Section::Learn => "learn",
+            Section::Chat => "chat",
         }
     }
 
@@ -138,6 +143,7 @@ pub fn results(all: &[Item], f: &Filter) -> Vec<Item> {
         Section::Browse => all.iter().filter(|i| matches!(i.kind, Kind::Instrument(_) | Kind::Effect(_) | Kind::Preset(_) | Kind::Sample(_) | Kind::Pattern(_))).cloned().collect(),
         Section::Files => all.iter().filter(|i| matches!(i.kind, Kind::ProjectAudio(_) | Kind::Track(_) | Kind::Song(_))).cloned().collect(),
         Section::Learn => all.iter().filter(|i| matches!(i.kind, Kind::Lesson(_))).cloned().collect(),
+        Section::Chat => Vec::new(),
     };
     if f.section.filters() {
         if let Some(coll) = f.collection {
