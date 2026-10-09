@@ -134,6 +134,28 @@ pub fn indian_harp() -> SynthState {
     s
 }
 
+/// A fingerpicked steel-string guitar: a bright pluck that dies away,
+/// darker as it rings.
+pub fn fingerstyle_guitar() -> SynthState {
+    let mut s = init("Fingerstyle Guitar");
+    s.osc2.waveform = Waveform::Square;
+    s.osc2.knob_a_cents = 6.0;
+    s.mix.osc2_db = -14.0;
+    s.amp_env.attack_ms = 1.0;
+    s.amp_env.sustain = 0.0;
+    s.amp_env.decay_ms = 1600.0;
+    s.amp_env.release_ms = 500.0;
+    s.filter.cutoff_hz = 700.0;
+    s.filter.env_amount_oct = 3.5;
+    s.filter.key_track = 0.5;
+    s.filter_env.decay_ms = 220.0;
+    s.fx.chorus_mix = 0.15;
+    s.fx.reverb_mix = 0.22;
+    s.fx.reverb_size = 0.5;
+    s.output.volume_db = 0.0;
+    s
+}
+
 pub fn tanpura() -> SynthState {
     let mut s = init("Tanpura");
     s.amp_env.attack_ms = 2.0;

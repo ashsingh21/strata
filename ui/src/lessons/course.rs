@@ -14,6 +14,7 @@ use shared::lessons::{
     THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, THEORY_BHAIRAV, PROGRESSION, MIX_LEVELS, MIX_EQ, MIX_COMPRESS,
     MIX_FINISH, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_HATS_8THS, ROLL_GHOSTS, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, MELODY_STEPS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, SOUND_PITCH_NOTE,
     TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE, TRAP_KICKS, TRAP_SNARE, TRAP_PHRASE, TRAP_GAP_BAR, MELODY_CALL, MELODY_MOTIF, MELODY_RHYTHM, MELODY_SHAPE, MELODY_CHORD_TONES, MELODY_HOOK, MELODY_OWN,
+    GUITAR_CHET, GUITAR_FAHEY, CHET_EXAMPLE, FAHEY_EXAMPLE, FINGERS_FROM, LOW_D,
 };
 use super::sound_match::WIN;
 use shared::synth::{lfo_rate_hz, FilterType, LfoTarget, SynthParam, SynthState, VoiceMode, Waveform};
@@ -60,6 +61,7 @@ pub const MIXING: &str = "Mixing";
 pub const ROLL: &str = "Piano roll";
 pub const MELODY: &str = "Melody";
 pub const SOUND: &str = "Sound basics";
+pub const GUITAR: &str = "Guitar styles";
 
 const fn act(text: &'static str, hint: &'static str, check: fn(&Snapshot) -> bool, target: fn(&Snapshot) -> Option<Target>) -> Step {
     Step { text, why: "", hint, kind: Kind::Action { check, target } }
@@ -4070,6 +4072,149 @@ pub const LESSONS: &[Lesson] = &[
             ),
         ],
     },
+    Lesson {
+        id: GUITAR_CHET,
+        group: GUITAR,
+        title: "Thumb and fingers: Chet Atkins",
+        steps: &[
+            quiz(
+                "Listen: one guitar. Is it playing one tune, or two things at once?",
+                "Two: the thumb plays a bass note on every beat and never stops, while the fingers play a tune on top. That\u{2019}s Travis picking, the style Chet Atkins made famous.",
+                &CHET_EXAMPLE,
+                &["One tune", "A steady bass and a tune on top"],
+                1,
+            ),
+            quiz(
+                "Again: where do most of the tune\u{2019}s notes land?",
+                "Between the thumb\u{2019}s notes, on the \u{201c}and\u{201d}s. The thumb holds the beat, so the fingers are free to bounce off it.",
+                &CHET_EXAMPLE,
+                &["On the beats, with the thumb", "Between the thumb\u{2019}s notes"],
+                1,
+            ),
+            act(
+                "Open the Picking clip: double-click it (in the Guitar lane).",
+                "Two quick clicks on the empty clip.",
+                |s| track_open(s, "Guitar"),
+                |s| track_named(s, "Guitar").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "The thumb, over C: C3 on beats 1 and 3, E3 on beats 2 and 4.",
+                "On guitar, hold a C chord: that\u{2019}s the A string (fret 3) and the D string (fret 2), back and forth. Low notes on every beat: the thumb is the band\u{2019}s drummer and bass player at once.",
+                "C3 at 1.1 and 1.3, E3 at 1.2 and 1.4: the low rows.",
+                |s| thumb_bar(s, 0, 0, 4),
+                |s| guitar_row(s, 48),
+            ),
+            act(
+                "Press Space to hear the thumb on its own. It should sound steady, almost boring - that\u{2019}s right.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            recipe(
+                "A pinch: put a high note of the C chord (C, E or G, from G3 up) on beat 1, with the thumb.",
+                "Thumb and finger together on the first beat - a pinch - tells the ear where the bar starts.",
+                "E4 at 1.1: the high E string, open.",
+                |s| finger_on(s, 0, &[0, 4, 7]),
+                |s| guitar_row(s, 64),
+            ),
+            recipe(
+                "Now the bounce: two or more high notes on the \u{201c}and\u{201d}s of bar 1, between the thumb\u{2019}s notes.",
+                "The fingers answering the thumb is the whole sound: boom-and-boom-and. Chet\u{2019}s tunes sit on top of this, as if two people were playing.",
+                "C4 halfway between 1.2 and 1.3, E4 halfway between 1.3 and 1.4.",
+                |s| fingers_between(s, 0) >= 2,
+                |s| guitar_row(s, 60),
+            ),
+            recipe(
+                "Bar 2 is G: the thumb on G2 on beats 1 and 3, D3 on beats 2 and 4.",
+                "Change chord, change where the thumb goes - low E string (fret 3) and the open D string - but never change the rhythm.",
+                "G2 at 2.1 and 2.3, D3 at 2.2 and 2.4.",
+                |s| thumb_bar(s, 1, 7, 2),
+                |s| guitar_row(s, 43),
+            ),
+            recipe(
+                "And the fingers over G: a pinch on beat 1 of bar 2 (G, B or D, from G3 up), and one note on an \u{201c}and\u{201d}.",
+                "Same moves, new chord: the pattern stays, only the notes change.",
+                "D4 at 2.1, B3 halfway between 2.2 and 2.3.",
+                |s| finger_on(s, BAR, &[7, 11, 2]) && fingers_between(s, 1) >= 1,
+                |s| guitar_row(s, 62),
+            ),
+            info(
+                "On your guitar: hold C (x32010). Thumb on the A string, then the D string, back and forth on every beat. \
+                 Rest the edge of your picking hand on the bass strings by the bridge so they thud - Chet\u{2019}s muted thumb. \
+                 Fingers on the G, B and high E strings. For G (320003): thumb on the low E string, then the open D. \
+                 Play the thumb alone until you can talk over it, then add one finger note per bar.",
+            ),
+        ],
+    },
+    Lesson {
+        id: GUITAR_FAHEY,
+        group: GUITAR,
+        title: "Drones and repetition: John Fahey",
+        steps: &[
+            quiz(
+                "Listen to the bass. Does it follow the tune, or stay on one note?",
+                "One note: the thumb hits the low open D string on every beat, whatever the tune does. A drone like this is the floor John Fahey built his pieces on.",
+                &FAHEY_EXAMPLE,
+                &["It follows the tune", "It stays on one low note"],
+                1,
+            ),
+            act(
+                "Open the Picking clip: double-click it (in the Guitar lane).",
+                "Two quick clicks on the empty clip.",
+                |s| track_open(s, "Guitar"),
+                |s| track_named(s, "Guitar").map(|t| Target::Lane(t.id)),
+            ),
+            recipe(
+                "The drone: D2, the lowest row, on every beat of both bars - eight notes.",
+                "On guitar this is the low E string tuned down to D and played open: no fretting, so the thumb can go on forever.",
+                "D2 at 1.1, 1.2, 1.3, 1.4, then 2.1 to 2.4.",
+                |s| (0..8).all(|beat| guitar_has(s, LOW_D, beat * PPQ)),
+                |s| guitar_row(s, LOW_D),
+            ),
+            act(
+                "Press Space and let the drone go round a few times.",
+                "Or click the play button at the top.",
+                |s| s.playing,
+                |_| Some(Target::Play),
+            ),
+            recipe(
+                "A phrase on top in bar 1: three or more high notes (from G3 up), at least one on an \u{201c}and\u{201d}.",
+                "Short and simple: over a drone, every note colours the same low D, so even a few notes say a lot.",
+                "F#4 at 1.1, E4 halfway to 1.3, D4 at 1.3.",
+                |s| {
+                    let bar = finger_bar(s, 0);
+                    bar.len() >= 3 && bar.iter().any(|(at, _)| at % PPQ == PPQ / 2)
+                },
+                |s| guitar_row(s, 66),
+            ),
+            recipe(
+                "Bar 2: the same phrase again, note for note.",
+                "Fahey repeats: a phrase comes round again and again, and the repeating is what pulls you in, like a chant.",
+                "Copy each high note of bar 1 one bar later.",
+                |s| !finger_bar(s, 0).is_empty() && finger_bar(s, 1) == finger_bar(s, 0),
+                |s| guitar_row(s, 66),
+            ),
+            recipe(
+                "The old sound: change one high note in bar 2 to a C (not C#).",
+                "C natural over a D drone is the sound of old blues and hymns. One changed note in a repeated phrase is how these pieces grow.",
+                "Move one of bar 2\u{2019}s notes to C4: the B string, fret 1.",
+                |s| finger_bar(s, 1).iter().any(|(_, p)| p % 12 == 0),
+                |s| guitar_row(s, 60),
+            ),
+            recipe(
+                "Let one high note ring: drag its end out to two beats or longer.",
+                "Open strings left ringing over the drone blur into one big sound - half of Fahey\u{2019}s magic is what he doesn\u{2019}t stop.",
+                "Drag the right end of a note in the grid.",
+                |s| guitar_notes(s).iter().any(|n| n.pitch >= FINGERS_FROM && n.length >= 2 * PPQ),
+                |s| guitar_row(s, 62),
+            ),
+            info(
+                "On your guitar: tune the low E string down to D (drop D) and play it open with your thumb on every beat - don\u{2019}t stop. \
+                 The fingers play on the G, B and high E strings: F#4 is high E fret 2, E4 high E open, D4 B fret 3, C4 B fret 1, A3 G fret 2. \
+                 Play one phrase over and over; every few times, change one note. Fahey built long pieces from just this.",
+            ),
+        ],
+    },
 ];
 
 /// The "and" of every beat.
@@ -4083,7 +4228,7 @@ pub(super) const MARKER_BARS: [i64; 4] = [0, 8, 16, 24];
 pub const PATH: &[&str] = &[
     FIRST_BEAT, BASSLINE, CHORDS, SOUND_LOUDNESS, SOUND_PITCH, SOUND_HARMONICS, ROLL_DYNAMICS, ROLL_LENGTH, ROLL_PAINT, ROLL_SWING, ROLL_ROLLS, THEORY_OCTAVES, THEORY_SCALES, THEORY_KEYS, THEORY_MAJOR_MINOR, THEORY_INTERVALS,
     THEORY_TRIADS, THEORY_PROGRESSIONS, THEORY_MELODY, THEORY_SEVENTHS, THEORY_RAAG, THEORY_BHAIRAV, MELODY_STEPS, MELODY_CALL,
-    MELODY_MOTIF, MELODY_RHYTHM, MELODY_SHAPE, MELODY_CHORD_TONES, MELODY_HOOK, MELODY_OWN, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
+    MELODY_MOTIF, MELODY_RHYTHM, MELODY_SHAPE, MELODY_CHORD_TONES, MELODY_HOOK, MELODY_OWN, GUITAR_CHET, GUITAR_FAHEY, CARVE_WAVES, CARVE_FILTER, CARVE_ENVELOPES, RECIPE_BASS, RECIPE_PAD, PROJECT_GROOVE,
     PROJECT_BASS, PROJECT_CHORDS, PROJECT_ARRANGE, PROJECT_FINISH, MIX_LEVELS, MIX_EQ, MIX_COMPRESS, MIX_FINISH,
     ARRANGE_HOUSE, RECIPE_KEYS, LOFI_BEAT, LOFI_KEYS,
     LOFI_BASS, LOFI_FINISH, BOLLY_MELODY, BOLLY_DRONE, TRAP_DRUMS, TRAP_808, TRAP_MELODY, TRAP_ARRANGE,
@@ -4828,6 +4973,48 @@ fn sequenced(s: &Snapshot, from: i64, to: i64) -> bool {
 /// `pitch`'s row once the Melody clip is open, else its lane.
 fn melody_row(s: &Snapshot, pitch: u8) -> Option<Target> {
     if track_open(s, "Melody") { Some(Target::PianoRollRow(pitch)) } else { track_named(s, "Melody").map(|t| Target::Lane(t.id)) }
+}
+
+/// Every note of the Guitar track's clip.
+fn guitar_notes(s: &Snapshot) -> Vec<shared::arrangement::MidiNote> {
+    let Some(ClipContent::Midi { notes, .. }) = named_clip(s, "Guitar").map(|c| &c.content) else { return Vec::new() };
+    notes.clone()
+}
+
+fn guitar_has(s: &Snapshot, pitch: u8, at: Ticks) -> bool {
+    guitar_notes(s).iter().any(|n| n.pitch == pitch && n.start == at)
+}
+
+/// The thumb in bar `bar`: a low note of pitch class `root` on beats 1
+/// and 3, `other` on 2 and 4.
+fn thumb_bar(s: &Snapshot, bar: i64, root: u8, other: u8) -> bool {
+    let notes = guitar_notes(s);
+    (0..4).all(|beat| {
+        let want = if beat % 2 == 0 { root } else { other };
+        notes.iter().any(|n| n.start == bar * BAR + beat * PPQ && n.pitch < FINGERS_FROM && n.pitch % 12 == want)
+    })
+}
+
+/// A finger note (G3 up) at `at` of one of `classes`.
+fn finger_on(s: &Snapshot, at: Ticks, classes: &[u8]) -> bool {
+    guitar_notes(s).iter().any(|n| n.start == at && n.pitch >= FINGERS_FROM && classes.contains(&(n.pitch % 12)))
+}
+
+/// Finger notes on the "and"s of bar `bar`.
+fn fingers_between(s: &Snapshot, bar: i64) -> usize {
+    guitar_notes(s).iter().filter(|n| n.start / BAR == bar && n.pitch >= FINGERS_FROM && off_beat(n)).count()
+}
+
+/// Bar `bar`'s finger notes as (where in the bar, pitch), in order.
+fn finger_bar(s: &Snapshot, bar: i64) -> Vec<(Ticks, u8)> {
+    let mut out: Vec<(Ticks, u8)> =
+        guitar_notes(s).iter().filter(|n| n.start / BAR == bar && n.pitch >= FINGERS_FROM).map(|n| (n.start - bar * BAR, n.pitch)).collect();
+    out.sort_unstable();
+    out
+}
+
+fn guitar_row(s: &Snapshot, pitch: u8) -> Option<Target> {
+    if track_open(s, "Guitar") { Some(Target::PianoRollRow(pitch)) } else { track_named(s, "Guitar").map(|t| Target::Lane(t.id)) }
 }
 
 fn trap_808(s: &Snapshot) -> Option<&shared::arrangement::Track> {

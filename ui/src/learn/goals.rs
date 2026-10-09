@@ -206,6 +206,13 @@ pub const GOALS: &[Goal] = &[
         items: &[EAR_DIRECTION, l(THEORY_INTERVALS), EAR_DISTANCE, EAR_STRING, l(THEORY_SCALES), EAR_TUNES, PLAY_BACK, EAR_KNOWN, CLASSICS],
     },
     Goal {
+        id: "guitar",
+        title: "Guitar styles",
+        promise: "Fingerpicking to take to your guitar: Chet Atkins\u{2019} bouncing thumb and John Fahey\u{2019}s drones.",
+        color: Some(shared::arrangement::ClipColor::Amber),
+        items: &[l(GUITAR_CHET), l(GUITAR_FAHEY), VOICE_LEADING],
+    },
+    Goal {
         id: "indian",
         title: "Indian classical",
         promise: "Raags, riyaz against the tanpura, and Bollywood lo-fi.",

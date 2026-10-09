@@ -47,6 +47,11 @@ pub enum Which {
 /// A quiz question's notes - (16th, pitch, 16ths) - played by the theory
 /// lessons' Keys sound, on their own.
 pub fn quiz_take(notes: &[(i64, u8, i64)]) -> Take {
+    quiz_take_with(notes, None)
+}
+
+/// The same, on `patch` instead when there is one.
+pub fn quiz_take_with(notes: &[(i64, u8, i64)], patch: Option<SynthState>) -> Take {
     let mut project = shared::lessons::starting_project(shared::lessons::THEORY_TRIADS);
     project.migrate();
     let sixteenth = shared::lessons::SIXTEENTH;
@@ -61,7 +66,13 @@ pub fn quiz_take(notes: &[(i64, u8, i64)]) -> Take {
         loop_len: None,
         link: None,
     };
-    Take { arrangement: project.arrangement, patches: project.instruments.into_iter().collect(), from: 0, to: end * sixteenth }
+    let mut patches: BTreeMap<TrackId, SynthState> = project.instruments.into_iter().collect();
+    if let Some(patch) = patch {
+        for p in patches.values_mut() {
+            *p = patch.clone();
+        }
+    }
+    Take { arrangement: project.arrangement, patches, from: 0, to: end * sixteenth }
 }
 
 /// The app as it stands in `snap`: the on-screen patch is the selected

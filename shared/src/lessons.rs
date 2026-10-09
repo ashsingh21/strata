@@ -80,6 +80,35 @@ pub const MELODY_SHAPE: &str = "melody-shape";
 pub const MELODY_CHORD_TONES: &str = "melody-chord-tones";
 pub const MELODY_HOOK: &str = "melody-hook";
 pub const MELODY_OWN: &str = "melody-own";
+/// Guitar styles: fingerpicking written out, to take to the guitar - Chet
+/// Atkins' thumb-and-fingers bounce, in C, and John Fahey's drone, in D.
+pub const GUITAR_CHET: &str = "guitar-chet";
+pub const GUITAR_FAHEY: &str = "guitar-fahey";
+pub const CHET_BPM: f64 = 100.0;
+pub const FAHEY_BPM: f64 = 92.0;
+/// Below this a note is the thumb's (the low E, A and D strings); from it
+/// up, the fingers' (G, B and high E: G3 is the open G string).
+pub const FINGERS_FROM: u8 = 55;
+/// Drop D's open low string: D2.
+pub const LOW_D: u8 = 38;
+/// What the Chet Atkins lesson builds, in (16th, pitch, 16ths): over C,
+/// the thumb on C and E (A string fret 3, D string fret 2), the fingers
+/// pinching with it on 1 and playing between; over G, the thumb on G and
+/// D (low E fret 3, open D).
+pub const CHET_EXAMPLE: [(i64, u8, i64); 16] = [
+    (0, 48, 2), (4, 52, 2), (8, 48, 2), (12, 52, 2),
+    (0, 64, 3), (6, 60, 2), (10, 64, 2), (14, 67, 2),
+    (16, 43, 2), (20, 50, 2), (24, 43, 2), (28, 50, 2),
+    (16, 62, 3), (22, 59, 2), (26, 62, 2), (30, 67, 2),
+];
+/// What the Fahey lesson builds: the open low D on every beat, a phrase
+/// on top that comes back, with C natural in it and a note left to ring.
+pub const FAHEY_EXAMPLE: [(i64, u8, i64); 15] = [
+    (0, 38, 3), (4, 38, 3), (8, 38, 3), (12, 38, 3), (16, 38, 3), (20, 38, 3), (24, 38, 3), (28, 38, 3),
+    (0, 66, 4), (6, 64, 2), (8, 62, 4), (14, 60, 2),
+    (16, 62, 6), (22, 57, 2), (24, 62, 8),
+];
+
 /// "Piano roll": the notes you write, played with feeling.
 pub const ROLL_DYNAMICS: &str = "roll-dynamics";
 pub const ROLL_LENGTH: &str = "roll-length";
@@ -382,6 +411,18 @@ fn theory_lesson(lesson: &str) -> Project {
     Project { arrangement: arr, instruments, synth: None }
 }
 
+/// The guitar-style lessons: one Guitar track, a fingerpicked sound and an
+/// empty two-bar pattern looping for eight, to write the thumb and the
+/// fingers into.
+fn guitar_lesson(lesson: &str) -> Project {
+    let mut arr = empty_arrangement();
+    let bpm = if lesson == GUITAR_FAHEY { FAHEY_BPM } else { CHET_BPM };
+    arr.tempo_map = TempoMap::constant(bpm, TimeSignature::FOUR_FOUR);
+    let guitar = add_track(&mut arr, "Guitar", ClipColor::Amber, Instrument::Carve, -4.0);
+    add_loop(&mut arr, guitar, "Picking", Vec::new(), 2, 8);
+    Project { arrangement: arr, instruments: vec![(guitar, crate::synth::recipes::fingerstyle_guitar())], synth: None }
+}
+
 /// The step lessons: a beat to finish in the drum editor. Painting starts
 /// from a kick and clap with no hats; swing from stiff, even 16th hats;
 /// rolls from a half-time trap beat with plain eighth hats.
@@ -531,6 +572,9 @@ pub fn starting_project(lesson: &str) -> Project {
     if lesson.starts_with("roll-") {
         return roll_lesson(lesson);
     }
+    if lesson.starts_with("guitar-") {
+        return guitar_lesson(lesson);
+    }
     // The melody lessons start where "Melody over chords" does.
     if lesson.starts_with("melody-") {
         return theory_lesson(THEORY_MELODY);
@@ -582,6 +626,9 @@ pub fn lesson_key(lesson: &str) -> Option<(u8, &'static str)> {
         RECIPE_HARP => (9, "Raga Malkauns"),
         RECIPE_REED | THEORY_BHAIRAV => (0, "Raga Bhairav"),
         RECIPE_TANPURA => return None,
+        GUITAR_CHET => (0, "Major"),
+        // D with C natural: the old, bluesy D.
+        GUITAR_FAHEY => (2, "Mixolydian"),
         // Every semitone a row: this lesson counts them.
         THEORY_SCALES => (0, "Chromatic"),
         _ if lesson.starts_with("theory-") || lesson.starts_with("melody-") => (0, "Major"),

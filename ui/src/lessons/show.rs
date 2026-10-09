@@ -964,6 +964,52 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 b(hook(3)),
             ]
         }
+        GUITAR_CHET => vec![
+            b(|s| s.open_clip = Some(clip_on_track(s, "Guitar"))),
+            b(|s| {
+                add_notes_on(s, "Guitar", 48, &[0, 2 * PPQ]);
+                add_notes_on(s, "Guitar", 52, &[PPQ, 3 * PPQ]);
+            }),
+            b(play),
+            b(|s| add_notes_on(s, "Guitar", 64, &[0])),
+            b(|s| {
+                add_notes_on(s, "Guitar", 60, &[PPQ + PPQ / 2]);
+                add_notes_on(s, "Guitar", 64, &[2 * PPQ + PPQ / 2]);
+            }),
+            b(|s| {
+                add_notes_on(s, "Guitar", 43, &[BAR, BAR + 2 * PPQ]);
+                add_notes_on(s, "Guitar", 50, &[BAR + PPQ, BAR + 3 * PPQ]);
+            }),
+            b(|s| {
+                add_notes_on(s, "Guitar", 62, &[BAR]);
+                add_notes_on(s, "Guitar", 59, &[BAR + PPQ + PPQ / 2]);
+            }),
+        ],
+        GUITAR_FAHEY => {
+            const PHRASE: [(Ticks, u8); 3] = [(0, 66), (PPQ + PPQ / 2, 64), (2 * PPQ, 62)];
+            vec![
+                b(|s| s.open_clip = Some(clip_on_track(s, "Guitar"))),
+                b(|s| add_notes_on(s, "Guitar", LOW_D, &(0..8).map(|b| b * PPQ).collect::<Vec<_>>())),
+                b(play),
+                b(|s| {
+                    for (at, p) in PHRASE {
+                        add_notes_on(s, "Guitar", p, &[at]);
+                    }
+                }),
+                b(|s| {
+                    for (at, p) in PHRASE {
+                        add_notes_on(s, "Guitar", p, &[BAR + at]);
+                    }
+                }),
+                b(|s| move_note_on(s, "Guitar", BAR + 2 * PPQ, 62, 60)),
+                // The D at 1.3, drawn out to two beats.
+                b(|s| {
+                    let clip = clip_on_track(s, "Guitar");
+                    Command::RemoveMidiNote { clip, start: 2 * PPQ, pitch: 62 }.apply(&mut s.arrangement);
+                    add_note_long(s, "Guitar", 62, 2 * PPQ, 2 * PPQ);
+                }),
+            ]
+        }
         MELODY_OWN => vec![
             b(play),
             b(|s| s.open_clip = Some(clip_on_track(s, "Melody"))),
@@ -1216,7 +1262,12 @@ fn add_notes_on(s: &mut Snapshot, name: &str, pitch: u8, starts: &[Ticks]) {
 /// The note at `start` moved from pitch `from` to `to` (what picking it
 /// and pressing an arrow key does).
 fn move_note(s: &mut Snapshot, start: Ticks, from: u8, to: u8) {
-    let clip = clip_on_track(s, "Keys");
+    move_note_on(s, "Keys", start, from, to);
+}
+
+/// The same on `name`'s clip.
+fn move_note_on(s: &mut Snapshot, name: &str, start: Ticks, from: u8, to: u8) {
+    let clip = clip_on_track(s, name);
     let ClipContent::Midi { notes, .. } = &s.arrangement.clip(clip).unwrap().content else { panic!() };
     let note = *notes.iter().find(|n| n.start == start && n.pitch == from).unwrap();
     Command::RemoveMidiNote { clip, start, pitch: from }.apply(&mut s.arrangement);

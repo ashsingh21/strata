@@ -510,7 +510,12 @@ impl LessonModel {
             preview::Which::Yours => Some(preview::take_of(&self.snapshot(), &self.patches.get())),
             preview::Which::Example => self.example.as_ref().map(|done| preview::take_of(done, &self.patches.get())),
             preview::Which::Quiz => match course::LESSONS[lesson].steps[step].kind {
-                course::Kind::Quiz { notes, .. } => Some(preview::quiz_take(notes)),
+                // A lesson with its own sound asks its questions in it.
+                course::Kind::Quiz { notes, .. } => {
+                    let own = shared::lessons::starting_project(course::LESSONS[lesson].id).instruments.into_iter().next().map(|(_, p)| p);
+                    let guitar = course::LESSONS[lesson].id.starts_with("guitar-");
+                    Some(preview::quiz_take_with(notes, own.filter(|_| guitar)))
+                }
                 _ => None,
             },
         };
