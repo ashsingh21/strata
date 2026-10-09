@@ -500,6 +500,15 @@ pub fn header(cx: &mut Context, props: HeaderProps, bpm: impl SignalGet<f64> + C
         )
         .on_press(|cx| cx.emit(crate::palette::PaletteEvent::Toggle));
 
+        // The Map: the song as sections, instead of the timeline.
+        if let Some(map_open) = crate::song_map::open_signal() {
+            with_tip(
+                Button::new(cx, |cx| Label::new(cx, "Map")).class("btn").class("quiet").toggle_class("is-on", map_open),
+                "See the song as sections: what's in each, and how it moves from one to the next",
+            )
+            .on_press(|cx| cx.emit(crate::song_map::MapEvent::Toggle));
+        }
+
         // The live spectrum analyzer, beside the other output readouts.
         with_tip(
             Button::new(cx, |cx| Label::new(cx, "Spectrum"))

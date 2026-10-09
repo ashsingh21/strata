@@ -956,6 +956,7 @@ fn render_theme_css(colors: &ColorMap, scope_class: Option<&str>, shadow_pop: &s
     rule(".ear-choice.is-right", vec![("background-color", c("signal")), ("border-color", c("signal")), ("color", c("on-signal"))]);
     rule(".ear-choice.is-wrong", vec![("background-color", c("record")), ("border-color", c("record")), ("color", c("on-record"))]);
     rule(".course-map", vec![("background-color", c("bg-100"))]);
+    rule(".map-view", vec![("background-color", c("bg-000"))]);
     rule(".learn-muted", vec![("color", c("ink-muted"))]);
     rule(".chat-mine", vec![("background-color", c("bg-200")), ("color", c("ink"))]);
     rule(".chat-theirs", vec![("color", c("ink"))]);

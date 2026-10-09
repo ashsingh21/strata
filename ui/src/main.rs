@@ -11,6 +11,7 @@ mod ear;
 mod mic;
 mod learn;
 mod chat;
+mod song_map;
 mod tools;
 mod bpm_field;
 mod canvas_text;
@@ -346,6 +347,9 @@ fn main() -> Result<(), ApplicationError> {
         let chat_model = chat::ChatModel::new(tl_arrangement, interval_key, interval_scale_mask, piano_roll_open_clip, selected_track);
         let _chat_props = chat::ChatProps::of(&chat_model);
         chat_model.build(cx);
+        let map_model = song_map::MapModel::new(tl_arrangement, tl_playhead, playing);
+        let map_props = song_map::MapProps::of(&map_model, theme);
+        map_model.build(cx);
 
         // The sidebar: rail, browser panel, preview dock.
         let browser_model = browser::BrowserModel::new(
@@ -424,6 +428,7 @@ fn main() -> Result<(), ApplicationError> {
                 cx.emit(SynthEvent::Tick(dt));
                 cx.emit(lessons::LessonEvent::Tick);
                 cx.emit(learn::LearnEvent::Tick);
+                cx.emit(song_map::MapEvent::Tick);
                 cx.emit(riyaz::RiyazEvent::Tick);
                 cx.emit(midi_in::MidiEvent::Tick);
                 cx.emit(practice::PracticeEvent::Tick);
@@ -719,6 +724,8 @@ fn main() -> Result<(), ApplicationError> {
 
                     // The course map, over the arrangement while it's open.
                     learn::home::learn_page(cx, learn_props);
+                    // The Map covers the timeline and the panel while it's open.
+                    song_map::map_view(cx, map_props);
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));
