@@ -1,7 +1,8 @@
 //! Voice leading: build a progression from the key's chords and see how to
-//! move between them with as little motion as possible - as guitar chord
-//! shapes chosen so fingers stay down where they can (Guitar), or as
-//! voices drawn as lines through the chords (Voices). Hold a chord to hear
+//! move between them with as little motion as possible - as whole guitar
+//! chords chosen so fingers stay down where they can, as close shapes on
+//! the top four strings drawn like tab (each string one voice), or as
+//! voices drawn as lines through the chords the way a pianist would. Hold a chord to hear
 //! it on the selected track; Play hears them all in turn. A page of its
 //! own over the timeline, opened from the rail.
 
@@ -18,6 +19,14 @@ use crate::hidpi::Logical;
 use crate::synth::state::SynthEvent;
 use crate::tokens::{self, ThemeId};
 
+/// Whole guitar chords, as chord charts.
+pub const FULL_CHORDS: u8 = 0;
+/// Close shapes on the top four strings, drawn like tab: each string one
+/// voice.
+pub const FOUR_STRINGS: u8 = 1;
+/// Voices as lines through the chords, the way a pianist would think.
+pub const PIANO_LINES: u8 = 2;
+
 /// How long each chord sounds in Play, in 16ths (half a bar).
 const CHORD_16THS: i64 = 8;
 
@@ -28,8 +37,8 @@ pub enum VoicingEvent {
     Clear,
     SetSevenths(bool),
     SetVoices(usize),
-    /// Guitar shapes (true) or voices as lines.
-    SetGuitar(bool),
+    /// FULL_CHORDS, FOUR_STRINGS or PIANO_LINES.
+    SetView(u8),
     /// Hear the whole progression (again: stop).
     Play,
     Rendered { generation: u64, audio: Arc<[f32]> },
@@ -41,7 +50,7 @@ pub struct VoicingModel {
     pub progression: Signal<Vec<usize>>,
     pub sevenths: Signal<bool>,
     pub voices: Signal<usize>,
-    pub guitar: Signal<bool>,
+    pub view: Signal<u8>,
     pub playing: Signal<bool>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
@@ -59,7 +68,7 @@ impl VoicingModel {
             progression: Signal::new(Vec::new()),
             sevenths: Signal::new(false),
             voices: Signal::new(4),
-            guitar: Signal::new(true),
+            view: Signal::new(FOUR_STRINGS),
             playing: Signal::new(false),
             key,
             scale_mask,
@@ -89,14 +98,14 @@ impl Model for VoicingModel {
             VoicingEvent::Clear => self.progression.set(Vec::new()),
             VoicingEvent::SetSevenths(on) => self.sevenths.set(*on),
             VoicingEvent::SetVoices(n) => self.voices.set(*n),
-            VoicingEvent::SetGuitar(on) => self.guitar.set(*on),
+            VoicingEvent::SetView(v) => self.view.set(*v),
             VoicingEvent::Play => {
                 if self.playing.get() {
                     self.stop();
                     return;
                 }
-                let chords: Vec<Vec<u8>> = if self.guitar.get() {
-                    on_guitar(&self.progression.get(), self.key.get(), self.scale_mask.get(), self.sevenths.get())
+                let chords: Vec<Vec<u8>> = if self.view.get() != PIANO_LINES {
+                    on_guitar(&self.progression.get(), self.key.get(), self.scale_mask.get(), self.sevenths.get(), self.view.get() == FOUR_STRINGS)
                         .into_iter()
                         .map(|(_, _, shape)| shape.map(|s| s.notes()).unwrap_or_default())
                         .collect()
@@ -156,10 +165,12 @@ fn voiced(progression: &[usize], key: u8, mask: u16, sevenths: bool, voices: usi
 }
 
 /// Each chord of the progression - its scale degree, the chord, and a
-/// guitar shape for it, the shapes chosen together to keep the hand still.
-pub fn on_guitar(progression: &[usize], key: u8, mask: u16, sevenths: bool) -> Vec<(usize, Chord, Option<Shape>)> {
+/// guitar shape for it - a whole chord, or (`small`) one on the top four
+/// strings - the shapes chosen together to keep the hand still.
+pub fn on_guitar(progression: &[usize], key: u8, mask: u16, sevenths: bool, small: bool) -> Vec<(usize, Chord, Option<Shape>)> {
     let chords: Vec<(usize, Chord)> = progression.iter().filter_map(|&d| voicing::diatonic(d, key, voicing::seven_notes(mask), sevenths).map(|c| (d, c))).collect();
-    let shapes = guitar::lead(&chords.iter().map(|(_, c)| c.clone()).collect::<Vec<_>>());
+    let plain: Vec<Chord> = chords.iter().map(|(_, c)| c.clone()).collect();
+    let shapes = if small { guitar::lead_small(&plain) } else { guitar::lead(&plain) };
     chords.into_iter().zip(shapes).map(|((d, c), s)| (d, c, s)).collect()
 }
 
@@ -169,7 +180,7 @@ pub struct VoicingProps {
     pub progression: Signal<Vec<usize>>,
     pub sevenths: Signal<bool>,
     pub voices: Signal<usize>,
-    pub guitar: Signal<bool>,
+    pub view: Signal<u8>,
     pub playing: Signal<bool>,
     pub key: Signal<u8>,
     pub scale_mask: Signal<u16>,
@@ -183,7 +194,7 @@ impl VoicingProps {
             progression: m.progression,
             sevenths: m.sevenths,
             voices: m.voices,
-            guitar: m.guitar,
+            view: m.view,
             playing: m.playing,
             key: m.key,
             scale_mask: m.scale_mask,
@@ -202,10 +213,14 @@ pub fn voicing_view(cx: &mut Context, p: VoicingProps) {
             header(cx, p);
             chord_buttons(cx, p);
             VStack::new(cx, move |cx| {
-                Binding::new(cx, p.guitar, move |cx| {
-                    if p.guitar.get() {
+                Binding::new(cx, p.view, move |cx| match p.view.get() {
+                    FULL_CHORDS => {
                         crate::chord_charts::ChordCharts::new(cx, p).width(Stretch(1.0)).height(Stretch(1.0));
-                    } else {
+                    }
+                    FOUR_STRINGS => {
+                        crate::chord_charts::StringsTab::new(cx, p).width(Stretch(1.0)).height(Stretch(1.0));
+                    }
+                    _ => {
                         Chart::new(cx, p).width(Stretch(1.0)).height(Stretch(1.0));
                     }
                 });
@@ -244,16 +259,16 @@ fn header(cx: &mut Context, p: VoicingProps) {
         .height(Pixels(tokens::SIZE_CONTROL));
         crate::synth::segmented::segmented(
             cx,
-            2,
-            |cx, i| Label::new(cx, if i == 0 { "Guitar" } else { "Voices" }),
-            move |i| p.guitar.map(move |g| *g == (i == 0)),
-            |cx, i| cx.emit(VoicingEvent::SetGuitar(i == 0)),
+            3,
+            |cx, i| Label::new(cx, ["Full chords", "4 strings", "Piano lines"][i]),
+            move |i| p.view.map(move |v| *v as usize == i),
+            |cx, i| cx.emit(VoicingEvent::SetView(i as u8)),
         )
         .height(Pixels(tokens::SIZE_CONTROL));
         // How many voices only matters when they're drawn as lines.
         HStack::new(cx, move |cx| {
-            Binding::new(cx, p.guitar, move |cx| {
-                if p.guitar.get() {
+            Binding::new(cx, p.view, move |cx| {
+                if p.view.get() != PIANO_LINES {
                     return;
                 }
                 crate::synth::segmented::segmented(

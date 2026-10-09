@@ -115,6 +115,11 @@ impl Shape {
         if bass_fretted && low < 5 && self.frets[low + 1] == Some(0) { 1.5 } else { 0.0 }
     }
 
+    /// How hard a top-four-string shape is to hold.
+    fn small_effort(&self) -> f32 {
+        0.12 * self.low_fret() as f32 + 0.4 * (self.high_fret() - self.low_fret()) as f32 + 0.3 * self.finger_count() as f32
+    }
+
     /// How hard it is to hold: higher is harder.
     fn effort(&self) -> f32 {
         let sounding = self.frets.iter().filter(|f| f.is_some()).count();
@@ -217,13 +222,80 @@ fn travel(a: &Shape, b: &Shape) -> f32 {
 /// as little as it can along the progression.
 pub fn lead(chords: &[Chord]) -> Vec<Option<Shape>> {
     let options: Vec<Vec<Shape>> = chords.iter().map(|c| shapes(c).into_iter().take(CANDIDATES).collect()).collect();
+    chain(&options, Shape::effort, travel)
+}
+
+/// Close shapes on the top four strings (D G B E), one note per string:
+/// every chord tone (a seventh may drop its fifth), any of them in the
+/// bass, within one hand's reach. Easiest first.
+pub fn small_shapes(chord: &Chord) -> Vec<Shape> {
+    let mut out: Vec<Shape> = Vec::new();
+    for position in 1..=TOP_POSITION {
+        let options: Vec<Vec<Option<u8>>> = (0..6)
+            .map(|s| {
+                if s < 2 {
+                    return vec![None];
+                }
+                let mut o = Vec::new();
+                if position <= 4 && chord.tones.contains(&(TUNING[s] % 12)) {
+                    o.push(Some(0));
+                }
+                for f in position..=position + SPAN {
+                    if chord.tones.contains(&((TUNING[s] + f) % 12)) {
+                        o.push(Some(f));
+                    }
+                }
+                o
+            })
+            .collect();
+        let mut frets = [None; 6];
+        collect_small(&options, 0, &mut frets, chord, &mut out);
+    }
+    out.sort_by(|a, b| a.small_effort().total_cmp(&b.small_effort()).then(a.frets.cmp(&b.frets)));
+    out
+}
+
+fn collect_small(options: &[Vec<Option<u8>>], string: usize, frets: &mut [Option<u8>; 6], chord: &Chord, out: &mut Vec<Shape>) {
+    if string == 6 {
+        let shape = Shape { frets: *frets };
+        let notes = shape.notes();
+        if notes.len() == 4
+            && has_tones(&notes, chord)
+            && shape.high_fret() - shape.low_fret() <= SPAN
+            && shape.finger_count() <= 4
+            && !out.contains(&shape)
+        {
+            out.push(shape);
+        }
+        return;
+    }
+    for &f in &options[string] {
+        frets[string] = f;
+        collect_small(options, string + 1, frets, chord, out);
+    }
+}
+
+/// Top-four-string shapes for each chord, chosen together so each string's
+/// finger moves as few frets as it can - each string is one voice.
+pub fn lead_small(chords: &[Chord]) -> Vec<Option<Shape>> {
+    let options: Vec<Vec<Shape>> = chords.iter().map(|c| small_shapes(c).into_iter().take(CANDIDATES * 2).collect()).collect();
+    chain(&options, Shape::small_effort, |a, b| {
+        let frets: u32 = (2..6).map(|s| a.frets[s].unwrap_or(0).abs_diff(b.frets[s].unwrap_or(0)) as u32).sum();
+        0.6 * frets as f32
+    })
+}
+
+/// The cheapest path through each chord's `options`: their own effort plus
+/// the travel between neighbours (Viterbi).
+fn chain(options: &[Vec<Shape>], effort: impl Fn(&Shape) -> f32, travel: impl Fn(&Shape, &Shape) -> f32) -> Vec<Option<Shape>> {
+    let chords = options;
     // Viterbi: the cheapest way to reach each shape of each chord.
     let mut cost: Vec<Vec<(f32, usize)>> = Vec::with_capacity(chords.len());
     for (i, opts) in options.iter().enumerate() {
         let row = opts
             .iter()
             .map(|shape| {
-                let own = shape.effort();
+                let own = effort(shape);
                 match cost.get(i.wrapping_sub(1)).filter(|_| i > 0) {
                     Some(prev) if !prev.is_empty() => prev
                         .iter()
@@ -305,6 +377,22 @@ mod tests {
         let c = Shape { frets: [None, Some(3), Some(2), Some(0), Some(1), Some(0)] };
         assert_eq!(c.barre(), None);
         assert_eq!(c.fingers(), [None, Some(3), Some(2), None, Some(1), None]);
+    }
+
+    #[test]
+    fn small_shapes_move_a_fret_or_two_per_string() {
+        let prog: Vec<Chord> = [5, 3, 0, 4].iter().map(|&d| chord(d, false)).collect();
+        let shapes: Vec<Shape> = lead_small(&prog).into_iter().map(|s| s.unwrap()).collect();
+        for (s, c) in shapes.iter().zip(&prog) {
+            assert_eq!(s.notes().len(), 4);
+            assert!(s.frets[0].is_none() && s.frets[1].is_none());
+            assert!(c.tones.iter().all(|t| s.notes().iter().any(|n| n % 12 == *t)), "{}", tab(s));
+        }
+        for pair in shapes.windows(2) {
+            let moved: u32 = (2..6).map(|i| pair[0].frets[i].unwrap().abs_diff(pair[1].frets[i].unwrap()) as u32).sum();
+            assert!(moved <= 5, "{} -> {}", tab(&pair[0]), tab(&pair[1]));
+        }
+        println!("{:?}", shapes.iter().map(tab).collect::<Vec<_>>());
     }
 
     #[test]

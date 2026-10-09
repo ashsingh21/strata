@@ -41,7 +41,7 @@ impl ChordCharts {
     }
 
     fn chords(&self) -> Vec<(usize, voicing::Chord, Option<Shape>)> {
-        on_guitar(&self.p.progression.get(), self.p.key.get(), self.p.scale_mask.get(), self.p.sevenths.get())
+        on_guitar(&self.p.progression.get(), self.p.key.get(), self.p.scale_mask.get(), self.p.sevenths.get(), false)
     }
 
     fn release(&mut self, cx: &mut EventContext) {
@@ -336,4 +336,219 @@ fn text(canvas: &Canvas, s: &str, x: f32, y: f32, size: f32, color: Color) {
     paint.set_color(color);
     paint.set_anti_alias(true);
     canvas.draw_str(s, vg::Point::new(x, y), &font, &paint);
+}
+
+/// The top four strings drawn like tab, high E on top: a column per
+/// chord, on each string the fret to press (each string is one voice).
+/// Between chords, a green line where a finger stays, and how many frets
+/// one moves where it doesn't. Press a column to hear it.
+pub struct StringsTab {
+    p: VoicingProps,
+    held: Vec<u8>,
+    pressed: Option<usize>,
+}
+
+/// The strings shown, top to bottom: high E, B, G, D.
+const TAB_STRINGS: [usize; 4] = [5, 4, 3, 2];
+const TAB_NAMES: [&str; 4] = ["high E", "B", "G", "D"];
+const GUTTER: f32 = 84.0;
+
+impl StringsTab {
+    pub fn new(cx: &mut Context, p: VoicingProps) -> Handle<'_, Self> {
+        Self { p, held: Vec::new(), pressed: None }
+            .build(cx, |_| {})
+            .bind(p.progression, |mut h| h.needs_redraw())
+            .bind(p.sevenths, |mut h| h.needs_redraw())
+            .bind(p.key, |mut h| h.needs_redraw())
+            .bind(p.scale_mask, |mut h| h.needs_redraw())
+            .bind(p.theme, |mut h| h.needs_redraw())
+    }
+
+    fn chords(&self) -> Vec<(usize, voicing::Chord, Option<Shape>)> {
+        on_guitar(&self.p.progression.get(), self.p.key.get(), self.p.scale_mask.get(), self.p.sevenths.get(), true)
+    }
+
+    /// Column width and the first column's centre.
+    fn columns(n: usize, b: BoundingBox) -> (f32, f32) {
+        let usable = b.w - GUTTER - 24.0;
+        let col = (usable / n.max(1) as f32).min(190.0);
+        (col, b.x + GUTTER + (usable - col * n as f32) / 2.0 + col / 2.0)
+    }
+
+    /// Where the strings run: the top one's y and the gap between them.
+    fn strings(b: BoundingBox) -> (f32, f32) {
+        let gap = ((b.h - 210.0) / 3.0).clamp(46.0, 84.0);
+        let top = b.y + 110.0;
+        (top, gap)
+    }
+
+    fn release(&mut self, cx: &mut EventContext) {
+        for note in std::mem::take(&mut self.held) {
+            cx.emit(SynthEvent::KeyRelease(note));
+        }
+        self.pressed = None;
+    }
+}
+
+impl View for StringsTab {
+    fn element(&self) -> Option<&'static str> {
+        Some("strings-tab")
+    }
+
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|window_event, _| match window_event {
+            WindowEvent::MouseDown(MouseButton::Left) => {
+                let chords = self.chords();
+                let (col, first) = Self::columns(chords.len(), cx.lbounds());
+                let i = ((cx.lmouse().0 - (first - col / 2.0)) / col).floor();
+                if i >= 0.0 && (i as usize) < chords.len() {
+                    let i = i as usize;
+                    self.release(cx);
+                    if let Some(shape) = chords[i].2 {
+                        self.held = shape.notes();
+                        for &note in &self.held {
+                            cx.emit(SynthEvent::KeyPress(note));
+                        }
+                    }
+                    self.pressed = Some(i);
+                    cx.capture();
+                    cx.needs_redraw();
+                }
+            }
+            WindowEvent::MouseUp(MouseButton::Left) => {
+                self.release(cx);
+                cx.release();
+                cx.needs_redraw();
+            }
+            _ => {}
+        });
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        let _hidpi = crate::hidpi::scale(cx, canvas);
+        let b = cx.lbounds();
+        crate::hidpi::clip(canvas, b);
+        let pal = self.p.theme.get().palette();
+        let key = self.p.key.get();
+        let chords = self.chords();
+        if chords.is_empty() {
+            let line = "Add chords above. Each is played on the top four strings, moving each finger as little as it can.";
+            let w = crate::canvas_text::canvas_font(14.0).measure_str(line, None).0;
+            text(canvas, line, b.x + (b.w - w) / 2.0, b.y + b.h / 2.0, 14.0, pal.ink_muted);
+            return;
+        }
+        let (col, first) = Self::columns(chords.len(), b);
+        let x_of = |i: usize| first + col * i as f32;
+        let (top, gap) = Self::strings(b);
+        let y_of = |row: usize| top + gap * row as f32;
+        let radius = (gap * 0.3).clamp(13.0, 19.0);
+        let font = crate::canvas_text::canvas_font(12.0);
+        let mut paint = vg::Paint::default();
+        paint.set_anti_alias(true);
+
+        // The pressed column, lit.
+        if let Some(i) = self.pressed {
+            paint.set_color(pal.bg_100);
+            let r = vg::Rect::new(x_of(i) - col / 2.0 + 4.0, b.y + 4.0, x_of(i) + col / 2.0 - 4.0, y_of(3) + 70.0);
+            canvas.draw_rrect(vg::RRect::new_rect_xy(r, 10.0, 10.0), &paint);
+        }
+
+        // The strings, with their names.
+        paint.set_style(vg::PaintStyle::Stroke);
+        paint.set_color(pal.line_control);
+        let right = x_of(chords.len() - 1) + col / 2.0;
+        for (row, name) in TAB_NAMES.iter().enumerate() {
+            paint.set_stroke_width(1.0 + 0.35 * row as f32);
+            line(canvas, b.x + GUTTER - 8.0, y_of(row), right, y_of(row), &paint);
+            let w = font.measure_str(name, None).0;
+            text(canvas, name, b.x + GUTTER - 18.0 - w, y_of(row) + 4.0, 12.0, pal.ink_muted);
+        }
+
+        for (i, (_, chord, shape)) in chords.iter().enumerate() {
+            let x = x_of(i);
+            let name = voicing::name(chord, key).replace('\u{266d}', "b");
+            let w = crate::canvas_text::canvas_font(22.0).measure_str(&name, None).0;
+            text(canvas, &name, x - w / 2.0, b.y + 36.0, 22.0, pal.ink);
+            let Some(shape) = shape else {
+                let w = font.measure_str("no shape", None).0;
+                text(canvas, "no shape", x - w / 2.0, b.y + 60.0, 12.0, pal.ink_faint);
+                continue;
+            };
+            let prev = if i > 0 { chords[i - 1].2 } else { None };
+            let where_ = if shape.high_fret() <= 3 && shape.frets.contains(&Some(0)) {
+                "open position".to_string()
+            } else {
+                format!("around fret {}", shape.low_fret().max(1))
+            };
+            let w = font.measure_str(&where_, None).0;
+            text(canvas, &where_, x - w / 2.0, b.y + 58.0, 12.0, pal.ink_faint);
+
+            // From the chord before, string by string: green where the
+            // finger stays, else how far it goes.
+            if let Some(prev) = prev {
+                let px = x_of(i - 1);
+                for (row, &s) in TAB_STRINGS.iter().enumerate() {
+                    let (Some(a), Some(c)) = (prev.frets[s], shape.frets[s]) else { continue };
+                    let y = y_of(row);
+                    let mut p = vg::Paint::default();
+                    p.set_anti_alias(true);
+                    p.set_style(vg::PaintStyle::Stroke);
+                    p.set_stroke_cap(vg::paint::Cap::Round);
+                    if a == c {
+                        p.set_color(pal.signal);
+                        p.set_stroke_width(4.0);
+                        line(canvas, px + radius, y, x - radius, y, &p);
+                    } else {
+                        let d = c as i32 - a as i32;
+                        let label = if d > 0 { format!("+{d}") } else { format!("{d}") };
+                        let w = font.measure_str(&label, None).0;
+                        text(canvas, &label, (px + x) / 2.0 - w / 2.0, y - 8.0, 12.0, pal.ink);
+                    }
+                }
+            }
+
+            // The frets, and under each the note it sounds.
+            for (row, &s) in TAB_STRINGS.iter().enumerate() {
+                let Some(fret) = shape.frets[s] else { continue };
+                let y = y_of(row);
+                let stays = prev.is_some_and(|p| p.frets[s] == Some(fret));
+                let mut dot = vg::Paint::default();
+                dot.set_anti_alias(true);
+                // An open string has no finger on it: a ring.
+                let ink = if fret == 0 {
+                    dot.set_color(pal.bg_000);
+                    canvas.draw_circle(vg::Point::new(x, y), radius, &dot);
+                    dot.set_style(vg::PaintStyle::Stroke);
+                    dot.set_stroke_width(2.0);
+                    dot.set_color(if stays { pal.signal } else { pal.ink_muted });
+                    canvas.draw_circle(vg::Point::new(x, y), radius - 1.0, &dot);
+                    pal.ink
+                } else {
+                    dot.set_color(if stays { pal.signal } else { pal.ink });
+                    canvas.draw_circle(vg::Point::new(x, y), radius, &dot);
+                    pal.bg_000
+                };
+                let label = fret.to_string();
+                let size = radius * 1.05;
+                let w = crate::canvas_text::canvas_font(size).measure_str(&label, None).0;
+                text(canvas, &label, x - w / 2.0, y + size * 0.36, size, ink);
+                let note = note_name_for_key(shape.pitch(s).unwrap_or(0) % 12, key).replace('\u{266d}', "b");
+                text(canvas, &note, x + radius + 4.0, y + radius + 2.0, 11.0, pal.ink_faint);
+            }
+
+            // What the hand does.
+            let moving = prev.map(|p| TAB_STRINGS.iter().filter(|&&s| p.frets[s] != shape.frets[s]).count());
+            let footer = match moving {
+                None => "start here".to_string(),
+                Some(0) => "same shape".to_string(),
+                Some(1) => "move 1 finger".to_string(),
+                Some(n) => format!("move {n} fingers"),
+            };
+            let w = font.measure_str(&footer, None).0;
+            text(canvas, &footer, x - w / 2.0, y_of(3) + 52.0, 12.0, pal.ink_muted);
+        }
+
+        let legend = "Numbers are frets (0 = open string). Green: it stays - keep that finger where it is. +1 / -2: that string goes up or down that many frets.";
+        text(canvas, legend, b.x + GUTTER - 8.0, b.y + b.h - 10.0, 12.0, pal.ink_faint);
+    }
 }
