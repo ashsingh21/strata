@@ -8,6 +8,8 @@ use super::voicing::Chord;
 /// Standard tuning, low E to high E.
 pub const TUNING: [u8; 6] = [40, 45, 50, 55, 59, 64];
 pub const STRING_NAMES: [&str; 6] = ["E", "A", "D", "G", "B", "E"];
+/// `Shape::fingers`' mark for the thumb.
+pub const THUMB: u8 = 0;
 /// The highest fret a shape may start on.
 const TOP_POSITION: u8 = 12;
 /// Frets one hand spans without stretching.
@@ -70,10 +72,27 @@ impl Shape {
         (self.fretted().count() > 4 || (to == 5 && at.len() == to - from + 1)).then_some(Barre { fret: low, from, to })
     }
 
-    /// Which finger presses each string (1 = index ... 4 = little),
-    /// `None` for open or unplayed. A barre is all finger 1; otherwise
-    /// fingers go in order of fret, then string.
+    /// The low E fretted by the thumb over the neck (fingerpickers' F,
+    /// 1x3211): when the shape needs a fifth finger, the low E is at its
+    /// lowest fret and the A string - which the thumb damps - isn't played.
+    pub fn thumb(&self) -> bool {
+        self.frets[0].is_some_and(|f| f > 0 && f == self.low_fret())
+            && self.frets[1].is_none()
+            && self.barre().is_none()
+            && self.fretted().count() > 4
+    }
+
+    /// Which finger presses each string (1 = index ... 4 = little, `THUMB`
+    /// for the thumb over the neck), `None` for open or unplayed. A barre
+    /// is all finger 1; otherwise fingers go in order of fret, then string.
     pub fn fingers(&self) -> [Option<u8>; 6] {
+        if self.thumb() {
+            let mut rest = *self;
+            rest.frets[0] = None;
+            let mut out = rest.fingers();
+            out[0] = Some(THUMB);
+            return out;
+        }
         let mut out = [None; 6];
         let barre = self.barre();
         let mut rest: Vec<(usize, u8)> = self.fretted().collect();
@@ -99,8 +118,13 @@ impl Shape {
         out
     }
 
-    /// Fingers it needs.
+    /// Fingers it needs (the thumb over the neck not counted).
     fn finger_count(&self) -> usize {
+        if self.thumb() {
+            let mut rest = *self;
+            rest.frets[0] = None;
+            return rest.finger_count();
+        }
         match self.barre() {
             Some(b) => 1 + self.fretted().filter(|(_, f)| *f != b.fret).count(),
             None => self.fretted().count(),
@@ -117,7 +141,10 @@ impl Shape {
 
     /// How hard a top-four-string shape is to hold.
     fn small_effort(&self) -> f32 {
-        0.12 * self.low_fret() as f32 + 0.4 * (self.high_fret() - self.low_fret()) as f32 + 0.3 * self.finger_count() as f32
+        0.12 * self.low_fret() as f32
+            + 0.4 * (self.high_fret() - self.low_fret()) as f32
+            + 0.3 * self.finger_count() as f32
+            + if self.thumb() { 0.5 } else { 0.0 }
     }
 
     /// How hard it is to hold: higher is harder.
@@ -276,13 +303,51 @@ fn collect_small(options: &[Vec<Option<u8>>], string: usize, frets: &mut [Option
 }
 
 /// Top-four-string shapes for each chord, chosen together so each string's
-/// finger moves as few frets as it can - each string is one voice.
-pub fn lead_small(chords: &[Chord]) -> Vec<Option<Shape>> {
-    let options: Vec<Vec<Shape>> = chords.iter().map(|c| small_shapes(c).into_iter().take(CANDIDATES * 2).collect()).collect();
-    chain(&options, Shape::small_effort, |a, b| {
-        let frets: u32 = (2..6).map(|s| a.frets[s].unwrap_or(0).abs_diff(b.frets[s].unwrap_or(0)) as u32).sum();
-        0.6 * frets as f32
+/// finger moves as few frets as it can - each string is one voice. With
+/// `bass`, each also has the chord's root on the A or low E string where
+/// the hand can reach it (shapes that can take one are preferred).
+pub fn lead_small(chords: &[Chord], bass: bool) -> Vec<Option<Shape>> {
+    let options: Vec<Vec<Shape>> = chords
+        .iter()
+        .map(|c| {
+            small_shapes(c)
+                .into_iter()
+                .take(CANDIDATES * 2)
+                .map(|s| if bass { add_bass(&s, c).unwrap_or(s) } else { s })
+                .collect()
+        })
+        .collect();
+    let effort = move |s: &Shape| s.small_effort() + if bass && s.frets[0].is_none() && s.frets[1].is_none() { 1.5 } else { 0.0 };
+    chain(&options, effort, |a, b| {
+        let top: u32 = (2..6).map(|s| a.frets[s].unwrap_or(0).abs_diff(b.frets[s].unwrap_or(0)) as u32).sum();
+        // The bass may jump - it's one finger, or an open string.
+        let low: u32 = (0..2).map(|s| a.frets[s].zip(b.frets[s]).map(|(x, y)| x.abs_diff(y) as u32).unwrap_or(1)).sum();
+        0.6 * top as f32 + 0.15 * low as f32
     })
+}
+
+/// `shape` (on the top four strings) with `chord`'s root added on the A
+/// string, or else the low E: open if that string is the root, else
+/// fretted within the shape's reach and four fingers. `None` if neither
+/// string can.
+pub fn add_bass(shape: &Shape, chord: &Chord) -> Option<Shape> {
+    let mut best: Option<Shape> = None;
+    for string in [1, 0] {
+        for fret in 0..=TOP_POSITION + SPAN {
+            if (TUNING[string] + fret) % 12 != chord.root {
+                continue;
+            }
+            let mut with = *shape;
+            with.frets[string] = Some(fret);
+            if with.high_fret() - with.low_fret() <= SPAN && with.finger_count() <= 4 && best.is_none_or(|b| with.small_effort() < b.small_effort()) {
+                best = Some(with);
+            }
+        }
+        if best.is_some() {
+            break;
+        }
+    }
+    best
 }
 
 /// The cheapest path through each chord's `options`: their own effort plus
@@ -377,12 +442,17 @@ mod tests {
         let c = Shape { frets: [None, Some(3), Some(2), Some(0), Some(1), Some(0)] };
         assert_eq!(c.barre(), None);
         assert_eq!(c.fingers(), [None, Some(3), Some(2), None, Some(1), None]);
+        // F with its bass on the low E: the thumb over the neck.
+        let f = Shape { frets: [Some(1), None, Some(3), Some(2), Some(1), Some(1)] };
+        assert!(f.thumb());
+        assert_eq!(f.fingers(), [Some(THUMB), None, Some(3), Some(2), Some(1), Some(1)]);
+        assert_eq!(f.finger_count(), 3);
     }
 
     #[test]
     fn small_shapes_move_a_fret_or_two_per_string() {
         let prog: Vec<Chord> = [5, 3, 0, 4].iter().map(|&d| chord(d, false)).collect();
-        let shapes: Vec<Shape> = lead_small(&prog).into_iter().map(|s| s.unwrap()).collect();
+        let shapes: Vec<Shape> = lead_small(&prog, false).into_iter().map(|s| s.unwrap()).collect();
         for (s, c) in shapes.iter().zip(&prog) {
             assert_eq!(s.notes().len(), 4);
             assert!(s.frets[0].is_none() && s.frets[1].is_none());
@@ -393,6 +463,24 @@ mod tests {
             assert!(moved <= 5, "{} -> {}", tab(&pair[0]), tab(&pair[1]));
         }
         println!("{:?}", shapes.iter().map(tab).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_bass_note_is_the_root_where_a_hand_can_reach_it() {
+        let prog: Vec<Chord> = [5, 3, 0, 4].iter().map(|&d| chord(d, false)).collect();
+        let shapes: Vec<Shape> = lead_small(&prog, true).into_iter().map(|s| s.unwrap()).collect();
+        let with_bass = shapes.iter().filter(|s| s.frets[0].is_some() || s.frets[1].is_some()).count();
+        assert_eq!(with_bass, 4, "{:?}", shapes.iter().map(tab).collect::<Vec<_>>());
+        for (s, c) in shapes.iter().zip(&prog) {
+            assert!(s.high_fret() - s.low_fret() <= SPAN && s.finger_count() <= 4, "{}", tab(s));
+            if s.frets[0].is_some() || s.frets[1].is_some() {
+                assert_eq!(s.notes()[0] % 12, c.root, "{}", tab(s));
+            }
+        }
+        println!("{:?}", shapes.iter().map(tab).collect::<Vec<_>>());
+        // Am's bass is the open A string.
+        let am = add_bass(&Shape { frets: [None, None, Some(2), Some(2), Some(1), Some(0)] }, &chord(5, false)).unwrap();
+        assert_eq!(tab(&am), "x02210");
     }
 
     #[test]

@@ -41,7 +41,7 @@ impl ChordCharts {
     }
 
     fn chords(&self) -> Vec<(usize, voicing::Chord, Option<Shape>)> {
-        on_guitar(&self.p.progression.get(), self.p.key.get(), self.p.scale_mask.get(), self.p.sevenths.get(), false)
+        on_guitar(&self.p.progression.get(), self.p.key.get(), self.p.scale_mask.get(), self.p.sevenths.get(), false, false)
     }
 
     fn release(&mut self, cx: &mut EventContext) {
@@ -263,7 +263,7 @@ impl Card<'_> {
                 canvas.draw_circle(vg::Point::new(x, y), radius, &dot);
             }
             if let Some(n) = fingers[s].filter(|_| !on_barre || s == shape.barre().map(|b| b.from).unwrap_or(s)) {
-                let label = n.to_string();
+                let label = if n == shared::theory::guitar::THUMB { "T".to_string() } else { n.to_string() };
                 let w = finger_font.measure_str(&label, None).0;
                 text(canvas, &label, x - w / 2.0, y + radius * 0.38, radius * 1.05, pal.bg_000);
             }
@@ -362,11 +362,12 @@ impl StringsTab {
             .bind(p.sevenths, |mut h| h.needs_redraw())
             .bind(p.key, |mut h| h.needs_redraw())
             .bind(p.scale_mask, |mut h| h.needs_redraw())
+            .bind(p.bass, |mut h| h.needs_redraw())
             .bind(p.theme, |mut h| h.needs_redraw())
     }
 
     fn chords(&self) -> Vec<(usize, voicing::Chord, Option<Shape>)> {
-        on_guitar(&self.p.progression.get(), self.p.key.get(), self.p.scale_mask.get(), self.p.sevenths.get(), true)
+        on_guitar(&self.p.progression.get(), self.p.key.get(), self.p.scale_mask.get(), self.p.sevenths.get(), true, self.p.bass.get())
     }
 
     /// Column width and the first column's centre.
@@ -544,23 +545,127 @@ impl View for StringsTab {
                 let size = radius * 1.05;
                 let w = crate::canvas_text::canvas_font(size).measure_str(&label, None).0;
                 text(canvas, &label, x - w / 2.0, y + size * 0.36, size, ink);
-                let note = note_name_for_key(shape.pitch(s).unwrap_or(0) % 12, key).replace('\u{266d}', "b");
+                let mut note = note_name_for_key(shape.pitch(s).unwrap_or(0) % 12, key).replace('\u{266d}', "b");
+                if s == 0 && shape.thumb() {
+                    note += " thumb";
+                }
                 text(canvas, &note, x + radius + 4.0, y + radius + 2.0, 11.0, pal.ink_faint);
             }
 
             // What the hand does.
-            let moving = prev.map(|p| TAB_STRINGS.iter().filter(|&&s| p.frets[s] != shape.frets[s]).count());
-            let footer = match moving {
+            // On the top four strings (the bass goes where the chord's
+            // name says): how many notes stay and how many move.
+            let footer = match prev {
                 None => "start here".to_string(),
-                Some(0) => "same shape".to_string(),
-                Some(1) => "move 1 finger".to_string(),
-                Some(n) => format!("move {n} fingers"),
+                Some(p) => {
+                    let stay = (2..6).filter(|&s| p.pitch(s).is_some() && p.pitch(s) == shape.pitch(s)).count();
+                    match (stay, 4 - stay) {
+                        (_, 0) => "nothing moves".to_string(),
+                        (0, _) => "all four move".to_string(),
+                        (k, m) => format!("{k} stay \u{b7} {m} move"),
+                    }
+                }
             };
             let w = font.measure_str(&footer, None).0;
             text(canvas, &footer, x - w / 2.0, y_of(5) + 52.0, 12.0, pal.ink_muted);
         }
 
-        let legend = "Numbers are frets (0 = open string, x = don't play it). Green: it stays - keep that finger where it is. +1 / -2: that string goes up or down that many frets.";
+        // Why each change works, in words.
+        let mut y = y_of(5) + 92.0;
+        if chords.len() > 1 && y + 20.0 < b.y + b.h - 24.0 {
+            text(canvas, "Why it moves like this", b.x + GUTTER - 8.0, y, 13.0, pal.ink);
+            y += 20.0;
+            text(
+                canvas,
+                "Notes two chords share stay where they are; every other note goes to the nearest note of the next chord.",
+                b.x + GUTTER - 8.0,
+                y,
+                12.0,
+                pal.ink_muted,
+            );
+            for pair in chords.windows(2) {
+                y += 20.0;
+                if y > b.y + b.h - 28.0 {
+                    break;
+                }
+                let line = why(&pair[0], &pair[1], key);
+                text(canvas, &line, b.x + GUTTER - 8.0, y, 12.0, pal.ink_muted);
+            }
+        }
+
+        let legend = "Numbers are frets (0 = open string, x = don't play it, thumb = the thumb over the neck). Green: it stays - keep that finger where it is. +1 / -2: that string goes up or down that many frets.";
         text(canvas, legend, b.x + GUTTER - 8.0, b.y + b.h - 10.0, 12.0, pal.ink_faint);
+    }
+}
+
+/// One chord change in words: what both chords have (and so stays), what
+/// moves and how far, and where the bass goes.
+fn why(a: &(usize, voicing::Chord, Option<Shape>), b: &(usize, voicing::Chord, Option<Shape>), key: u8) -> String {
+    let name = |c: &voicing::Chord| voicing::name(c, key).replace('\u{266d}', "b");
+    let note = |p: u8| note_name_for_key(p % 12, key).replace('\u{266d}', "b");
+    let mut line = format!("{} to {}: ", name(&a.1), name(&b.1));
+    let (Some(sa), Some(sb)) = (a.2, b.2) else { return line + "no shape to show." };
+    let list = |names: &[String]| match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    };
+    let mut kept: Vec<String> = Vec::new();
+    let mut moves: Vec<String> = Vec::new();
+    for s in 2..6 {
+        let (Some(x), Some(y)) = (sa.pitch(s), sb.pitch(s)) else { continue };
+        if x == y {
+            if !kept.contains(&note(x)) {
+                kept.push(note(x));
+            }
+        } else {
+            let d = y as i32 - x as i32;
+            let how = match d.abs() {
+                1 | 2 => format!("{} {} {} to {}", note(x), if d > 0 { "up" } else { "down" }, plural(d.abs(), "fret"), note(y)),
+                _ => format!("{} jumps {} {} to {}", note(x), if d > 0 { "up" } else { "down" }, plural(d.abs(), "frets"), note(y)),
+            };
+            if !moves.contains(&how) {
+                moves.push(how);
+            }
+        }
+    }
+    if kept.is_empty() {
+        line += "no notes in common, so everything moves - each to its nearest note. ";
+    } else {
+        line += &format!("{} {} in both chords, so {} stay{}. ", list(&kept), if kept.len() == 1 { "is" } else { "are" }, if kept.len() == 1 { "it" } else { "they" }, if kept.len() == 1 { "s" } else { "" });
+    }
+    if !moves.is_empty() {
+        line += &format!("{}. ", capitalise(&list(&moves)));
+    }
+    let bass = |sh: &Shape| (0..2).find_map(|s| sh.pitch(s));
+    if let Some(low) = bass(&sb) {
+        if bass(&sa) != Some(low) {
+            line += &format!("Bass to {}, the note the chord is named after.", note(low));
+        }
+    }
+    line.trim_end().to_string()
+}
+
+fn plural(n: i32, unit: &str) -> String {
+    let one = unit.trim_end_matches('s');
+    if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") }
+}
+
+fn capitalise(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_change_explains_itself() {
+        let chords = crate::voicing::on_guitar(&[5, 3], 0, voicing::MAJOR, false, true, true);
+        let line = why(&chords[0], &chords[1], 0);
+        assert!(line.starts_with("Am to F: "), "{line}");
+        assert!(line.contains("in both chords"), "{line}");
+        assert!(line.contains("Bass to F"), "{line}");
     }
 }

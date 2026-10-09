@@ -39,6 +39,8 @@ pub enum VoicingEvent {
     SetVoices(usize),
     /// FULL_CHORDS, FOUR_STRINGS or PIANO_LINES.
     SetView(u8),
+    /// The root on a bass string, in the four-string view.
+    SetBass(bool),
     /// Hear the whole progression (again: stop).
     Play,
     Rendered { generation: u64, audio: Arc<[f32]> },
@@ -51,6 +53,7 @@ pub struct VoicingModel {
     pub sevenths: Signal<bool>,
     pub voices: Signal<usize>,
     pub view: Signal<u8>,
+    pub bass: Signal<bool>,
     pub playing: Signal<bool>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
@@ -69,6 +72,7 @@ impl VoicingModel {
             sevenths: Signal::new(false),
             voices: Signal::new(4),
             view: Signal::new(FOUR_STRINGS),
+            bass: Signal::new(true),
             playing: Signal::new(false),
             key,
             scale_mask,
@@ -99,13 +103,14 @@ impl Model for VoicingModel {
             VoicingEvent::SetSevenths(on) => self.sevenths.set(*on),
             VoicingEvent::SetVoices(n) => self.voices.set(*n),
             VoicingEvent::SetView(v) => self.view.set(*v),
+            VoicingEvent::SetBass(on) => self.bass.set(*on),
             VoicingEvent::Play => {
                 if self.playing.get() {
                     self.stop();
                     return;
                 }
                 let chords: Vec<Vec<u8>> = if self.view.get() != PIANO_LINES {
-                    on_guitar(&self.progression.get(), self.key.get(), self.scale_mask.get(), self.sevenths.get(), self.view.get() == FOUR_STRINGS)
+                    on_guitar(&self.progression.get(), self.key.get(), self.scale_mask.get(), self.sevenths.get(), self.view.get() == FOUR_STRINGS, self.bass.get())
                         .into_iter()
                         .map(|(_, _, shape)| shape.map(|s| s.notes()).unwrap_or_default())
                         .collect()
@@ -166,11 +171,12 @@ fn voiced(progression: &[usize], key: u8, mask: u16, sevenths: bool, voices: usi
 
 /// Each chord of the progression - its scale degree, the chord, and a
 /// guitar shape for it - a whole chord, or (`small`) one on the top four
-/// strings - the shapes chosen together to keep the hand still.
-pub fn on_guitar(progression: &[usize], key: u8, mask: u16, sevenths: bool, small: bool) -> Vec<(usize, Chord, Option<Shape>)> {
+/// strings, with (`bass`) its root on a bass string where it reaches - the
+/// shapes chosen together to keep the hand still.
+pub fn on_guitar(progression: &[usize], key: u8, mask: u16, sevenths: bool, small: bool, bass: bool) -> Vec<(usize, Chord, Option<Shape>)> {
     let chords: Vec<(usize, Chord)> = progression.iter().filter_map(|&d| voicing::diatonic(d, key, voicing::seven_notes(mask), sevenths).map(|c| (d, c))).collect();
     let plain: Vec<Chord> = chords.iter().map(|(_, c)| c.clone()).collect();
-    let shapes = if small { guitar::lead_small(&plain) } else { guitar::lead(&plain) };
+    let shapes = if small { guitar::lead_small(&plain, bass) } else { guitar::lead(&plain) };
     chords.into_iter().zip(shapes).map(|((d, c), s)| (d, c, s)).collect()
 }
 
@@ -181,6 +187,7 @@ pub struct VoicingProps {
     pub sevenths: Signal<bool>,
     pub voices: Signal<usize>,
     pub view: Signal<u8>,
+    pub bass: Signal<bool>,
     pub playing: Signal<bool>,
     pub key: Signal<u8>,
     pub scale_mask: Signal<u16>,
@@ -195,6 +202,7 @@ impl VoicingProps {
             sevenths: m.sevenths,
             voices: m.voices,
             view: m.view,
+            bass: m.bass,
             playing: m.playing,
             key: m.key,
             scale_mask: m.scale_mask,
@@ -268,6 +276,16 @@ fn header(cx: &mut Context, p: VoicingProps) {
         // How many voices only matters when they're drawn as lines.
         HStack::new(cx, move |cx| {
             Binding::new(cx, p.view, move |cx| {
+                if p.view.get() == FOUR_STRINGS {
+                    crate::synth::segmented::segmented(
+                        cx,
+                        2,
+                        |cx, i| Label::new(cx, if i == 0 { "With bass" } else { "Top 4 only" }),
+                        move |i| p.bass.map(move |b| *b == (i == 0)),
+                        |cx, i| cx.emit(VoicingEvent::SetBass(i == 0)),
+                    )
+                    .height(Pixels(tokens::SIZE_CONTROL));
+                }
                 if p.view.get() != PIANO_LINES {
                     return;
                 }
