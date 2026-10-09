@@ -1,14 +1,16 @@
-//! Voice leading: build a progression from the key's chords and see each
-//! one voiced to move as little as possible from the last - every voice
-//! drawn as a line through the chords, held notes marked. Hold a chord to
-//! hear it on the selected track; Play hears them all in turn. Docked under
-//! the devices like Theory, opened from the rail.
+//! Voice leading: build a progression from the key's chords and see how to
+//! move between them with as little motion as possible - as guitar chord
+//! shapes chosen so fingers stay down where they can (Guitar), or as
+//! voices drawn as lines through the chords (Voices). Hold a chord to hear
+//! it on the selected track; Play hears them all in turn. A page of its
+//! own over the timeline, opened from the rail.
 
 use std::sync::Arc;
 
 use vizia::prelude::*;
 use vizia::vg;
 
+use shared::theory::guitar::{self, Shape};
 use shared::theory::voicing::{self, Chord};
 use shared::theory::note_name_for_key;
 
@@ -26,6 +28,8 @@ pub enum VoicingEvent {
     Clear,
     SetSevenths(bool),
     SetVoices(usize),
+    /// Guitar shapes (true) or voices as lines.
+    SetGuitar(bool),
     /// Hear the whole progression (again: stop).
     Play,
     Rendered { generation: u64, audio: Arc<[f32]> },
@@ -37,6 +41,7 @@ pub struct VoicingModel {
     pub progression: Signal<Vec<usize>>,
     pub sevenths: Signal<bool>,
     pub voices: Signal<usize>,
+    pub guitar: Signal<bool>,
     pub playing: Signal<bool>,
     key: Signal<u8>,
     scale_mask: Signal<u16>,
@@ -54,6 +59,7 @@ impl VoicingModel {
             progression: Signal::new(Vec::new()),
             sevenths: Signal::new(false),
             voices: Signal::new(4),
+            guitar: Signal::new(true),
             playing: Signal::new(false),
             key,
             scale_mask,
@@ -83,19 +89,30 @@ impl Model for VoicingModel {
             VoicingEvent::Clear => self.progression.set(Vec::new()),
             VoicingEvent::SetSevenths(on) => self.sevenths.set(*on),
             VoicingEvent::SetVoices(n) => self.voices.set(*n),
+            VoicingEvent::SetGuitar(on) => self.guitar.set(*on),
             VoicingEvent::Play => {
                 if self.playing.get() {
                     self.stop();
                     return;
                 }
-                let voiced = voiced(&self.progression.get(), self.key.get(), self.scale_mask.get(), self.sevenths.get(), self.voices.get());
-                if voiced.is_empty() {
+                let chords: Vec<Vec<u8>> = if self.guitar.get() {
+                    on_guitar(&self.progression.get(), self.key.get(), self.scale_mask.get(), self.sevenths.get())
+                        .into_iter()
+                        .map(|(_, _, shape)| shape.map(|s| s.notes()).unwrap_or_default())
+                        .collect()
+                } else {
+                    voiced(&self.progression.get(), self.key.get(), self.scale_mask.get(), self.sevenths.get(), self.voices.get())
+                        .into_iter()
+                        .map(|(_, notes)| notes)
+                        .collect()
+                };
+                if chords.is_empty() {
                     return;
                 }
-                let notes: Vec<(i64, u8, i64)> = voiced
+                let notes: Vec<(i64, u8, i64)> = chords
                     .iter()
                     .enumerate()
-                    .flat_map(|(i, (_, notes))| notes.iter().map(move |&n| (i as i64 * CHORD_16THS, n, CHORD_16THS - 1)))
+                    .flat_map(|(i, notes)| notes.iter().map(move |&n| (i as i64 * CHORD_16THS, n, CHORD_16THS - 1)))
                     .collect();
                 let take = crate::lessons::preview::quiz_take(&notes);
                 self.generation += 1;
@@ -133,9 +150,17 @@ impl Model for VoicingModel {
 
 /// Each chord of the progression with its voicing.
 fn voiced(progression: &[usize], key: u8, mask: u16, sevenths: bool, voices: usize) -> Vec<(Chord, Vec<u8>)> {
-    let chords: Vec<Chord> = progression.iter().filter_map(|&d| voicing::diatonic(d, key, mask, sevenths)).collect();
+    let chords: Vec<Chord> = progression.iter().filter_map(|&d| voicing::diatonic(d, key, voicing::seven_notes(mask), sevenths)).collect();
     let voicings = voicing::smooth(&chords, voices);
     chords.into_iter().zip(voicings).collect()
+}
+
+/// Each chord of the progression - its scale degree, the chord, and a
+/// guitar shape for it, the shapes chosen together to keep the hand still.
+pub fn on_guitar(progression: &[usize], key: u8, mask: u16, sevenths: bool) -> Vec<(usize, Chord, Option<Shape>)> {
+    let chords: Vec<(usize, Chord)> = progression.iter().filter_map(|&d| voicing::diatonic(d, key, voicing::seven_notes(mask), sevenths).map(|c| (d, c))).collect();
+    let shapes = guitar::lead(&chords.iter().map(|(_, c)| c.clone()).collect::<Vec<_>>());
+    chords.into_iter().zip(shapes).map(|((d, c), s)| (d, c, s)).collect()
 }
 
 #[derive(Clone, Copy)]
@@ -144,6 +169,7 @@ pub struct VoicingProps {
     pub progression: Signal<Vec<usize>>,
     pub sevenths: Signal<bool>,
     pub voices: Signal<usize>,
+    pub guitar: Signal<bool>,
     pub playing: Signal<bool>,
     pub key: Signal<u8>,
     pub scale_mask: Signal<u16>,
@@ -157,6 +183,7 @@ impl VoicingProps {
             progression: m.progression,
             sevenths: m.sevenths,
             voices: m.voices,
+            guitar: m.guitar,
             playing: m.playing,
             key: m.key,
             scale_mask: m.scale_mask,
@@ -165,7 +192,7 @@ impl VoicingProps {
     }
 }
 
-/// The panel, built only while open.
+/// The page, over the timeline, built only while open.
 pub fn voicing_view(cx: &mut Context, p: VoicingProps) {
     Binding::new(cx, p.open, move |cx| {
         if !p.open.get() {
@@ -174,23 +201,25 @@ pub fn voicing_view(cx: &mut Context, p: VoicingProps) {
         VStack::new(cx, move |cx| {
             header(cx, p);
             chord_buttons(cx, p);
-            // Tall enough that notes a semitone apart don't overlap.
-            let height = Memo::new(move |_| {
-                let voiced = voiced(&p.progression.get(), p.key.get(), p.scale_mask.get(), p.sevenths.get(), p.voices.get());
-                let notes = voiced.iter().flat_map(|(_, n)| n.iter().copied());
-                let range = match (notes.clone().min(), notes.max()) {
-                    (Some(lo), Some(hi)) => (hi - lo) as f32 + 2.0,
-                    _ => 0.0,
-                };
-                Pixels((range * SEMITONE_PX + TOP + BOTTOM).max(160.0))
-            });
-            Chart::new(cx, p).width(Stretch(1.0)).height(height);
+            VStack::new(cx, move |cx| {
+                Binding::new(cx, p.guitar, move |cx| {
+                    if p.guitar.get() {
+                        crate::chord_charts::ChordCharts::new(cx, p).width(Stretch(1.0)).height(Stretch(1.0));
+                    } else {
+                        Chart::new(cx, p).width(Stretch(1.0)).height(Stretch(1.0));
+                    }
+                });
+            })
+            .width(Stretch(1.0))
+            .height(Stretch(1.0));
         })
-        .class("device")
+        .class("map-view")
+        .position_type(PositionType::Absolute)
+        .z_index(40)
         .gap(Pixels(tokens::SPACE_3))
-        .padding(Pixels(tokens::SPACE_3))
+        .padding(Pixels(tokens::SPACE_4))
         .width(Stretch(1.0))
-        .height(Auto);
+        .height(Stretch(1.0));
     });
 }
 
@@ -216,10 +245,28 @@ fn header(cx: &mut Context, p: VoicingProps) {
         crate::synth::segmented::segmented(
             cx,
             2,
-            |cx, i| Label::new(cx, if i == 0 { "3 voices" } else { "4 voices" }),
-            move |i| p.voices.map(move |v| *v == i + 3),
-            |cx, i| cx.emit(VoicingEvent::SetVoices(i + 3)),
+            |cx, i| Label::new(cx, if i == 0 { "Guitar" } else { "Voices" }),
+            move |i| p.guitar.map(move |g| *g == (i == 0)),
+            |cx, i| cx.emit(VoicingEvent::SetGuitar(i == 0)),
         )
+        .height(Pixels(tokens::SIZE_CONTROL));
+        // How many voices only matters when they're drawn as lines.
+        HStack::new(cx, move |cx| {
+            Binding::new(cx, p.guitar, move |cx| {
+                if p.guitar.get() {
+                    return;
+                }
+                crate::synth::segmented::segmented(
+                    cx,
+                    2,
+                    |cx, i| Label::new(cx, if i == 0 { "3 voices" } else { "4 voices" }),
+                    move |i| p.voices.map(move |v| *v == i + 3),
+                    |cx, i| cx.emit(VoicingEvent::SetVoices(i + 3)),
+                )
+                .height(Pixels(tokens::SIZE_CONTROL));
+            });
+        })
+        .width(Auto)
         .height(Pixels(tokens::SIZE_CONTROL));
         Element::new(cx).width(Stretch(1.0)).height(Pixels(1.0));
         Button::new(cx, move |cx| Label::new(cx, p.playing.map(|on| if *on { "\u{25a0} Stop" } else { "\u{25b8} Play" })))
@@ -228,7 +275,7 @@ fn header(cx: &mut Context, p: VoicingProps) {
             .on_press(|cx| cx.emit(VoicingEvent::Play));
         Button::new(cx, |cx| Label::new(cx, "Remove last")).class("btn").class("quiet").on_press(|cx| cx.emit(VoicingEvent::RemoveLast));
         Button::new(cx, |cx| Label::new(cx, "Clear")).class("btn").class("quiet").on_press(|cx| cx.emit(VoicingEvent::Clear));
-        Button::new(cx, |cx| Label::new(cx, "Close")).class("btn").class("quiet").on_press(|cx| cx.emit(VoicingEvent::ToggleOpen));
+        Button::new(cx, |cx| Label::new(cx, "Back to the timeline")).class("btn").on_press(|cx| cx.emit(VoicingEvent::ToggleOpen));
     })
     .gap(Pixels(tokens::SPACE_2))
     .alignment(Alignment::Left)
@@ -240,7 +287,7 @@ fn header(cx: &mut Context, p: VoicingProps) {
 fn chord_buttons(cx: &mut Context, p: VoicingProps) {
     let chords = Memo::new(move |_| {
         (0..7)
-            .filter_map(|d| voicing::diatonic(d, p.key.get(), p.scale_mask.get(), p.sevenths.get()).map(|c| (d, c)))
+            .filter_map(|d| voicing::diatonic(d, p.key.get(), voicing::seven_notes(p.scale_mask.get()), p.sevenths.get()).map(|c| (d, c)))
             .map(|(d, c)| (d, voicing::numeral(d, &c), voicing::name(&c, p.key.get())))
             .collect::<Vec<_>>()
     });
@@ -254,6 +301,13 @@ fn chord_buttons(cx: &mut Context, p: VoicingProps) {
                 return;
             }
             Label::new(cx, "Add").class("label");
+            // A five-note scale borrows the chords of the key it comes from.
+            let mask = p.scale_mask.get();
+            if voicing::seven_notes(mask) != mask {
+                let from = if voicing::seven_notes(mask) == voicing::MAJOR { "major" } else { "minor" };
+                Label::new(cx, format!("(chords of {} {from})", shared::theory::note_name(p.key.get())))
+                    .class("value");
+            }
             for (degree, numeral, name) in chords {
                 Button::new(cx, move |cx| {
                     VStack::new(cx, move |cx| {
@@ -265,15 +319,15 @@ fn chord_buttons(cx: &mut Context, p: VoicingProps) {
                     .hoverable(false)
                 })
                 .class("btn")
-                .width(Pixels(64.0))
-                .height(Pixels(44.0))
+                .width(Pixels(72.0))
+                .height(Pixels(48.0))
                 .on_press(move |cx| cx.emit(VoicingEvent::Add(degree)));
             }
         })
         .gap(Pixels(tokens::SPACE_2))
         .alignment(Alignment::Left)
         .width(Stretch(1.0))
-        .height(Pixels(44.0));
+        .height(Pixels(48.0));
     });
 }
 
@@ -302,7 +356,7 @@ impl Chart {
 
     /// Column width and where the columns start, for `n` chords in `w`.
     fn columns(n: usize, x: f32, w: f32) -> (f32, f32) {
-        let col = (w / n.max(1) as f32).min(120.0);
+        let col = (w / n.max(1) as f32).min(170.0);
         (col, x + (w - col * n as f32) / 2.0)
     }
 
@@ -317,8 +371,6 @@ const TOP: f32 = 34.0;
 const BOTTOM: f32 = 22.0;
 const NOTE_W: f32 = 34.0;
 const NOTE_H: f32 = 16.0;
-/// Vertical room per semitone: a note box and a little air.
-const SEMITONE_PX: f32 = 17.0;
 
 impl View for Chart {
     fn element(&self) -> Option<&'static str> {

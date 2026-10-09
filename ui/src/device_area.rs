@@ -63,7 +63,6 @@ pub struct DeviceAreaProps {
     pub interval_open: Signal<bool>,
     pub show_note_names: Signal<bool>,
     /// Voice leading, docked under Theory.
-    pub voicing: crate::voicing::VoicingProps,
     /// Riyaz, docked likewise.
     pub riyaz: crate::riyaz::RiyazProps,
     /// Practice, docked likewise.
@@ -205,7 +204,6 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
         p.interval_open,
         p.show_note_names,
     );
-    crate::voicing::voicing_view(cx, p.voicing);
     crate::ear::ear_view(cx, p.ear);
     crate::riyaz::riyaz_view(cx, p.riyaz);
     crate::practice::practice_view(cx, p.practice);

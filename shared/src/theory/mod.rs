@@ -4,6 +4,7 @@
 
 pub mod chord;
 pub mod scale;
+pub mod guitar;
 pub mod voicing;
 
 pub use chord::{recognize, ChordMatch};

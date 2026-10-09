@@ -4,6 +4,7 @@ mod audio_watch;
 mod browser;
 mod preview_player;
 mod voicing;
+mod chord_charts;
 mod riyaz;
 mod midi_in;
 mod practice;
@@ -696,7 +697,6 @@ fn main() -> Result<(), ApplicationError> {
                                     scale_mask: interval_scale_mask,
                                     interval_open,
                                     show_note_names: interval_show_note_names,
-                                    voicing: voicing_props,
                                     riyaz: riyaz_props,
                                     practice: practice_props,
                                     ear: ear_props,
@@ -726,6 +726,8 @@ fn main() -> Result<(), ApplicationError> {
                     learn::home::learn_page(cx, learn_props);
                     // The Map covers the timeline and the panel while it's open.
                     song_map::map_view(cx, map_props);
+                    // Voice leading: a page of its own over the timeline.
+                    voicing::voicing_view(cx, voicing_props);
                 })
                 .width(Stretch(1.0))
                 .height(Stretch(1.0));

@@ -36,6 +36,22 @@ pub fn diatonic(degree: usize, key: u8, mask: u16, seventh: bool) -> Option<Chor
     Some(Chord { root: tones[0], tones })
 }
 
+pub const MAJOR: u16 = 0b1010_1011_0101;
+pub const MINOR: u16 = 0b0101_1010_1101;
+
+/// The scale to build chords from: a seven-note scale as it is; any other
+/// (a pentatonic) as the major or minor scale it sits in - minor when it
+/// has a minor third and no major one.
+pub fn seven_notes(mask: u16) -> u16 {
+    if degrees_in_mask(mask).len() == 7 {
+        mask
+    } else if mask & (1 << 3) != 0 && mask & (1 << 4) == 0 {
+        MINOR
+    } else {
+        MAJOR
+    }
+}
+
 /// "Am", "G7", "Bdim", "Cmaj7" - or the root and its notes when the shape
 /// has no common name. `key` picks sharps or flats.
 pub fn name(chord: &Chord, key: u8) -> String {
@@ -199,6 +215,10 @@ mod tests {
         assert_eq!(numeral(1, &diatonic(1, 0, C_MAJOR, false).unwrap()), "ii");
         // A pentatonic scale has no stacked thirds to build from.
         assert!(diatonic(0, 9, 0b0100_1010_1001, false).is_none());
+        // ... so it borrows the minor scale's.
+        assert_eq!(seven_notes(0b0100_1010_1001), MINOR);
+        assert_eq!(seven_notes(0b0010_1001_0101), MAJOR);
+        assert_eq!(seven_notes(C_MAJOR), C_MAJOR);
     }
 
     #[test]
