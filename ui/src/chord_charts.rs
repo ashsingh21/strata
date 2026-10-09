@@ -348,9 +348,10 @@ pub struct StringsTab {
     pressed: Option<usize>,
 }
 
-/// The strings shown, top to bottom: high E, B, G, D.
-const TAB_STRINGS: [usize; 4] = [5, 4, 3, 2];
-const TAB_NAMES: [&str; 4] = ["high E", "B", "G", "D"];
+/// The strings, top to bottom as in tab: high E down to low E. The
+/// shapes play the top four; the bass two show as not played.
+const TAB_STRINGS: [usize; 6] = [5, 4, 3, 2, 1, 0];
+const TAB_NAMES: [&str; 6] = ["high E", "B", "G", "D", "A", "low E"];
 const GUTTER: f32 = 84.0;
 
 impl StringsTab {
@@ -377,7 +378,7 @@ impl StringsTab {
 
     /// Where the strings run: the top one's y and the gap between them.
     fn strings(b: BoundingBox) -> (f32, f32) {
-        let gap = ((b.h - 210.0) / 3.0).clamp(46.0, 84.0);
+        let gap = ((b.h - 230.0) / 5.0).clamp(40.0, 72.0);
         let top = b.y + 110.0;
         (top, gap)
     }
@@ -449,7 +450,7 @@ impl View for StringsTab {
         // The pressed column, lit.
         if let Some(i) = self.pressed {
             paint.set_color(pal.bg_100);
-            let r = vg::Rect::new(x_of(i) - col / 2.0 + 4.0, b.y + 4.0, x_of(i) + col / 2.0 - 4.0, y_of(3) + 70.0);
+            let r = vg::Rect::new(x_of(i) - col / 2.0 + 4.0, b.y + 4.0, x_of(i) + col / 2.0 - 4.0, y_of(5) + 70.0);
             canvas.draw_rrect(vg::RRect::new_rect_xy(r, 10.0, 10.0), &paint);
         }
 
@@ -507,10 +508,21 @@ impl View for StringsTab {
                 }
             }
 
-            // The frets, and under each the note it sounds.
+            // The frets, and under each the note it sounds; an x on a
+            // string not played.
             for (row, &s) in TAB_STRINGS.iter().enumerate() {
-                let Some(fret) = shape.frets[s] else { continue };
                 let y = y_of(row);
+                let Some(fret) = shape.frets[s] else {
+                    let mut p = vg::Paint::default();
+                    p.set_anti_alias(true);
+                    p.set_style(vg::PaintStyle::Stroke);
+                    p.set_stroke_width(2.0);
+                    p.set_color(pal.ink_faint);
+                    let r = radius * 0.4;
+                    line(canvas, x - r, y - r, x + r, y + r, &p);
+                    line(canvas, x - r, y + r, x + r, y - r, &p);
+                    continue;
+                };
                 let stays = prev.is_some_and(|p| p.frets[s] == Some(fret));
                 let mut dot = vg::Paint::default();
                 dot.set_anti_alias(true);
@@ -545,10 +557,10 @@ impl View for StringsTab {
                 Some(n) => format!("move {n} fingers"),
             };
             let w = font.measure_str(&footer, None).0;
-            text(canvas, &footer, x - w / 2.0, y_of(3) + 52.0, 12.0, pal.ink_muted);
+            text(canvas, &footer, x - w / 2.0, y_of(5) + 52.0, 12.0, pal.ink_muted);
         }
 
-        let legend = "Numbers are frets (0 = open string). Green: it stays - keep that finger where it is. +1 / -2: that string goes up or down that many frets.";
+        let legend = "Numbers are frets (0 = open string, x = don't play it). Green: it stays - keep that finger where it is. +1 / -2: that string goes up or down that many frets.";
         text(canvas, legend, b.x + GUTTER - 8.0, b.y + b.h - 10.0, 12.0, pal.ink_faint);
     }
 }
