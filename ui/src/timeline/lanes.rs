@@ -111,6 +111,9 @@ enum Drag {
     },
     /// Dragging a scrollbar thumb: pointer travel scales to content travel.
     ScrollThumb { vertical: bool, last: f32 },
+    /// The Split tool: a click cuts every track there; a drag picks a
+    /// stretch of time (across every track) for Delete to take out.
+    SplitRange { anchor: Ticks, current: Ticks },
 }
 
 /// Scrollbar thumb thickness and its grab zone from the lane edge.
@@ -145,6 +148,8 @@ pub struct LaneArea {
     hover_cursor: Signal<CursorIcon>,
     drag: Option<Drag>,
     last_click: Option<(Instant, f32, f32)>,
+    /// The Split tool's guide: where a click would cut.
+    split_hover: Option<Ticks>,
 }
 
 impl LaneArea {
@@ -189,6 +194,7 @@ impl LaneArea {
             hover_cursor,
             drag: None,
             last_click: None,
+            split_hover: None,
         }
         .build(cx, |_| {})
         .bind(tool, |mut h| h.needs_redraw())
@@ -234,6 +240,11 @@ impl View for LaneArea {
             WindowEvent::MouseScroll(x, y) => {
                 self.on_scroll(cx, *x, *y);
             }
+            WindowEvent::MouseLeave => {
+                if self.split_hover.take().is_some() {
+                    cx.needs_redraw();
+                }
+            }
             WindowEvent::GeometryChanged(_) => {
                 let b = cx.lbounds();
                 cx.emit(TimelineEvent::SetViewport { width: b.w as f64, height: b.h as f64 });
@@ -246,7 +257,38 @@ impl View for LaneArea {
         let _hidpi = crate::hidpi::scale(cx, canvas);
         crate::hidpi::clip(canvas, cx.lbounds());
         self.draw_impl(cx, canvas);
+        self.draw_split_guide(cx, canvas);
         self.draw_scrollbars(cx, canvas);
+    }
+}
+
+impl LaneArea {
+    /// The Split tool's marks, over the clips: a line down every track
+    /// where a click cuts, and the stretch picked for Delete to take out
+    /// (darkened, edged) - the usual time wash sits under clips, where a
+    /// stretch through the middle of them can't be seen.
+    fn draw_split_guide(&self, cx: &mut DrawContext, canvas: &Canvas) {
+        if self.tool.get() != TimelineTool::Split {
+            return;
+        }
+        let bounds = cx.lbounds();
+        let transform = self.transform.get();
+        let palette = self.theme.get().palette();
+        let mut ink = vg::Paint::default();
+        ink.set_color(palette.ink);
+        let line = |x: f32| vg::Path::rect(vg::Rect::new(x, bounds.y, x + 1.0, bounds.y + bounds.h), None);
+        if let Some((start, end)) = self.selection.get().time_range {
+            let x0 = bounds.x + transform.tick_to_x(start) as f32;
+            let x1 = bounds.x + transform.tick_to_x(end) as f32;
+            let mut shade = vg::Paint::default();
+            shade.set_color(Color::rgba(0, 0, 0, 110));
+            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, bounds.y, x1, bounds.y + bounds.h), None), &shade);
+            canvas.draw_path(&line(x0), &ink);
+            canvas.draw_path(&line(x1), &ink);
+        }
+        if let Some(at) = self.split_hover {
+            canvas.draw_path(&line(bounds.x + transform.tick_to_x(at) as f32), &ink);
+        }
     }
 }
 
@@ -305,6 +347,20 @@ impl LaneArea {
         cx.capture();
         cx.focus_with_visibility(false);
 
+        let on_automation = row_at_y(&rows, y_scrolled).is_some_and(|i| matches!(rows[i].kind, RowKind::Automation(_)));
+        if self.tool.get() == TimelineTool::Split && !on_automation {
+            let at = snap(tick.max(0), SnapGrid::Sixteenth, cx.modifiers().alt());
+            if cx.modifiers().shift() {
+                // Shift: just the clip under the pointer.
+                if let Some(clip) = self.clip_at(lx, ly) {
+                    cx.emit(TimelineEvent::SplitClipAt { clip: clip.id, at });
+                }
+            } else {
+                self.drag = Some(Drag::SplitRange { anchor: at, current: at });
+            }
+            return;
+        }
+
         let Some(row_index) = row_at_y(&rows, y_scrolled) else {
             self.drag = Some(Drag::RubberBand { anchor: (lx, ly), current: (lx, ly) });
             return;
@@ -330,11 +386,6 @@ impl LaneArea {
                     .find(|c| tick >= c.start && tick < c.end());
 
                 if let Some(clip) = hit {
-                    if self.tool.get() == TimelineTool::Split {
-                        let at = snap(tick, SnapGrid::Sixteenth, cx.modifiers().alt());
-                        cx.emit(TimelineEvent::SplitClipAt { clip: clip.id, at });
-                        return;
-                    }
                     let is_double = self
                         .last_click
                         .map(|(t, px, py)| t.elapsed() < DOUBLE_CLICK && (px - lx).abs() < 8.0 && (py - ly).abs() < 8.0)
@@ -530,7 +581,15 @@ impl LaneArea {
         if self.drag.is_none() {
             let bounds = cx.lbounds();
             let (lx, ly) = (x - bounds.x, y - bounds.y);
-            let icon = if self.tool.get() == TimelineTool::Split && self.clip_at(lx, ly).is_some() {
+            let splitting = self.tool.get() == TimelineTool::Split;
+            let hover = splitting.then(|| {
+                snap(self.transform.get().x_to_tick(lx as f64).max(0), SnapGrid::Sixteenth, cx.modifiers().alt())
+            });
+            if hover != self.split_hover {
+                self.split_hover = hover;
+                cx.needs_redraw();
+            }
+            let icon = if splitting {
                 CursorIcon::Crosshair
             } else if self.edge_hover_at(lx, ly) {
                 CursorIcon::EwResize
@@ -579,6 +638,13 @@ impl LaneArea {
 
         match drag {
             Drag::ScrollThumb { .. } => {}
+            Drag::SplitRange { anchor, current } => {
+                *current = snap(tick.max(0), snap_grid, bypass);
+                let (lo, hi) = (*anchor.min(current), *anchor.max(current));
+                self.split_hover = Some(*current);
+                cx.emit(TimelineEvent::SetTimeSelection((hi > lo).then_some((lo, hi))));
+                cx.needs_redraw();
+            }
             Drag::MoveClips { clips, grab_tick, original_row, delta_ticks, row_delta } => {
                 *delta_ticks = snap(tick - *grab_tick, snap_grid, bypass);
                 if clips.len() == 1 {
@@ -637,6 +703,12 @@ impl LaneArea {
 
         match drag {
             Drag::ScrollThumb { .. } => {}
+            Drag::SplitRange { anchor, current } => {
+                if anchor == current {
+                    cx.emit(TimelineEvent::SetTimeSelection(None));
+                    cx.emit(TimelineEvent::SplitAllAt(anchor));
+                }
+            }
             Drag::MoveClips { clips, delta_ticks, row_delta, .. } => {
                 if delta_ticks == 0 && row_delta == 0 {
                     return;

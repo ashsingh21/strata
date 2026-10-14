@@ -415,8 +415,17 @@ pub enum TimelineEvent {
     /// longer repeats its pattern, shorter trims it.
     SetClipBars { clip: ClipId, bars: i64 },
     SplitAtPlayhead,
-    /// The Split tool: cuts `clip` in two at `at`.
+    /// The Split tool: cuts `clip` in two at `at` (Shift+click).
     SplitClipAt { clip: ClipId, at: Ticks },
+    /// The Split tool: cuts every clip on every track at this point.
+    SplitAllAt(Ticks),
+    /// Takes `start..end` out of the whole song; what's after moves back.
+    RemoveTime { start: Ticks, end: Ticks },
+    /// The piano roll's Unloop: every repeat of a looping clip written out
+    /// as notes of its own, so one can change without the others.
+    UnloopClip(ClipId),
+    /// The piano roll's Unlink: this clip stops sharing notes with its copies.
+    UnlinkClip(ClipId),
     DeleteSelected,
     DuplicateSelected,
     /// Duplicates the selected MIDI clips as linked copies: editing the
@@ -795,27 +804,37 @@ impl Model for TimelineState {
                 self.do_command(Command::ReplaceClip { clip: Box::new(new) });
             }
             TimelineEvent::SplitAtPlayhead => {
-                let playhead = self.playhead_ticks.get();
-                let arr = self.arrangement.get();
-                let mut new_ids = Vec::new();
-                let targets: Vec<ClipId> = arr
-                    .clips
-                    .iter()
-                    .filter(|c| c.start < playhead && c.end() > playhead)
-                    .map(|c| c.id)
-                    .collect();
-                if !targets.is_empty() {
+                cx.emit(TimelineEvent::SplitAllAt(self.playhead_ticks.get()));
+            }
+            TimelineEvent::SplitAllAt(at) => {
+                let at = *at;
+                if self.arrangement.get().clips.iter().any(|c| c.start < at && c.end() > at) {
                     self.with_arrangement(|arr, stack| {
-                        let commands = targets
-                            .into_iter()
-                            .map(|clip| {
-                                let new_id = arr.alloc_id();
-                                new_ids.push(new_id);
-                                Command::SplitClip { clip, at: playhead, new_id }
-                            })
-                            .collect();
+                        let commands = shared::arrangement::split_all_at(arr, at);
                         stack.do_command(Command::Batch(commands), arr);
                     });
+                }
+            }
+            TimelineEvent::RemoveTime { start, end } => {
+                if end > start {
+                    let next = shared::arrangement::remove_time(&self.arrangement.get(), *start, *end);
+                    self.do_command(Command::Replace(Box::new(next)));
+                    self.selection.set(Selection::default());
+                }
+            }
+            TimelineEvent::UnloopClip(clip) => {
+                let arr = self.arrangement.get();
+                let Some(c) = arr.clip(*clip) else { return };
+                let ClipContent::Midi { loop_len: Some(_), .. } = &c.content else { return };
+                // Written out as heard (swing included), so it sounds the same.
+                let mut next = c.clone().unlinked();
+                next.content = ClipContent::Midi { notes: c.played_notes(), loop_len: None, link: None };
+                next.swing = 0.0;
+                self.do_command(Command::ReplaceClip { clip: Box::new(next) });
+            }
+            TimelineEvent::UnlinkClip(clip) => {
+                if let Some(c) = self.arrangement.get().clip(*clip).filter(|c| c.link().is_some()) {
+                    self.do_command(Command::ReplaceClip { clip: Box::new(c.clone().unlinked()) });
                 }
             }
             TimelineEvent::SplitClipAt { clip, at } => {
@@ -829,6 +848,15 @@ impl Model for TimelineState {
                     let new_id = arr.alloc_id();
                     stack.do_command(Command::SplitClip { clip, at, new_id }, arr);
                 });
+            }
+            TimelineEvent::DeleteSelected
+                if self.tool.get() == TimelineTool::Split
+                    && self.selection.get().time_range.is_some()
+                    && self.piano_roll_selected.get().is_empty() =>
+            {
+                if let Some((start, end)) = self.selection.get().time_range {
+                    cx.emit(TimelineEvent::RemoveTime { start, end });
+                }
             }
             TimelineEvent::DeleteSelected => {
                 let piano_roll_selected = self.piano_roll_selected.get();

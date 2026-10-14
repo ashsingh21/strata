@@ -11,6 +11,7 @@ pub mod schedule;
 pub mod seed;
 pub mod step_entry;
 pub mod time;
+pub mod time_edit;
 pub mod transform;
 
 pub use automation::{fader_pos_to_gain_db, gain_db_to_fader_pos, AutomationTarget};
@@ -26,5 +27,6 @@ pub use peaks::{PeakLevel, PeakPyramid};
 pub use schedule::{notes_in_range, timed_notes_in_range, ScheduledNotes, TimedNote};
 pub use seed::{empty_arrangement, seed_arrangement};
 pub use step_entry::step_entry_commit;
+pub use time_edit::{remove_time, split_all_at};
 pub use time::{position_to_ticks, TempoEvent, TempoMap, TimeSignature, Ticks, PPQ};
 pub use transform::{snap, SnapGrid, ViewTransform, MAX_PIXELS_PER_BEAT, MIN_PIXELS_PER_BEAT};

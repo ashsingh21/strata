@@ -230,6 +230,9 @@ impl Command {
                     *loop_len = None;
                     // Its notes no longer match the rest of its group.
                     *link = None;
+                    // `played_notes` already swung them: swinging again
+                    // as they play would push the off-beats twice as late.
+                    clip.swing = 0.0;
                 }
                 arr.clips.push(right_clip);
 

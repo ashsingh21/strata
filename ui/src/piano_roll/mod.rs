@@ -140,6 +140,50 @@ pub fn piano_roll_view(
                 parts.join(" \u{b7} ")
             });
             Label::new(cx, meta_text).class("value");
+            // Editing a looping clip changes every repeat, and a linked one
+            // every copy: these make it one you can change on its own.
+            let looping_clip = Memo::new(move |_| {
+                let arr = arrangement.get();
+                open_clip.get().and_then(|id| arr.clip(id)).is_some_and(|c| {
+                    matches!(c.content, ClipContent::Midi { loop_len: Some(len), .. } if len < c.length)
+                })
+            });
+            let linked_clip = Memo::new(move |_| {
+                let arr = arrangement.get();
+                open_clip.get().and_then(|id| arr.clip(id)).is_some_and(|c| c.link().is_some())
+            });
+            Button::new(cx, |cx| Label::new(cx, "Unloop"))
+                .class("btn")
+                .class("sm")
+                .class("quiet")
+                .toggle_class("hidden", looping_clip.map(|l| !*l))
+                .tooltip(|cx| {
+                    Tooltip::new(cx, |cx| {
+                        Label::new(cx, "This clip repeats one pattern, so a change here changes every repeat. Unloop writes every repeat out so you can change one bar without the others.");
+                    })
+                    .arrow(false)
+                })
+                .on_press(move |cx| {
+                    if let Some(clip) = open_clip.get() {
+                        cx.emit(TimelineEvent::UnloopClip(clip));
+                    }
+                });
+            Button::new(cx, |cx| Label::new(cx, "Unlink"))
+                .class("btn")
+                .class("sm")
+                .class("quiet")
+                .toggle_class("hidden", linked_clip.map(|l| !*l))
+                .tooltip(|cx| {
+                    Tooltip::new(cx, |cx| {
+                        Label::new(cx, "This clip shares its notes with its linked copies, so a change here changes them all. Unlink makes this one its own.");
+                    })
+                    .arrow(false)
+                })
+                .on_press(move |cx| {
+                    if let Some(clip) = open_clip.get() {
+                        cx.emit(TimelineEvent::UnlinkClip(clip));
+                    }
+                });
 
             // Pattern length: what the grid edits, and what repeats when
             // the clip is stretched on the timeline.
