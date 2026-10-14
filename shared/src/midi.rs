@@ -10,6 +10,8 @@ pub enum Message {
     NoteOn { channel: u8, note: u8, velocity: u8 },
     NoteOff { channel: u8, note: u8 },
     Control { channel: u8, cc: u8, value: u8 },
+    /// The pitch wheel: -8192..=8191, 0 at rest.
+    PitchBend { channel: u8, value: i16 },
 }
 
 /// Reads one message; `None` for anything Shor doesn't use (clock,
@@ -22,6 +24,9 @@ pub fn parse(bytes: &[u8]) -> Option<Message> {
         (0x90, [note, 0, ..]) | (0x80, [note, ..]) => Some(Message::NoteOff { channel, note: note & 0x7f }),
         (0x90, [note, velocity, ..]) => Some(Message::NoteOn { channel, note: note & 0x7f, velocity: velocity & 0x7f }),
         (0xb0, [cc, value, ..]) => Some(Message::Control { channel, cc: cc & 0x7f, value: value & 0x7f }),
+        (0xe0, [lsb, msb, ..]) => {
+            Some(Message::PitchBend { channel, value: ((((msb & 0x7f) as i16) << 7) | (lsb & 0x7f) as i16) - 8192 })
+        }
         _ => None,
     }
 }
@@ -34,6 +39,10 @@ pub enum Action {
     /// Set a Carve knob (0..1 of its range).
     Knob { param: SynthParam, value: f32 },
     Sustain(bool),
+    /// The pitch wheel, -1..1.
+    PitchBend(f32),
+    /// The mod wheel (CC 1), 0..1.
+    ModWheel(f32),
 }
 
 /// Which mapping a device gets.
@@ -90,6 +99,8 @@ pub fn map(message: Message, layout: Layout, drum_pads: &[u8]) -> Option<Action>
         Message::NoteOn { channel, note, velocity } => Some(Action::Note { note: pad(channel, note).unwrap_or(note), velocity: velocity.max(1) }),
         Message::NoteOff { channel, note } => Some(Action::NoteOff { note: pad(channel, note).unwrap_or(note) }),
         Message::Control { cc: 64, value, .. } => Some(Action::Sustain(value >= 64)),
+        Message::Control { cc: 1, value, .. } => Some(Action::ModWheel(value as f32 / 127.0)),
+        Message::PitchBend { value, .. } => Some(Action::PitchBend((value as f32 / 8192.0).clamp(-1.0, 1.0))),
         Message::Control { cc, value, .. } => {
             let param = match (layout, cc) {
                 (Layout::MpkMini, c) if (MPK_FIRST_KNOB..MPK_FIRST_KNOB + 8).contains(&c) => MPK_KNOBS[(c - MPK_FIRST_KNOB) as usize],
@@ -119,7 +130,9 @@ mod tests {
         assert_eq!(parse(&[0x80, 60, 40]), Some(Message::NoteOff { channel: 0, note: 60 }));
         assert_eq!(parse(&[0xb0, 70, 127]), Some(Message::Control { channel: 0, cc: 70, value: 127 }));
         assert_eq!(parse(&[0xf8]), None);
-        assert_eq!(parse(&[0xe0, 0, 64]), None);
+        assert_eq!(parse(&[0xe0, 0, 64]), Some(Message::PitchBend { channel: 0, value: 0 }));
+        assert_eq!(parse(&[0xe0, 127, 127]), Some(Message::PitchBend { channel: 0, value: 8191 }));
+        assert_eq!(parse(&[0xd0, 64]), None);
         assert_eq!(parse(&[]), None);
     }
 

@@ -65,6 +65,7 @@ pub fn quiz_take_with(notes: &[(i64, u8, i64)], patch: Option<SynthState>) -> Ta
             .collect(),
         loop_len: None,
         link: None,
+        controls: Default::default(),
     };
     let mut patches: BTreeMap<TrackId, SynthState> = project.instruments.into_iter().collect();
     if let Some(patch) = patch {

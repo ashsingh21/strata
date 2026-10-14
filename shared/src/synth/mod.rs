@@ -8,7 +8,7 @@ pub mod params;
 pub mod recipes;
 
 pub use bridge::{
-    division_norm, lfo_division, lfo_rate_hz, synth_bridge, EffectUnitState, LFO_DIVISIONS, NoteEvent, ALL_NOTES_OFF, MAX_EFFECTS_PER_CHAIN, MAX_INSTRUMENTS,
+    division_norm, lfo_division, lfo_rate_hz, synth_bridge, EffectUnitState, LFO_DIVISIONS, NoteEvent, ALL_NOTES_OFF, PITCH_BEND, MOD_WHEEL, bend_to_byte, mod_to_byte, MAX_EFFECTS_PER_CHAIN, MAX_INSTRUMENTS,
     SynthBridge, SynthParams, SynthTelemetry, NOTE_EVENT_CAPACITY, SYNTH_PARAMS_CAPACITY, SYNTH_TELEMETRY_CAPACITY,
 };
 pub use params::SynthParam;

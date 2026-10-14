@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::model::{Clip, ClipContent, ClipId, MidiNote, TrackId};
+use super::model::{Clip, ClipContent, ClipId, ControlPoint, MidiControls, MidiNote, TrackId};
 use super::time::Ticks;
 
 /// A take in progress: the notes played so far, at song ticks.
@@ -15,11 +15,13 @@ pub struct LiveTake {
     pub notes: Vec<MidiNote>,
     /// Keys still down: pitch -> (tick pressed, velocity).
     held: HashMap<u8, (Ticks, u8)>,
+    /// Wheel moves, at song ticks.
+    pub controls: MidiControls,
 }
 
 impl LiveTake {
     pub fn new(track: TrackId) -> Self {
-        Self { track, notes: Vec::new(), held: HashMap::new() }
+        Self { track, notes: Vec::new(), held: HashMap::new(), controls: MidiControls::default() }
     }
 
     pub fn press(&mut self, pitch: u8, velocity: u8, at: Ticks) {
@@ -32,6 +34,16 @@ impl LiveTake {
         if let Some((start, velocity)) = self.held.remove(&pitch) {
             self.notes.push(MidiNote { start, length: (at - start).max(1), pitch, velocity });
         }
+    }
+
+    /// A wheel moved while recording.
+    pub fn wheel(&mut self, wheel: super::schedule::Wheel, value: f32, at: Ticks) {
+        let points = match wheel {
+            super::schedule::Wheel::Bend => &mut self.controls.bend,
+            super::schedule::Wheel::Mod => &mut self.controls.modwheel,
+        };
+        points.retain(|p| p.tick != at);
+        points.push(ControlPoint { tick: at, value });
     }
 
     /// The loop jumped back (or playback stopped): every key still down
@@ -59,13 +71,20 @@ impl LiveTake {
         let end = (last + bar - 1).div_euclid(bar) * bar;
         let mut notes: Vec<MidiNote> = self.notes.into_iter().map(|n| MidiNote { start: n.start - start, ..n }).collect();
         notes.sort_by_key(|n| (n.start, n.pitch));
+        let relative = |points: Vec<ControlPoint>| {
+            let mut points: Vec<ControlPoint> =
+                points.into_iter().filter(|p| p.tick >= start && p.tick < end).map(|p| ControlPoint { tick: p.tick - start, ..p }).collect();
+            points.sort_by_key(|p| p.tick);
+            points
+        };
+        let controls = MidiControls { bend: relative(self.controls.bend), modwheel: relative(self.controls.modwheel) };
         Some(Clip {
             id,
             track: self.track,
             start,
             length: (end - start).max(bar),
             name: "Played".into(),
-            content: ClipContent::Midi { notes, loop_len: None, link: None },
+            content: ClipContent::Midi { notes, loop_len: None, link: None, controls },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,

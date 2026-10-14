@@ -60,6 +60,11 @@ pub enum SynthEvent {
     /// that track's own Carve.
     NoteOn(TrackId, u8, u8),
     NoteOff(TrackId, u8),
+    /// A wheel on your keyboard moved: the selected track's instrument
+    /// follows it (and a live recording keeps it).
+    PlayWheel(shared::arrangement::Wheel, f32),
+    /// A clip's wheel move, from playback, on its track's instrument.
+    TrackWheel(TrackId, shared::arrangement::Wheel, f32),
     /// The transport stopped: every instrument lets go of whatever it
     /// still holds, so nothing drones on after Stop.
     AllNotesOff,
@@ -314,6 +319,17 @@ impl SynthModel {
         }
     }
 
+    /// A wheel position to `track`'s instrument.
+    fn wheel(&mut self, track: Option<TrackId>, wheel: shared::arrangement::Wheel, value: f32) {
+        use shared::arrangement::Wheel;
+        let Some(slot) = track.and_then(|t| self.slot_of(t)) else { return };
+        let (note, velocity) = match wheel {
+            Wheel::Bend => (shared::synth::PITCH_BEND, shared::synth::bend_to_byte(value)),
+            Wheel::Mod => (shared::synth::MOD_WHEEL, shared::synth::mod_to_byte(value)),
+        };
+        let _ = self.note_tx.push(NoteEvent { slot, note, on: false, velocity });
+    }
+
     fn sound_off(&mut self, track: Option<TrackId>, note: u8) {
         let Some(track) = track else { return };
         if self.selected_track.get() == Some(track) {
@@ -476,6 +492,11 @@ impl Model for SynthModel {
             }
             SynthEvent::NoteOn(track, note, velocity) => self.sound_on(Some(*track), *note, *velocity),
             SynthEvent::NoteOff(track, note) => self.sound_off(Some(*track), *note),
+            SynthEvent::PlayWheel(wheel, value) => {
+                self.wheel(self.selected_track.get(), *wheel, *value);
+                cx.emit(TimelineEvent::LiveWheel { wheel: *wheel, value: *value });
+            }
+            SynthEvent::TrackWheel(track, wheel, value) => self.wheel(Some(*track), *wheel, *value),
             SynthEvent::AllNotesOff => {
                 for (i, slot) in self.slots.iter().enumerate() {
                     if slot.is_some() {

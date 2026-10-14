@@ -15,7 +15,7 @@
 //! no syscalls.
 
 use shared::synth::{
-    FilterType, LfoTarget, NoteEvent, SynthParams, VoiceMode, Waveform, ALL_NOTES_OFF, LFO_CUTOFF_MAX_OCT, LFO_PITCH_MAX_CENTS,
+    FilterType, LfoTarget, NoteEvent, SynthParams, VoiceMode, Waveform, ALL_NOTES_OFF, MOD_WHEEL, PITCH_BEND, LFO_CUTOFF_MAX_OCT, LFO_PITCH_MAX_CENTS,
     LFO_PULSE_WIDTH_MAX, LFO_RESONANCE_MAX, MAX_UNISON,
 };
 
@@ -28,6 +28,11 @@ const MAX_VOICES: usize = 16;
 const UNISON: usize = MAX_UNISON as usize;
 /// Reference note for octave/key-tracking math (C4).
 const REF_NOTE: f32 = 60.0;
+/// How far the pitch wheel bends, and the mod wheel's vibrato.
+const BEND_RANGE_CENTS: f32 = 200.0;
+const MOD_VIBRATO_HZ: f32 = 5.5;
+const MOD_VIBRATO_CENTS: f32 = 50.0;
+
 /// Most a drifting oscillator wanders, in cents.
 const DRIFT_MAX_CENTS: f32 = 15.0;
 /// Parameter smoothing time: long enough to kill zipper noise, short
@@ -668,6 +673,11 @@ pub struct SynthEngine {
     drive: [DriveBank; MAX_VOICES / 2],
     next_voice: usize,
     mono_stack: Vec<u8>,
+    /// The pitch wheel, -1..1 (two semitones either way), and the mod
+    /// wheel, 0..1 (vibrato, up to half a semitone at 5.5 Hz).
+    bend: f32,
+    mod_wheel: f32,
+    mod_phase: f32,
     lfo1_phase: f32,
     lfo2_phase: f32,
     /// Where the song is, in beats, while it plays (synced LFOs lock to
@@ -700,6 +710,9 @@ impl SynthEngine {
             drive: [DriveBank::default(); MAX_VOICES / 2],
             next_voice: 0,
             mono_stack: Vec::with_capacity(MAX_VOICES),
+            bend: 0.0,
+            mod_wheel: 0.0,
+            mod_phase: 0.0,
             lfo1_phase: 0.0,
             lfo2_phase: 0.0,
             beat: None,
@@ -732,7 +745,21 @@ impl SynthEngine {
     }
 
     pub fn handle_note_event(&mut self, event: NoteEvent) {
+        match event.note {
+            PITCH_BEND => {
+                self.bend = (event.velocity as f32 / 127.0 - 1.0).clamp(-1.0, 1.0);
+                return;
+            }
+            MOD_WHEEL => {
+                self.mod_wheel = (event.velocity as f32 / 127.0).clamp(0.0, 1.0);
+                return;
+            }
+            _ => {}
+        }
         if event.note == ALL_NOTES_OFF {
+            // Stopped: the wheels go back to rest too.
+            self.bend = 0.0;
+            self.mod_wheel = 0.0;
             self.mono_stack.clear();
             for voice in &mut self.voices {
                 voice.amp_env.note_off();
@@ -905,6 +932,12 @@ impl SynthEngine {
         }
         let osc2_shape = osc2_shape.clamp(0.0, 1.0);
         let resonance = resonance.clamp(0.0, 1.0);
+        // The pitch wheel, and the mod wheel's vibrato.
+        pitch_lfo_cents += self.bend * BEND_RANGE_CENTS;
+        if self.mod_wheel > 0.0 {
+            self.mod_phase = (self.mod_phase + MOD_VIBRATO_HZ / self.sample_rate).fract();
+            pitch_lfo_cents += (self.mod_phase * std::f32::consts::TAU).sin() * self.mod_wheel * MOD_VIBRATO_CENTS;
+        }
         let vibrato_ratio = d.vibrato.get(pitch_lfo_cents, |c| 2f32.powf(c / 1200.0));
 
         // Glide arrives (within 1%) in its time.

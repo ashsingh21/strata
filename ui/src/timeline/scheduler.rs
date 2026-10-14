@@ -54,12 +54,20 @@ impl MidiScheduler {
             if self.was_playing.get() {
                 self.release_all(cx);
             }
+            // The wheels as they stand where playback (re)starts.
+            for (track, bend, modwheel) in shared::arrangement::controls_at(arrangement, tick) {
+                cx.emit(SynthEvent::TrackWheel(track, shared::arrangement::Wheel::Bend, bend));
+                cx.emit(SynthEvent::TrackWheel(track, shared::arrangement::Wheel::Mod, modwheel));
+            }
             self.was_playing.set(true);
             self.last_tick.set(tick.saturating_sub(1));
         }
 
         let from = self.last_tick.get();
         self.last_tick.set(tick);
+        for (track, wheel, value) in shared::arrangement::controls_in_range(arrangement, from, tick) {
+            cx.emit(SynthEvent::TrackWheel(track, wheel, value));
+        }
 
         // In time order: when a frame runs long (the UI stalled, or a short
         // note) a note can start and end inside one frame, and handling

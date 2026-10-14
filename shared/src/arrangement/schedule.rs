@@ -92,6 +92,78 @@ pub fn timed_notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> Vec<Ti
     events
 }
 
+/// Which wheel a control change is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wheel {
+    Bend,
+    Mod,
+}
+
+/// Where in `clip`'s own time song tick `tick` falls (a looping clip's
+/// pattern repeats), or `None` outside it.
+fn clip_time(clip: &super::model::Clip, tick: Ticks) -> Option<Ticks> {
+    if tick < clip.start || tick >= clip.end() {
+        return None;
+    }
+    let ClipContent::Midi { loop_len, .. } = &clip.content else { return None };
+    let local = tick - clip.start;
+    Some(match loop_len {
+        Some(len) if *len > 0 => local % len,
+        _ => local,
+    })
+}
+
+/// Wheel moves the playhead crossed in `(from, to]`: (track, wheel,
+/// value), in time order, across every audible MIDI clip.
+pub fn controls_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> Vec<(TrackId, Wheel, f32)> {
+    let mut out: Vec<(Ticks, TrackId, Wheel, f32)> = Vec::new();
+    if to <= from {
+        return Vec::new();
+    }
+    for clip in &arr.clips {
+        let ClipContent::Midi { controls, loop_len, .. } = &clip.content else { continue };
+        if controls.is_empty() || clip.end() < from || clip.start > to {
+            continue;
+        }
+        let Some(track) = arr.track(clip.track) else { continue };
+        if !arr.is_audible(track) {
+            continue;
+        }
+        let period = loop_len.filter(|l| *l > 0).unwrap_or(clip.length.max(1));
+        for (wheel, points) in [(Wheel::Bend, &controls.bend), (Wheel::Mod, &controls.modwheel)] {
+            for p in points.iter().filter(|p| p.tick < period) {
+                // Every repeat of the point that lands in the range.
+                let mut at = clip.start + p.tick;
+                while at <= to && at < clip.end() {
+                    if at > from {
+                        out.push((at, clip.track, wheel, p.value));
+                    }
+                    at += period;
+                }
+            }
+        }
+    }
+    out.sort_by_key(|e| e.0);
+    out.into_iter().map(|(_, t, w, v)| (t, w, v)).collect()
+}
+
+/// Each audible MIDI track's wheels at `tick` (where playback starts or
+/// jumps to): from the clip under it, or at rest.
+pub fn controls_at(arr: &Arrangement, tick: Ticks) -> Vec<(TrackId, f32, f32)> {
+    arr.tracks
+        .iter()
+        .filter(|t| t.kind == super::model::TrackKind::Midi && arr.is_audible(t))
+        .map(|t| {
+            let here = arr.clips.iter().filter(|c| c.track == t.id).find_map(|c| {
+                let ClipContent::Midi { controls, .. } = &c.content else { return None };
+                clip_time(c, tick).map(|local| controls.at(local))
+            });
+            let (bend, modwheel) = here.unwrap_or((0.0, 0.0));
+            (t.id, bend, modwheel)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,12 +195,27 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Clip".into(),
-            content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60, velocity: DEFAULT_VELOCITY }], loop_len: None, link: None },
+            content: ClipContent::Midi { notes: vec![MidiNote { start: PPQ, length: PPQ, pitch: 60, velocity: DEFAULT_VELOCITY }], loop_len: None, link: None, controls: Default::default() },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,
         });
         arr
+    }
+
+    #[test]
+    fn wheel_moves_play_back_and_repeat_with_a_loop() {
+        use crate::arrangement::model::ControlPoint;
+        let mut arr = arrangement_with_one_note(false, false);
+        if let ClipContent::Midi { controls, loop_len, .. } = &mut arr.clips[0].content {
+            controls.bend = vec![ControlPoint { tick: PPQ, value: 0.5 }];
+            *loop_len = Some(PPQ * 2);
+        }
+        // The point at beat 1 of a 2-beat loop: heard at beats 1 and 3.
+        let moves = controls_in_range(&arr, 0, PPQ * 4);
+        assert_eq!(moves, vec![(1, Wheel::Bend, 0.5), (1, Wheel::Bend, 0.5)]);
+        assert_eq!(controls_at(&arr, PPQ / 2), vec![(1, 0.0, 0.0)]);
+        assert_eq!(controls_at(&arr, PPQ * 3 + 1), vec![(1, 0.5, 0.0)]);
     }
 
     #[test]

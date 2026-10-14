@@ -176,6 +176,21 @@ pub struct NoteEvent {
 /// A `NoteEvent::note` meaning "release every voice in this slot" - sent
 /// when a track loses its instrument, so nothing is left hanging.
 pub const ALL_NOTES_OFF: u8 = 255;
+/// Not notes: a pitch bend (`velocity` 0..=254, 127 centred) and the mod
+/// wheel (`velocity` 0..=127), sent through the same queue as notes so
+/// they land in order with them.
+pub const PITCH_BEND: u8 = 254;
+pub const MOD_WHEEL: u8 = 253;
+
+/// A bend of -1..1 as a `PITCH_BEND` event's `velocity`.
+pub fn bend_to_byte(bend: f32) -> u8 {
+    ((bend.clamp(-1.0, 1.0) + 1.0) * 127.0).round() as u8
+}
+
+/// A mod wheel position 0..1 as a `MOD_WHEEL` event's `velocity`.
+pub fn mod_to_byte(amount: f32) -> u8 {
+    (amount.clamp(0.0, 1.0) * 127.0).round() as u8
+}
 
 /// One block's worth of Carve's own post-mix peak level, separate from the
 /// transport's master peak meter.

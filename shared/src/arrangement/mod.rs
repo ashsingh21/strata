@@ -21,13 +21,13 @@ pub use automation::{fader_pos_to_gain_db, gain_db_to_fader_pos, AutomationTarge
 pub use commands::{Command, CommandStack};
 pub use model::{
     DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
-    Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent,
+    Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent, ControlPoint, MidiControls,
     ClipId, LinkId, LoopRange, Marker, MarkerId, MidiNote, Take, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
     Effect, EffectSlot, EffectNode, EffectNodeId, EffectEdge, EffectGraph, CompressorState, EqState, EqBand, EqBandKind, EQ_LOW_CUT, EQ_LOW_SHELF, EQ_BELL, EQ_HIGH_SHELF,
     EffectParam, ModTarget,
 };
 pub use peaks::{PeakLevel, PeakPyramid};
-pub use schedule::{notes_in_range, timed_notes_in_range, ScheduledNotes, TimedNote};
+pub use schedule::{controls_at, controls_in_range, notes_in_range, timed_notes_in_range, ScheduledNotes, TimedNote, Wheel};
 pub use seed::{empty_arrangement, seed_arrangement};
 pub use step_entry::step_entry_commit;
 pub use live_record::LiveTake;

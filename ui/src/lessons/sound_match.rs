@@ -47,7 +47,7 @@ pub fn measure(patch: &SynthState) -> Analysis {
         start: 0,
         length: 4 * PPQ,
         name: "Note".into(),
-        content: ClipContent::Midi { notes: vec![note], loop_len: None, link: None },
+        content: ClipContent::Midi { notes: vec![note], loop_len: None, link: None, controls: Default::default() },
         recording: false,
         gain_db: 0.0,
         swing: 0.0,

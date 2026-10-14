@@ -7,9 +7,9 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use shared::arrangement::{timed_notes_in_range, Arrangement, Ticks, TrackId, PPQ};
+use shared::arrangement::{controls_at, controls_in_range, timed_notes_in_range, Arrangement, Ticks, TrackId, Wheel, PPQ};
 use shared::playback::{instrument_params, DecodedSource, PlaybackPlan, MAX_BUS_TRACKS};
-use shared::synth::{NoteEvent, SynthState, MAX_INSTRUMENTS};
+use shared::synth::{bend_to_byte, mod_to_byte, NoteEvent, SynthState, MAX_INSTRUMENTS, MOD_WHEEL, PITCH_BEND};
 
 use crate::drums::DrumEngine;
 use crate::effects::EffectChain;
@@ -146,6 +146,29 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
         let beats_per_sample = arr.tempo_map.bpm_at(tick) / 60.0 / srf as f64;
         for synth in &mut synths {
             synth.set_clock(Some(tick as f64 / PPQ as f64), beats_per_sample);
+        }
+
+        // The wheels: where they stand as the render starts, then each
+        // move at the start of its block.
+        let wheel_event = |slot: usize, wheel: Wheel, value: f32| {
+            let (note, velocity) = match wheel {
+                Wheel::Bend => (PITCH_BEND, bend_to_byte(value)),
+                Wheel::Mod => (MOD_WHEEL, mod_to_byte(value)),
+            };
+            NoteEvent { slot: slot as u8, note, on: false, velocity }
+        };
+        if block == 0 {
+            for (track, bend, modwheel) in controls_at(arr, tick) {
+                if let Some(&slot) = slot_of.get(&track) {
+                    synths[slot].handle_note_event(wheel_event(slot, Wheel::Bend, bend));
+                    synths[slot].handle_note_event(wheel_event(slot, Wheel::Mod, modwheel));
+                }
+            }
+        }
+        for (track, wheel, value) in controls_in_range(arr, last_tick, block_end_tick) {
+            if let Some(&slot) = slot_of.get(&track) {
+                synths[slot].handle_note_event(wheel_event(slot, wheel, value));
+            }
         }
 
         // This block's notes, each at its own sample.
@@ -295,7 +318,7 @@ mod tests {
             start: 0,
             length,
             name: "C".into(),
-            content: ClipContent::Midi { notes, loop_len: None, link: None },
+            content: ClipContent::Midi { notes, loop_len: None, link: None, controls: Default::default() },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,

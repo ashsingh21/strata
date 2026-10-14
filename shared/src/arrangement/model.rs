@@ -609,6 +609,49 @@ fn default_velocity() -> u8 {
     DEFAULT_VELOCITY
 }
 
+/// A wheel's value from `tick` (relative to the clip) until the next point.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ControlPoint {
+    pub tick: Ticks,
+    pub value: f32,
+}
+
+/// A MIDI clip's pitch wheel (-1..1, two semitones either way) and mod
+/// wheel (0..1, vibrato) points, each in time order.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MidiControls {
+    #[serde(default)]
+    pub bend: Vec<ControlPoint>,
+    #[serde(default)]
+    pub modwheel: Vec<ControlPoint>,
+}
+
+impl MidiControls {
+    /// From `at` on, as a clip starting there sees it (a split's right
+    /// half): later points moved back, led by the value in effect at `at`.
+    pub fn from_tick(&self, at: Ticks) -> MidiControls {
+        let cut = |points: &[ControlPoint]| -> Vec<ControlPoint> {
+            let mut out: Vec<ControlPoint> = Vec::new();
+            if let Some(held) = points.iter().filter(|p| p.tick <= at).last() {
+                out.push(ControlPoint { tick: 0, value: held.value });
+            }
+            out.extend(points.iter().filter(|p| p.tick > at).map(|p| ControlPoint { tick: p.tick - at, value: p.value }));
+            out
+        };
+        MidiControls { bend: cut(&self.bend), modwheel: cut(&self.modwheel) }
+    }
+
+    /// Each wheel's value at `tick` (bend at rest 0, mod 0 before any point).
+    pub fn at(&self, tick: Ticks) -> (f32, f32) {
+        let value = |points: &[ControlPoint]| points.iter().filter(|p| p.tick <= tick).last().map(|p| p.value).unwrap_or(0.0);
+        (value(&self.bend), value(&self.modwheel))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.bend.is_empty() && self.modwheel.is_empty()
+    }
+}
+
 /// An alternate recording an audio clip can play instead: a file, and
 /// where in it the clip's start falls (frames at 48 kHz, like
 /// `source_offset_samples`).
@@ -663,6 +706,9 @@ pub enum ClipContent {
         /// Each keeps its own position and length. `None`: independent.
         #[serde(default)]
         link: Option<LinkId>,
+        /// The pitch and mod wheels, drawn or played in alongside the notes.
+        #[serde(default)]
+        controls: MidiControls,
     },
 }
 
@@ -730,13 +776,13 @@ impl Clip {
     /// beat out to 16 bars repeats it. `None` for anything else (audio,
     /// or not getting longer): a plain trim.
     pub fn extended_as_loop(&self, length: Ticks) -> Option<Clip> {
-        let ClipContent::Midi { notes, loop_len, link } = &self.content else { return None };
+        let ClipContent::Midi { notes, loop_len, link, .. } = &self.content else { return None };
         if length <= self.length {
             return None;
         }
         let mut clip = self.clone();
         clip.length = length;
-        clip.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(loop_len.unwrap_or(self.length)), link: *link };
+        clip.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(loop_len.unwrap_or(self.length)), link: *link, controls: Default::default() };
         Some(clip)
     }
 
@@ -933,14 +979,15 @@ impl Arrangement {
     /// Copies `from`'s pattern (notes and loop length) to every other clip
     /// linked to it. Positions and lengths stay each clip's own.
     pub fn sync_links(&mut self, from: ClipId) {
-        let Some(ClipContent::Midi { notes, loop_len, link: Some(link) }) = self.clip(from).map(|c| c.content.clone()) else {
+        let Some(ClipContent::Midi { notes, loop_len, link: Some(link), controls }) = self.clip(from).map(|c| c.content.clone()) else {
             return;
         };
         for clip in self.clips.iter_mut().filter(|c| c.id != from) {
-            if let ClipContent::Midi { notes: n, loop_len: l, link: Some(k) } = &mut clip.content {
+            if let ClipContent::Midi { notes: n, loop_len: l, link: Some(k), controls: c } = &mut clip.content {
                 if *k == link {
                     *n = notes.clone();
                     *l = loop_len;
+                    *c = controls.clone();
                 }
             }
         }
@@ -1457,7 +1504,7 @@ mod swing_tests {
             start: 0,
             length: 2 * PPQ,
             name: "Hats".into(),
-            content: ClipContent::Midi { notes, loop_len: Some(PPQ), link: None },
+            content: ClipContent::Midi { notes, loop_len: Some(PPQ), link: None, controls: Default::default() },
             recording: false,
             gain_db: 0.0,
             swing,

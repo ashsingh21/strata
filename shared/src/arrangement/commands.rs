@@ -216,6 +216,10 @@ impl Command {
                             .collect(),
                         loop_len: None,
                         link: None,
+                        controls: match &original.content {
+                            ClipContent::Midi { controls, .. } => controls.from_tick(left_length),
+                            _ => Default::default(),
+                        },
                     },
                 };
                 let left_notes: Option<Vec<MidiNote>> = matches!(original.content, ClipContent::Midi { .. })
@@ -238,7 +242,7 @@ impl Command {
                 if let ClipContent::Audio { fade_out, .. } = &mut clip.content {
                     *fade_out = 0;
                 }
-                if let (Some(notes), ClipContent::Midi { notes: dst, loop_len, link }) =
+                if let (Some(notes), ClipContent::Midi { notes: dst, loop_len, link, .. }) =
                     (left_notes, &mut clip.content)
                 {
                     *dst = notes;
@@ -779,7 +783,7 @@ mod tests {
             start: 0,
             length: PPQ * 16,
             name: "Beat".into(),
-            content: ClipContent::Midi { notes, loop_len: Some(PPQ * 4), link: None },
+            content: ClipContent::Midi { notes, loop_len: Some(PPQ * 4), link: None, controls: Default::default() },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,
@@ -911,7 +915,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Step".into(),
-            content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
+            content: ClipContent::Midi { notes: vec![], loop_len: None, link: None, controls: Default::default() },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,
@@ -1040,7 +1044,7 @@ mod tests {
             start: 0,
             length: PPQ * 4,
             name: "Velocity".into(),
-            content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
+            content: ClipContent::Midi { notes: vec![], loop_len: None, link: None, controls: Default::default() },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,

@@ -28,6 +28,53 @@ pub const ROW_H: f32 = 20.0;
 pub const LABEL_W: f32 = 88.0;
 pub const RULER_H: f32 = 24.0;
 pub const VEL_H: f32 = 56.0;
+
+/// The lane under the rows: note velocities, or one of the wheels (drawn
+/// as a value held until the next point). Click its name to switch.
+#[derive(Clone, Copy, PartialEq)]
+enum Lane {
+    Velocity,
+    Bend,
+    Mod,
+}
+
+impl Lane {
+    fn next(self) -> Lane {
+        match self {
+            Lane::Velocity => Lane::Bend,
+            Lane::Bend => Lane::Mod,
+            Lane::Mod => Lane::Velocity,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Lane::Velocity => "Velocity",
+            Lane::Bend => "Pitch bend",
+            Lane::Mod => "Mod wheel",
+        }
+    }
+
+    fn wheel(self) -> Option<shared::arrangement::Wheel> {
+        match self {
+            Lane::Velocity => None,
+            Lane::Bend => Some(shared::arrangement::Wheel::Bend),
+            Lane::Mod => Some(shared::arrangement::Wheel::Mod),
+        }
+    }
+
+    /// A wheel value for a y inside the lane (bend: -1 bottom, +1 top;
+    /// mod: 0 bottom, 1 top), and back.
+    fn value_at(self, lane_top: f32, y: f32) -> f32 {
+        let t = 1.0 - ((y - lane_top - 6.0) / (VEL_H - 10.0)).clamp(0.0, 1.0);
+        if self == Lane::Bend { t * 2.0 - 1.0 } else { t }
+    }
+
+    fn y_of(self, lane_top: f32, value: f32) -> f32 {
+        let t = if self == Lane::Bend { (value + 1.0) / 2.0 } else { value };
+        lane_top + 6.0 + (1.0 - t.clamp(0.0, 1.0)) * (VEL_H - 10.0)
+    }
+}
 /// How close (px) a click must be to a velocity stem to grab it.
 const STEM_GRAB_PX: f32 = 6.0;
 
@@ -212,6 +259,11 @@ pub struct Grid {
     wheel_moved: bool,
     /// The note sounding while the mouse is down on the grid.
     audition: Option<(shared::arrangement::TrackId, u8)>,
+    /// What the lane under the rows shows and edits.
+    lane: Lane,
+    /// A wheel stroke being drawn in the lane: tick -> value (`None`
+    /// where it erases), committed on mouse-up.
+    wheel_stroke: Option<std::collections::BTreeMap<Ticks, Option<f32>>>,
 }
 
 impl Grid {
@@ -232,7 +284,7 @@ impl Grid {
         chord: Signal<ChordShape>,
         new_length: Signal<Option<(SnapGrid, Ticks)>>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, new_length, resize: None, scrub: false, cursor: CursorIcon::Default, vel_drag: None, paint: None, wheel: 0.0, wheel_at: None, wheel_moved: false, audition: None }
+        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, new_length, resize: None, scrub: false, cursor: CursorIcon::Default, vel_drag: None, paint: None, wheel: 0.0, wheel_at: None, wheel_moved: false, audition: None, lane: Lane::Velocity, wheel_stroke: None }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(open_clip, |mut h| h.needs_redraw())
@@ -293,6 +345,18 @@ impl Grid {
     /// hats doesn't skip every other step.
     fn hits_in(notes: &[MidiNote], at: Ticks, step: Ticks, pitch: u8) -> Vec<Ticks> {
         notes.iter().filter(|n| n.pitch == pitch && n.start >= at && n.start < at + step).map(|n| n.start).collect()
+    }
+
+    /// The open clip's points for the lane's wheel (none for Velocity).
+    fn wheel_points(&self) -> Vec<shared::arrangement::ControlPoint> {
+        let arr = self.arrangement.get();
+        let Some(clip) = self.open_clip.get().and_then(|id| arr.clip(id)) else { return Vec::new() };
+        let shared::arrangement::ClipContent::Midi { controls, .. } = &clip.content else { return Vec::new() };
+        match self.lane {
+            Lane::Bend => controls.bend.clone(),
+            Lane::Mod => controls.modwheel.clone(),
+            Lane::Velocity => Vec::new(),
+        }
     }
 
     /// Velocity (1..=127) for a y position inside the velocity lane.
@@ -414,6 +478,12 @@ impl View for Grid {
                     cx.emit(PianoRollEvent::SetLabelMode(self.label_mode.get().next()));
                     return;
                 }
+                // The lane's name: Velocity, Pitch bend, Mod wheel in turn.
+                if lx < 0.0 && ly >= rows.len() as f32 * ROW_H && !self.drums() {
+                    self.lane = self.lane.next();
+                    cx.needs_redraw();
+                    return;
+                }
                 // A pad's name in a drum clip: mute or unmute that pad.
                 if lx < 0.0 && ly >= 0.0 && self.drums() {
                     let row = (ly / ROW_H) as usize;
@@ -449,6 +519,18 @@ impl View for Grid {
                     }
                 }
 
+                // A wheel lane: draw its values (Alt erases), snapped to
+                // the grid, one undo step on mouse-up.
+                if ly >= rows_h && self.lane != Lane::Velocity {
+                    let lane_top = bounds.y + RULER_H + rows_h;
+                    let step = self.snap.get().ticks().unwrap_or(PPQ / 4).max(1);
+                    let tick = (((lx as f64 / px_per_tick) as Ticks).max(0) / step * step).min(clip_length - 1);
+                    let value = (!cx.modifiers().alt()).then(|| self.lane.value_at(lane_top, cx.lmouse().1));
+                    self.wheel_stroke = Some([(tick, value)].into_iter().collect());
+                    cx.capture();
+                    cx.needs_redraw();
+                    return;
+                }
                 // Velocity lane: grab the nearest stem.
                 if ly >= rows_h {
                     let lane_top = bounds.y + RULER_H + rows_h;
@@ -646,6 +728,22 @@ impl View for Grid {
                     }
                     return;
                 }
+                if self.wheel_stroke.is_some() {
+                    let Some((_, _, clip_length, notes)) = self.clip_info() else { return };
+                    let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.kit(), self.octave.get());
+                    let bounds = cx.lbounds();
+                    let lane_top = bounds.y + RULER_H + rows.len() as f32 * ROW_H;
+                    let px_per_tick = (bounds.w - LABEL_W) as f64 / clip_length.max(1) as f64;
+                    let lx = crate::hidpi::l(cx, *x) - bounds.x - LABEL_W;
+                    let step = self.snap.get().ticks().unwrap_or(PPQ / 4).max(1);
+                    let tick = (((lx as f64 / px_per_tick) as Ticks).max(0) / step * step).min(clip_length - 1);
+                    let value = (!cx.modifiers().alt()).then(|| self.lane.value_at(lane_top, crate::hidpi::l(cx, *y)));
+                    if let Some(stroke) = self.wheel_stroke.as_mut() {
+                        stroke.insert(tick, value);
+                    }
+                    cx.needs_redraw();
+                    return;
+                }
                 if let Some((key, _)) = self.vel_drag {
                     let Some((_, _, _, notes)) = self.clip_info() else { return };
                     let rows = row_pitches(&notes, self.key.get(), self.scale_mask.get(), self.kit(), self.octave.get());
@@ -697,6 +795,15 @@ impl View for Grid {
                             .collect();
                         cx.emit(TimelineEvent::AddMidiNotesAt { clip, notes });
                     }
+                    return;
+                }
+                if let Some(stroke) = self.wheel_stroke.take() {
+                    cx.release();
+                    if let (Some(clip), Some(wheel)) = (self.open_clip.get(), self.lane.wheel()) {
+                        let points = merged_points(&self.wheel_points(), &stroke);
+                        cx.emit(TimelineEvent::SetWheelPoints { clip, wheel, points });
+                    }
+                    cx.needs_redraw();
                     return;
                 }
                 if let Some((key, velocity)) = self.vel_drag.take() {
@@ -820,7 +927,15 @@ impl View for Grid {
             let x = bounds.x + 10.0 + font.measure_str(title, None).0;
             text(canvas, " \u{203a}", x, bounds.y + 16.0, 11.0, p.ink_faint);
         }
-        text(canvas, "Velocity", bounds.x + 10.0, lane_top + 18.0, 11.0, p.ink_muted);
+        if drums {
+            text(canvas, "Velocity", bounds.x + 10.0, lane_top + 18.0, 11.0, p.ink_muted);
+        } else {
+            let font = crate::canvas_text::canvas_font(11.0);
+            let title = self.lane.title();
+            text(canvas, title, bounds.x + 10.0, lane_top + 18.0, 11.0, p.ink_muted);
+            let x = bounds.x + 10.0 + font.measure_str(title, None).0;
+            text(canvas, " \u{203a}", x, lane_top + 18.0, 11.0, p.ink_faint);
+        }
 
         // Vertical grid through rows and lane: bars, beats, and the finest
         // lines Snap asks for - 16ths, or triplets and 32nds when chosen
@@ -1021,6 +1136,9 @@ impl View for Grid {
                 canvas.draw_str(&name, vg::Point::new(x0 + 4.0, y0 + ROW_H * 0.5 + 2.0), &label_font, &paint);
             }
 
+            if self.lane != Lane::Velocity {
+                continue;
+            }
             // Velocity stem: ink-muted at rest, signal sounding, ink when
             // selected or being dragged.
             let dragging = self.vel_drag.is_some_and(|(k, _)| drag_group.contains(&key_of_note) && k.0 == note.start);
@@ -1041,6 +1159,26 @@ impl View for Grid {
             fill(canvas, vg::Rect::new(sx - 2.0, stem_top - 1.0, sx + 4.0, stem_top + 2.0), stem_color);
         }
 
+        // A wheel lane: each value held until the next point (the stroke
+        // being drawn shown as it will land); pitch bend's rest line.
+        if self.lane != Lane::Velocity && !drums {
+            if self.lane == Lane::Bend {
+                let y = self.lane.y_of(lane_top, 0.0);
+                fill(canvas, vg::Rect::new(gx, y, gx + gw, y + 1.0), p.ink_faint);
+            }
+            let points = match &self.wheel_stroke {
+                Some(stroke) => merged_points(&self.wheel_points(), stroke),
+                None => self.wheel_points(),
+            };
+            for (i, point) in points.iter().enumerate() {
+                let x0 = tick_to_x(point.tick);
+                let x1 = points.get(i + 1).map(|n| tick_to_x(n.tick)).unwrap_or(gx + gw);
+                let y = self.lane.y_of(lane_top, point.value);
+                fill(canvas, vg::Rect::new(x0, y - 1.0, x1, y + 1.0), p.ink);
+                fill(canvas, vg::Rect::new(x0 - 2.0, y - 3.0, x0 + 3.0, y + 3.0), p.ink);
+            }
+        }
+
         // Playhead through ruler, rows and lane, with a triangle head.
         if playhead >= 0 && playhead < clip_length {
             let x = tick_to_x(playhead).round();
@@ -1056,6 +1194,20 @@ impl View for Grid {
             canvas.draw_path(&head.detach(), &paint);
         }
     }
+}
+
+/// `existing` with a drawn stroke laid over it: across the ticks the
+/// stroke covered, its values replace what was there (or, erasing, leave
+/// nothing); outside them nothing changes.
+fn merged_points(
+    existing: &[shared::arrangement::ControlPoint],
+    stroke: &std::collections::BTreeMap<Ticks, Option<f32>>,
+) -> Vec<shared::arrangement::ControlPoint> {
+    let (Some(lo), Some(hi)) = (stroke.keys().next().copied(), stroke.keys().last().copied()) else { return existing.to_vec() };
+    let mut out: Vec<_> = existing.iter().copied().filter(|p| p.tick < lo || p.tick > hi).collect();
+    out.extend(stroke.iter().filter_map(|(tick, value)| value.map(|value| shared::arrangement::ControlPoint { tick: *tick, value })));
+    out.sort_by_key(|p| p.tick);
+    out
 }
 
 #[cfg(test)]

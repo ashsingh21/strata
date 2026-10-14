@@ -122,6 +122,8 @@ impl MidiModel {
                 cx.emit(SynthEvent::Update(Box::new(move |s| param.apply_norm(s, value))));
                 cx.emit(SynthEvent::Touched(param));
             }
+            Action::PitchBend(value) => cx.emit(SynthEvent::PlayWheel(shared::arrangement::Wheel::Bend, value)),
+            Action::ModWheel(value) => cx.emit(SynthEvent::PlayWheel(shared::arrangement::Wheel::Mod, value)),
             Action::Sustain(down) => {
                 self.sustain = down;
                 if !down {

@@ -632,6 +632,10 @@ pub enum TimelineEvent {
     /// is played via Space): commits `pitches` (possibly empty, for a
     /// rest) as one step of a step-entry recording.
     CommitStepChord(HashSet<u8>),
+    /// A MIDI clip's points for one wheel, replaced (one undo step).
+    SetWheelPoints { clip: ClipId, wheel: shared::arrangement::Wheel, points: Vec<shared::arrangement::ControlPoint> },
+    /// A wheel moved by the player, for live recording.
+    LiveWheel { wheel: shared::arrangement::Wheel, value: f32 },
     /// A key played (or let go) by the player, for live recording.
     LiveNote { pitch: u8, velocity: u8, on: bool },
 
@@ -977,7 +981,7 @@ impl Model for TimelineState {
                 }
                 let mut new = old.clone();
                 new.length = new.length.max(len);
-                new.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(len), link: *link };
+                new.content = ClipContent::Midi { notes: notes.clone(), loop_len: Some(len), link: *link, controls: Default::default() };
                 self.do_command(Command::ReplaceClip { clip: Box::new(new) });
             }
             TimelineEvent::SplitAtPlayhead => {
@@ -1024,7 +1028,7 @@ impl Model for TimelineState {
                 let ClipContent::Midi { loop_len: Some(_), .. } = &c.content else { return };
                 // Written out as heard (swing included), so it sounds the same.
                 let mut next = c.clone().unlinked();
-                next.content = ClipContent::Midi { notes: c.played_notes(), loop_len: None, link: None };
+                next.content = ClipContent::Midi { notes: c.played_notes(), loop_len: None, link: None, controls: Default::default() };
                 next.swing = 0.0;
                 self.do_command(Command::ReplaceClip { clip: Box::new(next) });
             }
@@ -1361,7 +1365,7 @@ impl Model for TimelineState {
                         start: snapped_start,
                         length: snapped_end - snapped_start,
                         name: "Clip".to_string(),
-                        content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
+                        content: ClipContent::Midi { notes: vec![], loop_len: None, link: None, controls: Default::default() },
                         recording: false,
                         gain_db: 0.0,
                         swing: 0.0,
@@ -1567,6 +1571,25 @@ impl Model for TimelineState {
                             }
                         });
                     }
+                }
+            }
+            TimelineEvent::SetWheelPoints { clip, wheel, points } => {
+                let Some(mut next) = self.arrangement.get().clip(*clip).cloned() else { return };
+                let ClipContent::Midi { controls, .. } = &mut next.content else { return };
+                let list = match wheel {
+                    shared::arrangement::Wheel::Bend => &mut controls.bend,
+                    shared::arrangement::Wheel::Mod => &mut controls.modwheel,
+                };
+                if *list == *points {
+                    return;
+                }
+                *list = points.clone();
+                self.do_command(Command::ReplaceClip { clip: Box::new(next) });
+            }
+            TimelineEvent::LiveWheel { wheel, value } => {
+                let at = self.playhead_ticks.get();
+                if let Some(take) = &mut self.live_take {
+                    take.wheel(*wheel, *value, at);
                 }
             }
             TimelineEvent::LiveNote { pitch, velocity, on } => {

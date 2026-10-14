@@ -91,7 +91,7 @@ pub fn steps(lesson: &str) -> Vec<Show> {
                 b(move |s| {
                     let mut clip = s.arrangement.clip(last_clip(s)).unwrap().clone();
                     clip.length = 2 * BAR;
-                    clip.content = ClipContent::Midi { notes: vec![], loop_len: Some(2 * BAR), link: None };
+                    clip.content = ClipContent::Midi { notes: vec![], loop_len: Some(2 * BAR), link: None, controls: Default::default() };
                     Command::ReplaceClip { clip: Box::new(clip) }.apply(&mut s.arrangement);
                 }),
                 b(move |s| {
@@ -1317,7 +1317,7 @@ pub(super) fn draw_clip(s: &mut Snapshot) {
         start: 0,
         length: BAR,
         name: "Clip".into(),
-        content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
+        content: ClipContent::Midi { notes: vec![], loop_len: None, link: None, controls: Default::default() },
         recording: false,
         gain_db: 0.0,
         swing: 0.0,
@@ -1374,7 +1374,7 @@ pub(super) fn draw_clip_at(s: &mut Snapshot, bar: i64) {
         start: bar * BAR,
         length: BAR,
         name: "Clip".into(),
-        content: ClipContent::Midi { notes: vec![], loop_len: None, link: None },
+        content: ClipContent::Midi { notes: vec![], loop_len: None, link: None, controls: Default::default() },
         recording: false,
         gain_db: 0.0,
         swing: 0.0,
@@ -1388,7 +1388,7 @@ pub(super) fn pattern_bars(s: &mut Snapshot, n: i64) {
     let mut clip = s.arrangement.clip(last_clip(s)).unwrap().clone();
     clip.length = clip.length.max(n * BAR);
     let ClipContent::Midi { notes, link, .. } = clip.content.clone() else { panic!() };
-    clip.content = ClipContent::Midi { notes, loop_len: Some(n * BAR), link };
+    clip.content = ClipContent::Midi { notes, loop_len: Some(n * BAR), link, controls: Default::default() };
     Command::ReplaceClip { clip: Box::new(clip) }.apply(&mut s.arrangement);
 }
 

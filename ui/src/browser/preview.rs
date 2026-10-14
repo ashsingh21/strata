@@ -312,7 +312,7 @@ fn phrase(patch: SynthState, effect: Option<shared::arrangement::Effect>, bpm: f
     if let Some(effect) = effect {
         arr.tracks[0].fx.push_at_end(effect);
     }
-    clip(&mut arr, track, 8 * PPQ, ClipContent::Midi { notes, loop_len: None, link: None });
+    clip(&mut arr, track, 8 * PPQ, ClipContent::Midi { notes, loop_len: None, link: None, controls: Default::default() });
     let mut patch = patch;
     patch.held_notes.clear();
     let job = engine::render::RenderJob {
@@ -329,7 +329,7 @@ fn phrase(patch: SynthState, effect: Option<shared::arrangement::Effect>, bpm: f
 fn beat(bpm: f64, sample_rate: u32) -> (Vec<f32>, String) {
     let mut arr = preview_arrangement(bpm);
     let track = midi_track(&mut arr, Instrument::Drums);
-    clip(&mut arr, track, 8 * PPQ, ClipContent::Midi { notes: shared::lessons::lesson_one_beat(), loop_len: Some(4 * PPQ), link: None });
+    clip(&mut arr, track, 8 * PPQ, ClipContent::Midi { notes: shared::lessons::lesson_one_beat(), loop_len: Some(4 * PPQ), link: None, controls: Default::default() });
     let sources = crate::project::decode_sources(&arr, sample_rate);
     let job = engine::render::RenderJob { arrangement: arr, patches: Default::default(), sources, sample_rate };
     (engine::render::render_between(&job, 0, 8 * PPQ, 0.5), format!("{bpm:.0} BPM \u{b7} 2 bars"))
