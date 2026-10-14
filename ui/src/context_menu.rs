@@ -216,6 +216,15 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
                 let bar_start = tick.max(0).div_euclid(bar) * bar;
                 separator(cx);
                 item(cx, "Insert a bar here", move |cx| cx.emit(TimelineEvent::InsertTime { at: bar_start, length: bar }));
+                // A tempo change from this bar on: its flag on the ruler
+                // is then dragged up or down.
+                let has_change = bar_start > 0 && arr.tempo_map.events().iter().any(|e| e.tick == bar_start);
+                if has_change {
+                    item(cx, "Remove tempo change", move |cx| cx.emit(TimelineEvent::RemoveTempoAt(bar_start)));
+                } else if bar_start > 0 {
+                    let bpm = arr.tempo_map.bpm_at(bar_start);
+                    item(cx, "Tempo change here", move |cx| cx.emit(TimelineEvent::SetTempoAt { tick: bar_start, bpm }));
+                }
                 item(cx, "Remove this bar", move |cx| {
                     cx.emit(TimelineEvent::RemoveTime { start: bar_start, end: bar_start + bar })
                 });

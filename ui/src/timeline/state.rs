@@ -518,6 +518,9 @@ pub enum TimelineEvent {
     SplitAllAt(Ticks),
     /// Takes `start..end` out of the whole song; what's after moves back.
     RemoveTime { start: Ticks, end: Ticks },
+    /// A tempo change from `tick` on (added, or its tempo changed).
+    SetTempoAt { tick: Ticks, bpm: f64 },
+    RemoveTempoAt(Ticks),
     /// Opens `length` of empty time at `at` in the whole song.
     InsertTime { at: Ticks, length: Ticks },
     /// The piano roll's Unloop: every repeat of a looping clip written out
@@ -965,6 +968,16 @@ impl Model for TimelineState {
                     self.do_command(Command::Replace(Box::new(next)));
                     self.selection.set(Selection::default());
                 }
+            }
+            TimelineEvent::SetTempoAt { tick, bpm } => {
+                let mut map = self.arrangement.get().tempo_map;
+                map.set_tempo_at(*tick, *bpm);
+                self.do_command(Command::SetTempoMap(map));
+            }
+            TimelineEvent::RemoveTempoAt(tick) => {
+                let mut map = self.arrangement.get().tempo_map;
+                map.remove_tempo_at(*tick);
+                self.do_command(Command::SetTempoMap(map));
             }
             TimelineEvent::InsertTime { at, length } => {
                 let next = shared::arrangement::insert_time(&self.arrangement.get(), *at, *length);

@@ -18,11 +18,23 @@ const MIN_BEAT_PX: f64 = 6.0;
 const EDGE_HIT_PX: f64 = 5.0;
 /// How close to the playhead a press grabs it rather than drawing a loop.
 const PLAYHEAD_HIT_PX: f64 = 6.0;
+const TEMPO_FLAG_H: f32 = 11.0;
+
+fn tempo_label(bpm: f64) -> String {
+    format!("{} bpm", bpm.round())
+}
+
+/// A tempo flag's width (about 6 px a character at the ruler's size).
+fn tempo_flag_width(bpm: f64) -> f64 {
+    8.0 + tempo_label(bpm).chars().count() as f64 * 6.0
+}
 
 #[derive(Clone, Copy)]
 enum Drag {
     /// The playhead itself, dragged along the ruler.
     Playhead,
+    /// A tempo change's flag, dragged up (faster) or down (slower).
+    Tempo { tick: Ticks, original: f64, grab_y: f32, bpm: f64 },
     LoopStart,
     LoopEnd,
     LoopMiddle { grab_offset: Ticks },
@@ -91,6 +103,20 @@ impl Ruler {
         }
     }
 
+    /// The tempo change whose flag (drawn just left of where it starts,
+    /// along the ruler's bottom) is under local (x, y).
+    fn tempo_flag_at(&self, x: f64, y: f32, height: f32) -> Option<(Ticks, f64)> {
+        if y < height - TEMPO_FLAG_H {
+            return None;
+        }
+        let transform = self.transform.get();
+        let arr = self.arrangement.get();
+        arr.tempo_map.events().iter().skip(1).find_map(|e| {
+            let fx = transform.tick_to_x(e.tick);
+            (x >= fx - tempo_flag_width(e.bpm) && x <= fx + 2.0).then_some((e.tick, e.bpm))
+        })
+    }
+
     fn loop_range(&self) -> Option<LoopRange> {
         self.loop_preview.or(self.arrangement.get().loop_range)
     }
@@ -109,6 +135,13 @@ impl View for Ruler {
                 let transform = self.transform.get();
                 let tick = transform.x_to_tick(x);
 
+                let y = cx.lmouse().1 - bounds.y;
+                if let Some((tick, bpm)) = self.tempo_flag_at(x, y, bounds.h) {
+                    self.drag = Some(Drag::Tempo { tick, original: bpm, grab_y: y, bpm });
+                    self.set_cursor(cx, CursorIcon::NsResize);
+                    cx.capture();
+                    return;
+                }
                 let on_playhead = (transform.tick_to_x(self.playhead.get()) - x).abs() <= PLAYHEAD_HIT_PX;
                 self.drag = Some(match self.arrangement.get().loop_range {
                     _ if on_playhead => Drag::Playhead,
@@ -161,7 +194,7 @@ impl View for Ruler {
                 }));
             }
 
-            WindowEvent::MouseMove(x, _) => {
+            WindowEvent::MouseMove(x, y) => {
                 if self.drag.is_none() {
                     let local_x = crate::hidpi::l(cx, *x) as f64 - cx.lbounds().x as f64;
                     let icon = self.cursor_at(local_x);
@@ -175,6 +208,12 @@ impl View for Ruler {
                     let tick = snap(transform.x_to_tick(local_x), shared::arrangement::SnapGrid::Sixteenth, bypass);
 
                     match drag {
+                        Drag::Tempo { tick, original, grab_y, .. } => {
+                            let y = crate::hidpi::l(cx, *y) - bounds.y;
+                            let bpm = (original + ((grab_y - y) / 2.0) as f64).round().clamp(20.0, 300.0);
+                            self.drag = Some(Drag::Tempo { tick, original, grab_y, bpm });
+                            cx.needs_redraw();
+                        }
                         Drag::Playhead => {
                             cx.emit(crate::app::AppEvent::Seek(transform.x_to_tick(local_x).max(0)));
                         }
@@ -209,6 +248,9 @@ impl View for Ruler {
             WindowEvent::MouseUp(button) if *button == MouseButton::Left => {
                 let current = self.arrangement.get().loop_range;
                 match self.drag {
+                    Some(Drag::Tempo { tick, original, bpm, .. }) if bpm != original => {
+                        cx.emit(TimelineEvent::SetTempoAt { tick, bpm });
+                    }
                     // A click on the loop bar (no drag) turns looping on
                     // or off; dragging it moves it.
                     Some(Drag::LoopMiddle { .. }) if self.loop_preview.is_none() || self.loop_preview == current => {
@@ -371,6 +413,28 @@ impl View for Ruler {
                     &loop_paint,
                 );
             }
+        }
+
+        // Tempo changes: a flag ending where each starts ("140 bpm"), its
+        // tempo live while dragged.
+        for event in arr.tempo_map.events().iter().skip(1) {
+            let bpm = match self.drag {
+                Some(Drag::Tempo { tick, bpm, .. }) if tick == event.tick => bpm,
+                _ => event.bpm,
+            };
+            let x = (bounds.x as f64 + transform.tick_to_x(event.tick)) as f32;
+            let width = tempo_flag_width(bpm) as f32;
+            let mut flag = vg::Paint::default();
+            flag.set_color(palette.bg_300);
+            let rect = vg::Rect::new(x - width, bounds.y + bounds.h - TEMPO_FLAG_H, x, bounds.y + bounds.h);
+            canvas.draw_path(&vg::Path::rect(rect, None), &flag);
+            let mut edge = vg::Paint::default();
+            edge.set_color(palette.ink);
+            canvas.draw_path(&vg::Path::rect(vg::Rect::new(x - 1.0, bounds.y + 2.0, x, bounds.y + bounds.h), None), &edge);
+            let mut text = vg::Paint::default();
+            text.set_anti_alias(true);
+            text.set_color(palette.ink);
+            canvas.draw_str(&tempo_label(bpm), vg::Point::new(x - width + 4.0, bounds.y + bounds.h - 2.5), &font, &text);
         }
 
         for marker in &arr.markers {

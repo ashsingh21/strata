@@ -58,6 +58,39 @@ impl TempoMap {
         &self.events
     }
 
+    /// The song's starting tempo, keeping any later changes.
+    pub fn set_base_bpm(&mut self, bpm: f64) {
+        self.events[0].bpm = bpm;
+    }
+
+    /// The time signature everywhere (changes of signature mid-song
+    /// aren't offered).
+    pub fn set_time_signature(&mut self, time_signature: TimeSignature) {
+        for event in &mut self.events {
+            event.time_signature = time_signature;
+        }
+    }
+
+    /// A tempo change at `tick` (replacing one already there); at 0 it
+    /// sets the starting tempo.
+    pub fn set_tempo_at(&mut self, tick: Ticks, bpm: f64) {
+        let time_signature = self.events[0].time_signature;
+        match self.events.iter_mut().find(|e| e.tick == tick.max(0)) {
+            Some(event) => event.bpm = bpm,
+            None => {
+                self.events.push(TempoEvent { tick: tick.max(0), bpm, time_signature });
+                self.events.sort_by_key(|e| e.tick);
+            }
+        }
+    }
+
+    /// Takes away the tempo change at `tick` (never the starting tempo).
+    pub fn remove_tempo_at(&mut self, tick: Ticks) {
+        if tick > 0 {
+            self.events.retain(|e| e.tick != tick);
+        }
+    }
+
     /// The tempo event in effect at `tick`.
     fn event_at(&self, tick: Ticks) -> TempoEvent {
         self.events.iter().rev().find(|e| e.tick <= tick).copied().unwrap_or(self.events[0])
@@ -152,6 +185,19 @@ fn seconds_duration_ticks(seconds: f64, bpm: f64) -> Ticks {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tempo_change_mid_song_keeps_through_a_new_starting_tempo() {
+        let mut map = TempoMap::constant(120.0, TimeSignature::FOUR_FOUR);
+        map.set_tempo_at(super::PPQ * 4, 60.0);
+        // One bar at 120 (2 s), then a beat at 60 (1 s).
+        assert!((map.ticks_to_seconds(super::PPQ * 5) - 3.0).abs() < 1e-9);
+        map.set_base_bpm(240.0);
+        assert_eq!(map.bpm_at(super::PPQ * 4), 60.0);
+        assert!((map.ticks_to_seconds(super::PPQ * 5) - 2.0).abs() < 1e-9);
+        map.remove_tempo_at(super::PPQ * 4);
+        assert_eq!(map.events().len(), 1);
+    }
+
     use super::*;
 
     #[test]

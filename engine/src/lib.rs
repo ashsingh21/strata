@@ -655,7 +655,7 @@ fn write_block<T>(
 
     // Synced LFOs lock to the song's beat.
     let beats_per_sample = 1.0 / samples_per_beat;
-    let beat = playing.then(|| *sample_counter as f64 / samples_per_beat);
+    let beat = playing.then(|| params.beat_at(*sample_counter, samples_per_beat));
     for engine in synth_engines.iter_mut() {
         engine.set_clock(beat, beats_per_sample);
     }
@@ -683,12 +683,12 @@ fn write_block<T>(
 
         if playing && click_enabled {
             let next = *sample_counter + 1;
-            let beat_before = (*sample_counter as f64 / samples_per_beat) as u64;
-            let beat_after = (next as f64 / samples_per_beat) as u64;
+            let beat_before = params.beat_at(*sample_counter, samples_per_beat).floor() as i64;
+            let beat_after = params.beat_at(next, samples_per_beat).floor() as i64;
             if beat_after != beat_before {
                 *click_env = 1.0;
                 *click_phase = 0.0;
-                *click_hz = if beat_after % BEATS_PER_BAR == 0 { CLICK_HZ_DOWNBEAT } else { CLICK_HZ_BEAT };
+                *click_hz = if beat_after.rem_euclid(BEATS_PER_BAR as i64) == 0 { CLICK_HZ_DOWNBEAT } else { CLICK_HZ_BEAT };
             }
         }
         let click = (*click_phase).sin() * *click_env * CLICK_AMPLITUDE;

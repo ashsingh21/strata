@@ -137,6 +137,7 @@ fn main() -> Result<(), ApplicationError> {
         let click_on = app_data.click_on;
         let position = app_data.position;
         let sample_counter = app_data.sample_counter;
+        let app_tempo_map = app_data.tempo_map;
         let sidebar_open = app_data.sidebar_open;
         let cpu_load = app_data.cpu_load;
         let output_db = app_data.output_db;
@@ -426,6 +427,21 @@ fn main() -> Result<(), ApplicationError> {
                 let is_playing = playing.get();
                 cx.emit(TimelineEvent::SyncPlayhead { ticks, playing: is_playing });
                 midi_scheduler.advance(cx, &tl_arrangement.get(), ticks, is_playing, loop_params.seek_count());
+                // The tempo segment under the playhead, for the engine's
+                // click and synced LFOs; the whole map, for seeking.
+                {
+                    let map = tl_arrangement.get().tempo_map;
+                    let events = map.events();
+                    let segment = events.iter().rev().find(|e| e.tick <= ticks).copied().unwrap_or(events[0]);
+                    loop_params.set_bpm(segment.bpm);
+                    loop_params.set_beat_origin(
+                        map.ticks_to_samples(segment.tick, engine_sample_rate).max(0) as u64,
+                        segment.tick as f64 / shared::arrangement::PPQ as f64,
+                    );
+                    if app_tempo_map.get() != map {
+                        app_tempo_map.set(map);
+                    }
+                }
                 cx.emit(SynthEvent::Tick(dt));
                 cx.emit(lessons::LessonEvent::Tick);
                 cx.emit(learn::LearnEvent::Tick);

@@ -101,6 +101,8 @@ pub enum Command {
     /// Swaps in a whole arrangement - for an edit made elsewhere as a
     /// finished result (a lesson's "Show me"), undone in one step.
     Replace(Box<Arrangement>),
+    /// Tempo changes added, moved or removed: the whole map swapped.
+    SetTempoMap(TempoMap),
 }
 
 impl Command {
@@ -493,17 +495,18 @@ impl Command {
 
             Command::SetTempo { bpm } => {
                 let old_bpm = arr.tempo_map.bpm_at(0);
-                let time_signature = arr.tempo_map.time_signature_at(0);
-                arr.tempo_map = TempoMap::constant(bpm, time_signature);
+                // The starting tempo only: later tempo changes stay.
+                arr.tempo_map.set_base_bpm(bpm);
                 Command::SetTempo { bpm: old_bpm }
             }
 
             Command::SetTimeSignature { numerator, denominator } => {
-                let bpm = arr.tempo_map.bpm_at(0);
                 let old_sig = arr.tempo_map.time_signature_at(0);
-                arr.tempo_map = TempoMap::constant(bpm, TimeSignature { numerator, denominator });
+                arr.tempo_map.set_time_signature(TimeSignature { numerator, denominator });
                 Command::SetTimeSignature { numerator: old_sig.numerator, denominator: old_sig.denominator }
             }
+
+            Command::SetTempoMap(map) => Command::SetTempoMap(std::mem::replace(&mut arr.tempo_map, map)),
         }
     }
 }

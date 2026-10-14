@@ -37,6 +37,9 @@ pub struct AppData {
     /// `TempoMap::samples_to_ticks` to drive the playhead smoothly instead
     /// of visibly stepping once per 16th note.
     pub sample_counter: Signal<u64>,
+    /// The song's tempo map, kept in step by the render timer, for turning
+    /// a seek's ticks into samples across tempo changes.
+    pub tempo_map: Signal<shared::arrangement::TempoMap>,
     pub sidebar_open: Signal<bool>,
 
     // Engine status for the header and status bar.
@@ -128,6 +131,7 @@ impl AppData {
             click_on: Signal::new(false),
             position: Signal::new(Position::default()),
             sample_counter: Signal::new(0),
+            tempo_map: Signal::new(shared::arrangement::TempoMap::constant(shared::DEFAULT_BPM, shared::arrangement::TimeSignature::FOUR_FOUR)),
             sidebar_open: Signal::new(crate::settings::load_sidebar_open().unwrap_or(true)),
             cpu_load: Signal::new(0.0),
             block_frames: Signal::new(0),
@@ -215,7 +219,7 @@ impl Model for AppData {
             }
             AppEvent::Seek(ticks) => {
                 let ticks = (*ticks).max(0);
-                let samples = (ticks as f64 / shared::arrangement::PPQ as f64 * 60.0 / self.params.bpm() * self.sample_rate as f64) as u64;
+                let samples = self.tempo_map.get().ticks_to_samples(ticks, self.sample_rate).max(0) as u64;
                 tracing::debug!(target: "action", "transport: seek to tick {ticks}");
                 cx.emit(crate::timeline::state::TimelineEvent::ScrubPlayhead(ticks));
                 self.params.request_seek(samples);

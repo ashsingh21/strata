@@ -53,6 +53,12 @@ pub struct Params {
     /// `TimelineEvent::SetTempo`), rather than the engine reading the
     /// arrangement directly.
     bpm: AtomicU32,
+    /// Where the tempo segment playing now starts (a tempo change, or the
+    /// song's start): its sample, and the beat it falls on. The engine
+    /// counts beats from here at `bpm`, so the click and synced LFOs stay
+    /// on the beat after a tempo change.
+    beat_origin_sample: AtomicU64,
+    beat_origin_beat: AtomicU64,
     /// Arrangement loop range, in samples at the engine's sample rate -
     /// recomputed and pushed every UI frame (ticks depend on the tempo
     /// map, which the engine doesn't have), alongside `PlaybackPlan`.
@@ -79,6 +85,8 @@ impl Params {
             seeks: AtomicU32::new(0),
             click_enabled: AtomicBool::new(false),
             bpm: AtomicU32::new((DEFAULT_BPM as f32).to_bits()),
+            beat_origin_sample: AtomicU64::new(0),
+            beat_origin_beat: AtomicU64::new(0f64.to_bits()),
             loop_enabled: AtomicBool::new(false),
             loop_start_sample: AtomicU64::new(0),
             loop_end_sample: AtomicU64::new(0),
@@ -141,6 +149,19 @@ impl Params {
 
     pub fn bpm(&self) -> f64 {
         f32::from_bits(self.bpm.load(Ordering::Relaxed)) as f64
+    }
+
+    /// The tempo segment the playhead is in: see `beat_origin_sample`.
+    pub fn set_beat_origin(&self, sample: u64, beat: f64) {
+        self.beat_origin_sample.store(sample, Ordering::Relaxed);
+        self.beat_origin_beat.store(beat.to_bits(), Ordering::Relaxed);
+    }
+
+    /// The beat at `sample`, counting from the current tempo segment.
+    pub fn beat_at(&self, sample: u64, samples_per_beat: f64) -> f64 {
+        let origin = self.beat_origin_sample.load(Ordering::Relaxed);
+        let beat = f64::from_bits(self.beat_origin_beat.load(Ordering::Relaxed));
+        beat + (sample as f64 - origin as f64) / samples_per_beat
     }
 
     /// `start`/`end` in samples at the engine's rate; `enabled` is the
