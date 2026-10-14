@@ -609,6 +609,15 @@ fn default_velocity() -> u8 {
     DEFAULT_VELOCITY
 }
 
+/// An alternate recording an audio clip can play instead: a file, and
+/// where in it the clip's start falls (frames at 48 kHz, like
+/// `source_offset_samples`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Take {
+    pub source: Arc<str>,
+    pub offset: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ClipContent {
     Audio {
@@ -634,6 +643,11 @@ pub enum ClipContent {
         fade_in: Ticks,
         #[serde(default)]
         fade_out: Ticks,
+        /// Other recordings of this same stretch (recorded over it again):
+        /// one of them can be swapped in to play instead. Split the clip
+        /// to pick a different take for each part (comping).
+        #[serde(default)]
+        takes: Vec<Take>,
     },
     Midi {
         /// Starts are relative to the clip's start.

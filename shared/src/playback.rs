@@ -417,7 +417,7 @@ mod tests {
             start,
             length: PPQ,
             name: "Take".into(),
-            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0, takes: Vec::new() },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,

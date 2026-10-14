@@ -1163,7 +1163,7 @@ impl LaneArea {
                             start: preview.start,
                             length: preview.length,
                             name: "Recording".to_string(),
-                            content: ClipContent::Audio { source: "".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+                            content: ClipContent::Audio { source: "".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0, takes: Vec::new() },
                             recording: true,
                             gain_db: 0.0,
                             swing: 0.0,
@@ -1434,7 +1434,12 @@ impl LaneArea {
         // when there's room - the name gives way to it.
         let linked = clip.link().is_some() && x1 - x0 >= 24.0;
         let badge_w = if linked { 16.0 } else { 0.0 };
-        if let Some(label) = crate::canvas_text::fit_text(&clip.name, &font, x1 - x0 - 8.0 - badge_w) {
+        // An audio clip recorded over says how many takes it holds.
+        let name = match &clip.content {
+            ClipContent::Audio { takes, .. } if !takes.is_empty() => format!("{} \u{b7} {} takes", clip.name, takes.len() + 1),
+            _ => clip.name.clone(),
+        };
+        if let Some(label) = crate::canvas_text::fit_text(&name, &font, x1 - x0 - 8.0 - badge_w) {
             canvas.draw_str(&label, vg::Point::new(x0 + 4.0, y0 + 10.0), &font, &text_paint);
         }
         if linked {

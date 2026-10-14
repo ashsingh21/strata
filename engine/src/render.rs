@@ -436,7 +436,7 @@ mod tests {
             start: 0,
             length: PPQ * 2,
             name: "Square".into(),
-            content: ClipContent::Audio { source: Arc::from("sq.wav"), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+            content: ClipContent::Audio { source: Arc::from("sq.wav"), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0, takes: Vec::new() },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,

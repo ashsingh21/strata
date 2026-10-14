@@ -368,7 +368,7 @@ fn pattern(index: usize, bpm: f64, sample_rate: u32) -> Option<(Vec<f32>, String
                 start: bar * 4 * PPQ + hit.beat * PPQ,
                 length,
                 name: "Hit".into(),
-                content: ClipContent::Audio { source: hit.sample.into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+                content: ClipContent::Audio { source: hit.sample.into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0, takes: Vec::new() },
                 recording: false,
                 gain_db: 0.0,
                 swing: 0.0,

@@ -158,6 +158,16 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
                     item(cx, "Open in piano roll", move |cx| cx.emit(PianoRollEvent::Open(clip_id)));
                 } else {
                     separator(cx);
+                    // Recorded over: the other takes, to play instead.
+                    if let Some(ClipContent::Audio { takes, .. }) = arr.clip(clip_id).map(|c| &c.content) {
+                        for (index, take) in takes.iter().enumerate() {
+                            let label = format!("Use take {} ({})", index + 2, take.source.trim_end_matches(".wav"));
+                            item(cx, label, move |cx| cx.emit(TimelineEvent::UseTake { clip: clip_id, index }));
+                        }
+                        if !takes.is_empty() {
+                            separator(cx);
+                        }
+                    }
                     item(cx, "Reverse", move |cx| cx.emit(TimelineEvent::ReverseClip(clip_id)));
                     // A loop whose name gives its tempo ("..._120_bpm"):
                     // stretched to play in time with the song.

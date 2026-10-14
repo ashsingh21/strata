@@ -113,6 +113,7 @@ pub fn seed_arrangement() -> Arrangement {
                 source_offset_samples,
                 fade_in: 0,
                 fade_out: 0,
+                takes: Vec::new(),
             },
             recording: false,
             gain_db: 0.0,
@@ -150,6 +151,7 @@ pub fn seed_arrangement() -> Arrangement {
             source_offset_samples: 0,
             fade_in: 0,
             fade_out: 0,
+            takes: Vec::new(),
         },
         recording: false,
         gain_db: 0.0,
@@ -168,6 +170,7 @@ pub fn seed_arrangement() -> Arrangement {
             source_offset_samples: 0,
             fade_in: 0,
             fade_out: 0,
+            takes: Vec::new(),
         },
         // Not `recording: true` - that makes a clip's rendered length grow
         // to chase the live playhead (see lanes.rs), which is correct for

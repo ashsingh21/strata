@@ -520,6 +520,8 @@ pub enum TimelineEvent {
     /// An audio clip's sound made `factor` times as long at the same
     /// pitch, written as a new file (the original is untouched).
     StretchClip { clip: ClipId, factor: f64 },
+    /// An audio clip plays its take `index` instead (see `takes`).
+    UseTake { clip: ClipId, index: usize },
     /// An audio clip's gain set so its loudest peak reaches -1 dB.
     NormalizeClip(ClipId),
     /// A clip changed while a handle is dragged - shown, not yet undoable.
@@ -788,7 +790,7 @@ impl TimelineState {
                             start: start.max(0),
                             length,
                             name: name.clone(),
-                            content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+                            content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0, takes: Vec::new() },
                             recording: false,
                             gain_db: 0.0,
                             swing: 0.0,
@@ -823,7 +825,7 @@ impl TimelineState {
                         start: start.max(0),
                         length,
                         name: name.clone(),
-                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0, takes: Vec::new() },
                         recording: false,
                         gain_db: 0.0,
                         swing: 0.0,
@@ -1448,6 +1450,8 @@ impl Model for TimelineState {
                     // What faded in now fades out.
                     fade_in: *fade_out,
                     fade_out: *fade_in,
+                    // The other takes weren't reversed with it.
+                    takes: Vec::new(),
                 };
                 self.do_command(Command::ReplaceClip { clip: Box::new(next) });
                 if let Some(tx) = &self.decode_request_tx {
@@ -1476,12 +1480,23 @@ impl Model for TimelineState {
                     source_offset_samples: 0,
                     fade_in: scale(*fade_in),
                     fade_out: scale(*fade_out),
+                    takes: Vec::new(),
                 };
                 self.do_command(Command::ReplaceClip { clip: Box::new(next) });
                 if let Some(tx) = &self.decode_request_tx {
                     let _ = tx.send(new_source.clone());
                 }
                 crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &crate::timeline::assets_dir(), new_source);
+            }
+            TimelineEvent::UseTake { clip, index } => {
+                let Some(next) = self.arrangement.get().clip(*clip).and_then(|c| shared::arrangement::takes::use_take(c, *index)) else { return };
+                let ClipContent::Audio { source, .. } = &next.content else { return };
+                let source = source.clone();
+                self.do_command(Command::ReplaceClip { clip: Box::new(next) });
+                if let Some(tx) = &self.decode_request_tx {
+                    let _ = tx.send(source.clone());
+                }
+                crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &crate::timeline::assets_dir(), source);
             }
             TimelineEvent::NormalizeClip(id) => {
                 let arr = self.arrangement.get();
@@ -1853,12 +1868,15 @@ impl Model for TimelineState {
                         start: *start,
                         length: *length,
                         name: "Take".to_string(),
-                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0, takes: Vec::new() },
                         recording: false,
                         gain_db: 0.0,
                         swing: 0.0,
                     };
-                    stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
+                    // Recorded over an earlier take: that one is kept as an
+                    // alternate of this clip (see `takes`).
+                    let commands = shared::arrangement::takes::record_over(arr, clip);
+                    stack.do_command(Command::Batch(commands), arr);
                 });
                 // Without this the clip sits at `peaks: None` - and so
                 // waveform-less - until the project is next reloaded, which
@@ -1941,6 +1959,7 @@ impl Model for TimelineState {
                                         source_offset_samples: 0,
                                         fade_in: 0,
                                         fade_out: 0,
+                                        takes: Vec::new(),
                                     },
                                     recording: false,
                                     gain_db: 0.0,
@@ -2093,6 +2112,7 @@ impl Model for TimelineState {
                             source_offset_samples: 0,
                             fade_in: 0,
                             fade_out: 0,
+                            takes: Vec::new(),
                         },
                         recording: false,
                         // A touch of per-hit level variation so the same

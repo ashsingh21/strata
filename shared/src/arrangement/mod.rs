@@ -14,6 +14,7 @@ pub mod time;
 pub mod time_edit;
 pub mod live_record;
 pub mod note_tools;
+pub mod takes;
 pub mod transform;
 
 pub use automation::{fader_pos_to_gain_db, gain_db_to_fader_pos, AutomationTarget};
@@ -21,7 +22,7 @@ pub use commands::{Command, CommandStack};
 pub use model::{
     DEFAULT_TRACK_HEIGHT, MIN_TRACK_HEIGHT, MAX_TRACK_HEIGHT,
     Arrangement, AutomationLane, AutomationLaneId, Breakpoint, Clip, ClipColor, ClipContent,
-    ClipId, LinkId, LoopRange, Marker, MarkerId, MidiNote, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
+    ClipId, LinkId, LoopRange, Marker, MarkerId, MidiNote, Take, Track, TrackId, TrackKind, DEFAULT_VELOCITY, Instrument,
     Effect, EffectSlot, EffectNode, EffectNodeId, EffectEdge, EffectGraph, CompressorState, EqState, EqBand, EqBandKind, EQ_LOW_CUT, EQ_LOW_SHELF, EQ_BELL, EQ_HIGH_SHELF,
     EffectParam, ModTarget,
 };

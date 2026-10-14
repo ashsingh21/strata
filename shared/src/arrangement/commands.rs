@@ -186,7 +186,7 @@ impl Command {
                 let left_length = at - original.start;
 
                 let right_content = match &original.content {
-                    ClipContent::Audio { source, peaks, source_offset_samples, fade_out, .. } => {
+                    ClipContent::Audio { source, peaks, source_offset_samples, fade_out, takes, .. } => {
                         let bpm = arr.tempo_map.bpm_at(original.start);
                         let sample_rate = 48_000u32;
                         let delta_samples =
@@ -198,6 +198,11 @@ impl Command {
                             // The cut ends one half and starts the other.
                             fade_in: 0,
                             fade_out: *fade_out,
+                            // Every take, lined up with the right half too.
+                            takes: takes
+                                .iter()
+                                .map(|t| crate::arrangement::Take { source: t.source.clone(), offset: t.offset + delta_samples })
+                                .collect(),
                         }
                     }
                     // Split what's heard (a looping clip is unrolled), so
@@ -636,6 +641,7 @@ mod tests {
                 source_offset_samples: 0,
                 fade_in: 0,
                 fade_out: 0,
+                takes: Vec::new(),
             },
             recording: false,
             gain_db: 0.0,
