@@ -156,6 +156,10 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
                 if is_midi {
                     separator(cx);
                     item(cx, "Open in piano roll", move |cx| cx.emit(PianoRollEvent::Open(clip_id)));
+                } else {
+                    separator(cx);
+                    item(cx, "Reverse", move |cx| cx.emit(TimelineEvent::ReverseClip(clip_id)));
+                    item(cx, "Normalize", move |cx| cx.emit(TimelineEvent::NormalizeClip(clip_id)));
                 }
                 separator(cx);
                 item_with_shortcut(cx, "Delete", "Del", |cx| cx.emit(TimelineEvent::DeleteSelected));
@@ -207,6 +211,14 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
             }
             ContextMenuTarget::Ruler { tick } => {
                 item(cx, "Add marker here", move |cx| cx.emit(TimelineEvent::AddMarker(tick)));
+                // Whole bars, on every track: the bar under the pointer.
+                let bar = arr.tempo_map.time_signature_at(0).ticks_per_bar();
+                let bar_start = tick.max(0).div_euclid(bar) * bar;
+                separator(cx);
+                item(cx, "Insert a bar here", move |cx| cx.emit(TimelineEvent::InsertTime { at: bar_start, length: bar }));
+                item(cx, "Remove this bar", move |cx| {
+                    cx.emit(TimelineEvent::RemoveTime { start: bar_start, end: bar_start + bar })
+                });
                 if arr.loop_range.is_some() {
                     separator(cx);
                     item(cx, "Remove loop", |cx| cx.emit(TimelineEvent::SetLoopRange(None)));

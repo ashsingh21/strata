@@ -623,6 +623,13 @@ pub enum ClipContent {
         /// advances this so playback (and the displayed waveform slice)
         /// keeps referencing the right part of the source.
         source_offset_samples: u64,
+        /// Fade in from silence over this long at the clip's start, and out
+        /// to silence at its end (0: just the engine's few-ms click guard).
+        /// Where two clips on a track overlap they also crossfade.
+        #[serde(default)]
+        fade_in: Ticks,
+        #[serde(default)]
+        fade_out: Ticks,
     },
     Midi {
         /// Starts are relative to the clip's start.

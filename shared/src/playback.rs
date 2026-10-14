@@ -37,6 +37,10 @@ pub struct PlaybackClip {
     /// before they're summed into the track bus, separately from the
     /// track-wide `gain_db` above.
     pub clip_gain_db: f32,
+    /// Fades at the clip's start and end, in samples - its own, stretched
+    /// over any overlap with a neighbour on its track (a crossfade).
+    pub fade_in_samples: i64,
+    pub fade_out_samples: i64,
     /// The owning track's effect chain, in order - only
     /// `effects[..effect_count]` is meaningful. See `SynthParams`'s own
     /// `effects`/`effect_count` fields for the same "fixed array, not a
@@ -171,7 +175,7 @@ impl PlaybackPlan {
                 if track.mute || (any_solo && !track.solo) {
                     return None;
                 }
-                let ClipContent::Audio { source, source_offset_samples, .. } = &clip.content else {
+                let ClipContent::Audio { source, source_offset_samples, fade_in, fade_out, .. } = &clip.content else {
                     return None;
                 };
                 let start_sample = arrangement.tempo_map.ticks_to_samples(clip.start, sample_rate);
@@ -191,12 +195,16 @@ impl PlaybackPlan {
                     source_offset_samples: *source_offset_samples,
                     gain_db: track.gain_db,
                     clip_gain_db: clip.gain_db,
+                    fade_in_samples: arrangement.tempo_map.ticks_to_samples(clip.start + fade_in.max(&0), sample_rate) - start_sample,
+                    fade_out_samples: end_sample - arrangement.tempo_map.ticks_to_samples(clip.end() - fade_out.max(&0), sample_rate),
                     effect_count,
                     effects,
                     bus_slot,
                 })
             })
-            .collect();
+            .collect::<Vec<PlaybackClip>>();
+        let mut clips = clips;
+        crossfade_overlaps(&mut clips);
         let (master_effect_count, master_effects) = build_effect_units(&arrangement.master_effects);
         let monitor = arrangement
             .tracks
@@ -209,6 +217,24 @@ impl PlaybackPlan {
                 MonitorPlan { bus_slot: i.min(MAX_BUS_TRACKS - 1) as u8, gain_db: t.gain_db, effect_count, effects }
             });
         Self { clips, master_effect_count, master_effects, monitor }
+    }
+}
+
+/// Where two clips on one track overlap, the earlier fades out and the
+/// later fades in across the overlap, instead of both playing at full.
+fn crossfade_overlaps(clips: &mut [PlaybackClip]) {
+    for i in 0..clips.len() {
+        for j in 0..clips.len() {
+            let (a, b) = (&clips[i], &clips[j]);
+            if i == j || a.track != b.track || b.start_sample <= a.start_sample {
+                continue;
+            }
+            let overlap = (a.start_sample + a.length_samples).min(b.start_sample + b.length_samples) - b.start_sample;
+            if overlap > 0 {
+                clips[i].fade_out_samples = clips[i].fade_out_samples.max(overlap);
+                clips[j].fade_in_samples = clips[j].fade_in_samples.max(overlap);
+            }
+        }
     }
 }
 
@@ -349,7 +375,7 @@ mod tests {
             start,
             length: PPQ,
             name: "Take".into(),
-            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0 },
+            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,
@@ -361,6 +387,25 @@ mod tests {
         arr.tracks.push(track(1, false, false));
         arr.clips.push(audio_clip(1, 1, 0));
         arr
+    }
+
+    #[test]
+    fn overlapping_clips_on_a_track_crossfade() {
+        let mut arr = Arrangement::new(TempoMap::constant(120.0, TimeSignature::FOUR_FOUR));
+        arr.tracks.push(track(1, false, false));
+        let mut first = audio_clip(1, 1, 0);
+        first.length = PPQ * 4;
+        if let ClipContent::Audio { fade_in, .. } = &mut first.content {
+            *fade_in = PPQ;
+        }
+        let mut second = audio_clip(2, 1, PPQ * 3);
+        second.length = PPQ * 4;
+        arr.clips = vec![first, second];
+        let plan = PlaybackPlan::from_arrangement(&arr, 48_000);
+        // 120 bpm: a beat is 24000 samples; they overlap by one beat.
+        let (a, b) = (&plan.clips[0], &plan.clips[1]);
+        assert_eq!((a.fade_in_samples, a.fade_out_samples), (24_000, 24_000));
+        assert_eq!((b.fade_in_samples, b.fade_out_samples), (24_000, 0));
     }
 
     #[test]

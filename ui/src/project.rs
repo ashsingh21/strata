@@ -743,7 +743,7 @@ mod decode_tests {
             start: 0,
             length: 3840,
             name: "Loop".into(),
-            content: shared::arrangement::ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+            content: shared::arrangement::ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,

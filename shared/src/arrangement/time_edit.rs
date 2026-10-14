@@ -49,6 +49,33 @@ pub fn remove_time(arr: &Arrangement, start: Ticks, end: Ticks) -> Arrangement {
     next
 }
 
+/// `arr` with `length` of empty time opened at `at` on every track: clips
+/// crossing it are cut there, and everything from it on moves later.
+/// Markers, automation points and the loop range move with it.
+pub fn insert_time(arr: &Arrangement, at: Ticks, length: Ticks) -> Arrangement {
+    let mut next = arr.clone();
+    if length <= 0 {
+        return next;
+    }
+    for command in split_all_at(&mut next, at) {
+        command.apply(&mut next);
+    }
+    for clip in next.clips.iter_mut().filter(|c| c.start >= at) {
+        clip.start += length;
+    }
+    let moved = |t: Ticks| if t >= at { t + length } else { t };
+    for lane in &mut next.automation {
+        for point in &mut lane.breakpoints {
+            point.tick = moved(point.tick);
+        }
+    }
+    for marker in &mut next.markers {
+        marker.position = moved(marker.position);
+    }
+    next.loop_range = next.loop_range.map(|r| LoopRange { start: moved(r.start), end: moved(r.end) });
+    next
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +161,18 @@ mod tests {
         assert_eq!(right.played_notes().first().map(|n| (n.start, n.pitch)), Some((0, 60)));
         assert_eq!(next.markers.iter().map(|m| (m.name.as_str(), m.position / BAR)).collect::<Vec<_>>(), vec![("Drop", 4)]);
         assert_eq!(next.loop_range, Some(LoopRange { start: 3 * BAR, end: 7 * BAR }));
+    }
+
+    #[test]
+    fn inserting_bars_opens_a_gap_on_every_track() {
+        let next = insert_time(&song(), 2 * BAR, 3 * BAR);
+        assert_eq!(spans(&next, 1), vec![(0, 2), (5, 11)]);
+        assert_eq!(spans(&next, 2), vec![(0, 2), (13, 15)]);
+        assert_eq!(next.markers.iter().map(|m| m.position / BAR).collect::<Vec<_>>(), vec![6, 9]);
+        assert_eq!(next.loop_range, Some(LoopRange { start: 8 * BAR, end: 12 * BAR }));
+        // Taking the same bars out again gives the song back.
+        let back = remove_time(&next, 2 * BAR, 5 * BAR);
+        assert_eq!(spans(&back, 1), vec![(0, 2), (2, 8)]);
     }
 
     #[test]

@@ -852,7 +852,15 @@ fn mix_audio_clips(
         let into = pos - clip.start_sample;
         let left = (clip.start_sample + clip.length_samples - pos).min(frame_count - frame_index);
         let edge = into.min(left - 1).min(fade);
-        let fade_gain = if edge < fade { (edge + 1) as f32 / fade as f32 } else { 1.0 };
+        let mut fade_gain = if edge < fade { (edge + 1) as f32 / fade as f32 } else { 1.0 };
+        // The clip's own fades (and crossfades with a neighbour).
+        if into < clip.fade_in_samples {
+            fade_gain *= (into + 1) as f32 / clip.fade_in_samples as f32;
+        }
+        let to_end = clip.start_sample + clip.length_samples - pos;
+        if to_end <= clip.fade_out_samples {
+            fade_gain *= to_end as f32 / clip.fade_out_samples.max(1) as f32;
+        }
         let clip_gain = db_to_gain(clip.clip_gain_db) * fade_gain;
         bus_raw[slot].0 += l * clip_gain;
         bus_raw[slot].1 += r * clip_gain;
@@ -944,7 +952,7 @@ mod track_meter_tests {
             start: 0,
             length: 4 * PPQ,
             name: "Take".into(),
-            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0 },
+            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
             recording: false,
             gain_db: 0.0,
             swing: 0.0,

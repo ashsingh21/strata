@@ -5,6 +5,7 @@ pub mod beat_templates;
 pub mod drum_pads;
 pub mod header;
 pub mod lanes;
+pub mod overview;
 pub mod peaks_loader;
 pub mod ruler;
 pub mod scheduler;
@@ -242,6 +243,16 @@ pub fn timeline_view(
                 })
                 .height(Stretch(1.0))
                 .width(Stretch(1.0));
+
+                overview::Overview::new(cx, arrangement, transform, theme)
+                    .height(Pixels(16.0))
+                    .width(Stretch(1.0))
+                    .tooltip(|cx| {
+                        Tooltip::new(cx, |cx| {
+                            Label::new(cx, "The whole song. Click or drag to look somewhere else. Ctrl/Cmd+Shift+0 fits it all on screen.");
+                        })
+                        .arrow(false)
+                    });
             })
             .width(Stretch(1.0))
             .height(Stretch(1.0));

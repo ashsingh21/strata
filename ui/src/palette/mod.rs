@@ -179,6 +179,7 @@ pub fn commands() -> Vec<Command> {
         command("Show / hide spectrum", "View", "", "analyzer frequency", |cx| cx.emit(AnalyzerEvent::Toggle)),
         command("Zoom in", "View", "Ctrl+=", "bigger", |cx| cx.emit(AppEvent::Zoom(1))),
         command("Zoom out", "View", "Ctrl+-", "smaller", |cx| cx.emit(AppEvent::Zoom(-1))),
+        command("Fit the song on screen", "Timeline", "Ctrl+Shift+0", "zoom fit whole song overview", |cx| cx.emit(TimelineEvent::ZoomToFit)),
         command("Reset zoom", "View", "Ctrl+0", "", |cx| cx.emit(AppEvent::ResetZoom)),
         command("Next theme", "View", "Ctrl+T", "colours dark light", |cx| cx.emit(AppEvent::ToggleTheme)),
         command("Show tips again", "Help", "", "hints reset", |cx| cx.emit(crate::hints::HintEvent::ResetAll)),

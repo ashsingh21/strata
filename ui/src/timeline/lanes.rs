@@ -76,6 +76,9 @@ enum Edge {
 }
 
 enum Drag {
+    /// An audio clip's fade handle, or (Gain) its name bar dragged up/down.
+    /// The clip is edited live; mouse-up makes it one undo step.
+    AudioHandle { before: Box<Clip>, handle: AudioHandle, grab_y: f32 },
     MoveClips {
         /// (clip, original track, original start).
         clips: Vec<(ClipId, TrackId, Ticks)>,
@@ -114,6 +117,26 @@ enum Drag {
     /// The Split tool: a click cuts every track there; a drag picks a
     /// stretch of time (across every track) for Delete to take out.
     SplitRange { anchor: Ticks, current: Ticks },
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum AudioHandle {
+    FadeIn,
+    FadeOut,
+    Gain,
+}
+
+/// Fade handles' grab zone, and how far a gain drag moves per dB.
+const FADE_GRAB_PX: f32 = 6.0;
+const PX_PER_DB: f32 = 3.0;
+
+/// Where an audio clip's gain readout sits in its name bar (and is
+/// dragged): just inside the fade-out handle. Empty on a narrow clip.
+fn gain_zone(start_x: f32, end_x: f32) -> std::ops::Range<f32> {
+    if end_x - start_x < 90.0 {
+        return 0.0..0.0;
+    }
+    end_x - 52.0..end_x - FADE_GRAB_PX - 2.0
 }
 
 /// Scrollbar thumb thickness and its grab zone from the lane edge.
@@ -239,6 +262,13 @@ impl View for LaneArea {
             }
             WindowEvent::MouseScroll(x, y) => {
                 self.on_scroll(cx, *x, *y);
+            }
+            // Selected clips: Left/Right a Snap step, with Shift a bar.
+            WindowEvent::KeyDown(code @ (Code::ArrowLeft | Code::ArrowRight), _) => {
+                if !self.selection.get().clips.is_empty() {
+                    let dir = if *code == Code::ArrowRight { 1 } else { -1 };
+                    cx.emit(TimelineEvent::NudgeClips { dir, bar: cx.modifiers().shift() });
+                }
             }
             WindowEvent::MouseLeave => {
                 if self.split_hover.take().is_some() {
@@ -398,6 +428,36 @@ impl LaneArea {
 
                     let start_x = transform.tick_to_x(clip.start) as f32;
                     let end_x = transform.tick_to_x(clip.end()) as f32;
+                    // An audio clip's name bar: its fade handles at the
+                    // corners (where each fade ends), gain in between.
+                    if let ClipContent::Audio { fade_in, fade_out, .. } = clip.content {
+                        let in_header = ly - (row.top - transform.scroll_y as f32) < CLIP_HEADER_H + 3.0;
+                        let handle = if in_header && end_x - start_x > 24.0 {
+                            let fade_in_x = transform.tick_to_x(clip.start + fade_in) as f32;
+                            let fade_out_x = transform.tick_to_x(clip.end() - fade_out) as f32;
+                            if (lx - fade_in_x).abs() <= FADE_GRAB_PX && lx < (start_x + end_x) / 2.0 {
+                                Some(AudioHandle::FadeIn)
+                            } else if (lx - fade_out_x).abs() <= FADE_GRAB_PX {
+                                Some(AudioHandle::FadeOut)
+                            } else if gain_zone(start_x, end_x).contains(&lx) {
+                                Some(AudioHandle::Gain)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        if handle == Some(AudioHandle::Gain) && is_double {
+                            let mut reset = clip.clone();
+                            reset.gain_db = 0.0;
+                            cx.emit(TimelineEvent::CommitClip { before: Box::new(clip.clone()), after: Box::new(reset) });
+                            return;
+                        }
+                        if let Some(handle) = handle {
+                            self.drag = Some(Drag::AudioHandle { before: Box::new(clip.clone()), handle, grab_y: ly });
+                            return;
+                        }
+                    }
                     // A short clip (a single drum hit, easily narrower than
                     // twice the grab zone) needs a proportionally smaller
                     // grab zone, or every click anywhere on it - including
@@ -553,6 +613,32 @@ impl LaneArea {
         cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target, x: window_x, y: window_y }));
     }
 
+    /// Which audio-clip handle (a fade's end, the gain readout) is under a
+    /// point, for the hover cursor - the same zones `on_mouse_down` uses.
+    fn audio_handle_at(&self, lx: f32, ly: f32) -> Option<AudioHandle> {
+        let clip = self.clip_at(lx, ly)?;
+        let ClipContent::Audio { fade_in, fade_out, .. } = clip.content else { return None };
+        let t = self.transform.get();
+        let rows = build_rows(&self.arrangement.get());
+        let row = rows.iter().find(|r| matches!(r.kind, RowKind::Track(id) if id == clip.track))?;
+        if ly - (row.top - t.scroll_y as f32) >= CLIP_HEADER_H + 3.0 {
+            return None;
+        }
+        let (start_x, end_x) = (t.tick_to_x(clip.start) as f32, t.tick_to_x(clip.end()) as f32);
+        if end_x - start_x <= 24.0 {
+            return None;
+        }
+        if (lx - t.tick_to_x(clip.start + fade_in) as f32).abs() <= FADE_GRAB_PX && lx < (start_x + end_x) / 2.0 {
+            Some(AudioHandle::FadeIn)
+        } else if (lx - t.tick_to_x(clip.end() - fade_out) as f32).abs() <= FADE_GRAB_PX {
+            Some(AudioHandle::FadeOut)
+        } else if gain_zone(start_x, end_x).contains(&lx) {
+            Some(AudioHandle::Gain)
+        } else {
+            None
+        }
+    }
+
     /// The clip under a point on the lanes, topmost first.
     fn clip_at(&self, lx: f32, ly: f32) -> Option<Clip> {
         let transform = self.transform.get();
@@ -591,6 +677,8 @@ impl LaneArea {
             }
             let icon = if splitting {
                 CursorIcon::Crosshair
+            } else if let Some(handle) = self.audio_handle_at(lx, ly) {
+                if handle == AudioHandle::Gain { CursorIcon::NsResize } else { CursorIcon::EwResize }
             } else if self.edge_hover_at(lx, ly) {
                 CursorIcon::EwResize
             } else {
@@ -638,6 +726,27 @@ impl LaneArea {
 
         match drag {
             Drag::ScrollThumb { .. } => {}
+            Drag::AudioHandle { before, handle, grab_y } => {
+                let mut clip = (**before).clone();
+                match handle {
+                    AudioHandle::Gain => {
+                        let db = before.gain_db + (*grab_y - ly) / PX_PER_DB;
+                        clip.gain_db = (db * 2.0).round() / 2.0;
+                        clip.gain_db = clip.gain_db.clamp(-48.0, 12.0);
+                    }
+                    AudioHandle::FadeIn | AudioHandle::FadeOut => {
+                        let at = snap(tick, snap_grid, true).clamp(clip.start, clip.end());
+                        if let ClipContent::Audio { fade_in, fade_out, .. } = &mut clip.content {
+                            if *handle == AudioHandle::FadeIn {
+                                *fade_in = (at - clip.start).min(clip.length - *fade_out).max(0);
+                            } else {
+                                *fade_out = (clip.start + clip.length - at).min(clip.length - *fade_in).max(0);
+                            }
+                        }
+                    }
+                }
+                cx.emit(TimelineEvent::LiveClip(Box::new(clip)));
+            }
             Drag::SplitRange { anchor, current } => {
                 *current = snap(tick.max(0), snap_grid, bypass);
                 let (lo, hi) = (*anchor.min(current), *anchor.max(current));
@@ -703,6 +812,16 @@ impl LaneArea {
 
         match drag {
             Drag::ScrollThumb { .. } => {}
+            Drag::AudioHandle { before, .. } => {
+                if let Some(after) = self.arrangement.get().clip(before.id).cloned() {
+                    let changed = after.gain_db != before.gain_db
+                        || matches!((&after.content, &before.content),
+                            (ClipContent::Audio { fade_in: a, fade_out: b, .. }, ClipContent::Audio { fade_in: c, fade_out: d, .. }) if (a, b) != (c, d));
+                    if changed {
+                        cx.emit(TimelineEvent::CommitClip { before, after: Box::new(after) });
+                    }
+                }
+            }
             Drag::SplitRange { anchor, current } => {
                 if anchor == current {
                     cx.emit(TimelineEvent::SetTimeSelection(None));
@@ -715,6 +834,7 @@ impl LaneArea {
                 }
                 let arr = self.arrangement.get();
                 let track_ids: Vec<TrackId> = arr.tracks.iter().map(|t| t.id).collect();
+                let mut moves = Vec::new();
                 for (clip_id, original_track, original_start) in clips {
                     let new_start = (original_start + delta_ticks).max(0);
                     let new_track = if row_delta != 0 {
@@ -728,8 +848,11 @@ impl LaneArea {
                     } else {
                         original_track
                     };
-                    cx.emit(TimelineEvent::MoveClip { clip: clip_id, track: new_track, start: new_start });
+                    moves.push((clip_id, new_track, new_start));
                 }
+                // Ctrl (Cmd on a Mac) held: leave the originals, drop copies.
+                let copy = cx.modifiers().ctrl() || cx.modifiers().logo();
+                cx.emit(TimelineEvent::MoveClips { moves, copy });
             }
             Drag::TrimClip { clip, edge, original_start, original_length, delta_ticks } => {
                 if delta_ticks == 0 {
@@ -1031,7 +1154,7 @@ impl LaneArea {
                             start: preview.start,
                             length: preview.length,
                             name: "Recording".to_string(),
-                            content: ClipContent::Audio { source: "".into(), peaks: None, source_offset_samples: 0 },
+                            content: ClipContent::Audio { source: "".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
                             recording: true,
                             gain_db: 0.0,
                             swing: 0.0,
@@ -1320,6 +1443,50 @@ impl LaneArea {
 
         if y1 > header_bottom {
             self.draw_clip_body(canvas, frame, clip, x0, header_bottom, x1, y1);
+        }
+
+        // An audio clip's fades (shaded wedges, a handle where each ends)
+        // and its gain, at the name bar's right.
+        if let ClipContent::Audio { fade_in, fade_out, .. } = clip.content {
+            let t = self.transform.get();
+            let fi = t.ticks_to_px(fade_in) as f32;
+            let fo = t.ticks_to_px(fade_out) as f32;
+            let mut shade = vg::Paint::default();
+            shade.set_color(Color::rgba(0, 0, 0, 80));
+            shade.set_anti_alias(true);
+            if fi > 0.5 {
+                let mut path = vg::PathBuilder::new();
+                path.move_to((x0, header_bottom));
+                path.line_to(((x0 + fi).min(x1), header_bottom));
+                path.line_to((x0, y1));
+                path.close();
+                canvas.draw_path(&path.detach(), &shade);
+            }
+            if fo > 0.5 {
+                let mut path = vg::PathBuilder::new();
+                path.move_to((x1, header_bottom));
+                path.line_to(((x1 - fo).max(x0), header_bottom));
+                path.line_to((x1, y1));
+                path.close();
+                canvas.draw_path(&path.detach(), &shade);
+            }
+            if x1 - x0 > 24.0 {
+                let mut handle = vg::Paint::default();
+                handle.set_color(tokens::ON_CLIP);
+                for hx in [(x0 + fi).min(x1 - 3.0), (x1 - fo).max(x0 + 3.0)] {
+                    canvas.draw_path(&vg::Path::rect(vg::Rect::new(hx - 3.0, y0 + 1.0, hx + 3.0, y0 + 7.0), None), &handle);
+                }
+            }
+            let zone = gain_zone(x0, x1);
+            if !zone.is_empty() {
+                let db = clip.gain_db;
+                let label = if db == 0.0 { "0 dB".to_string() } else { format!("{db:+.1} dB").replace('-', "\u{2212}") };
+                let gain_font = crate::canvas_text::canvas_font(10.0);
+                let mut gain_paint = vg::Paint::default();
+                gain_paint.set_color(Color::rgba(tokens::ON_CLIP.r(), tokens::ON_CLIP.g(), tokens::ON_CLIP.b(), if db == 0.0 { 120 } else { 255 }));
+                gain_paint.set_anti_alias(true);
+                canvas.draw_str(&label, vg::Point::new(zone.start, y0 + 10.0), &gain_font, &gain_paint);
+            }
         }
 
         // A seam down the clip's start, so two clips that touch (a split,

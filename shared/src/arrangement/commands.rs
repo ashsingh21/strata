@@ -182,7 +182,7 @@ impl Command {
                 let left_length = at - original.start;
 
                 let right_content = match &original.content {
-                    ClipContent::Audio { source, peaks, source_offset_samples } => {
+                    ClipContent::Audio { source, peaks, source_offset_samples, fade_out, .. } => {
                         let bpm = arr.tempo_map.bpm_at(original.start);
                         let sample_rate = 48_000u32;
                         let delta_samples =
@@ -191,6 +191,9 @@ impl Command {
                             source: source.clone(),
                             peaks: peaks.clone(),
                             source_offset_samples: source_offset_samples + delta_samples,
+                            // The cut ends one half and starts the other.
+                            fade_in: 0,
+                            fade_out: *fade_out,
                         }
                     }
                     // Split what's heard (a looping clip is unrolled), so
@@ -223,6 +226,9 @@ impl Command {
 
                 let clip = arr.clip_mut(clip_id).unwrap();
                 clip.length = left_length;
+                if let ClipContent::Audio { fade_out, .. } = &mut clip.content {
+                    *fade_out = 0;
+                }
                 if let (Some(notes), ClipContent::Midi { notes: dst, loop_len, link }) =
                     (left_notes, &mut clip.content)
                 {
@@ -615,6 +621,8 @@ mod tests {
                 source: "test.wav".into(),
                 peaks: None,
                 source_offset_samples: 0,
+                fade_in: 0,
+                fade_out: 0,
             },
             recording: false,
             gain_db: 0.0,

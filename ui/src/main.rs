@@ -578,6 +578,8 @@ fn main() -> Result<(), ApplicationError> {
             (KeyChord::new(Modifiers::CTRL, Code::Minus), KeymapEntry::new(34u8, |cx| cx.emit(AppEvent::Zoom(-1)))),
             (KeyChord::new(Modifiers::SUPER, Code::Minus), KeymapEntry::new(35u8, |cx| cx.emit(AppEvent::Zoom(-1)))),
             (KeyChord::new(Modifiers::CTRL, Code::Digit0), KeymapEntry::new(36u8, |cx| cx.emit(AppEvent::ResetZoom))),
+            (KeyChord::new(Modifiers::CTRL | Modifiers::SHIFT, Code::Digit0), KeymapEntry::new(60u8, |cx| cx.emit(TimelineEvent::ZoomToFit))),
+            (KeyChord::new(Modifiers::SUPER | Modifiers::SHIFT, Code::Digit0), KeymapEntry::new(61u8, |cx| cx.emit(TimelineEvent::ZoomToFit))),
             (KeyChord::new(Modifiers::SUPER, Code::Digit0), KeymapEntry::new(37u8, |cx| cx.emit(AppEvent::ResetZoom))),
             (
                 KeyChord::new(Modifiers::empty(), Code::Home),

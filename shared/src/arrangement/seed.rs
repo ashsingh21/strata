@@ -111,6 +111,8 @@ pub fn seed_arrangement() -> Arrangement {
                 source: drums_source.clone(),
                 peaks: None,
                 source_offset_samples,
+                fade_in: 0,
+                fade_out: 0,
             },
             recording: false,
             gain_db: 0.0,
@@ -146,6 +148,8 @@ pub fn seed_arrangement() -> Arrangement {
             source: "lead_hook.wav".into(),
             peaks: None,
             source_offset_samples: 0,
+            fade_in: 0,
+            fade_out: 0,
         },
         recording: false,
         gain_db: 0.0,
@@ -162,6 +166,8 @@ pub fn seed_arrangement() -> Arrangement {
             source: "lead_take3.wav".into(),
             peaks: None,
             source_offset_samples: 0,
+            fade_in: 0,
+            fade_out: 0,
         },
         // Not `recording: true` - that makes a clip's rendered length grow
         // to chase the live playhead (see lanes.rs), which is correct for

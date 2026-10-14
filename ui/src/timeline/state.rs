@@ -213,6 +213,24 @@ pub fn content_height(arr: &Arrangement) -> f64 {
 /// How far right there's anything to scroll to, in unscrolled px: the end
 /// of the last clip plus eight bars of empty room to write into (at least
 /// 32 bars).
+/// The part of an audio clip's file it plays, read from disk: its frames
+/// (interleaved, silence past the file's end) and the file's format.
+/// Offsets are kept at 48 kHz, as `Command::SplitClip` counts them.
+fn audio_region(arr: &Arrangement, clip: &Clip) -> Option<(Vec<f32>, hound::WavSpec)> {
+    let ClipContent::Audio { source, source_offset_samples, .. } = &clip.content else { return None };
+    let path = crate::paths::audio_file(&crate::timeline::assets_dir(), source);
+    let (samples, spec) = crate::timeline::peaks_loader::decode_wav(&path)?;
+    let channels = spec.channels.max(1) as usize;
+    let rate = spec.sample_rate.max(1);
+    let first = (*source_offset_samples as f64 * rate as f64 / 48_000.0) as usize;
+    let count = (arr.tempo_map.ticks_to_samples(clip.end(), rate) - arr.tempo_map.ticks_to_samples(clip.start, rate)).max(0) as usize;
+    let mut out = vec![0.0f32; count * channels];
+    for (i, frame) in samples.chunks(channels).skip(first).take(count).enumerate() {
+        out[i * channels..i * channels + frame.len()].copy_from_slice(frame);
+    }
+    Some((out, spec))
+}
+
 pub fn content_width(arr: &Arrangement, t: &ViewTransform) -> f64 {
     let bar = shared::arrangement::PPQ * 4;
     let end = arr.clips.iter().map(|c| c.start + c.length).max().unwrap_or(0);
@@ -470,7 +488,22 @@ pub enum NoteTool {
 #[derive(Debug)]
 pub enum TimelineEvent {
     NoteTool(NoteTool),
-    MoveClip { clip: ClipId, track: TrackId, start: Ticks },
+    /// Several clips moved as one undo step - or, with `copy` (Ctrl/Cmd
+    /// held while dragging), copies of them put there instead.
+    MoveClips { moves: Vec<(ClipId, TrackId, Ticks)>, copy: bool },
+    /// An audio clip played backwards: its part of the file written out
+    /// reversed as a new file (the original is untouched; undo goes back).
+    ReverseClip(ClipId),
+    /// An audio clip's gain set so its loudest peak reaches -1 dB.
+    NormalizeClip(ClipId),
+    /// A clip changed while a handle is dragged - shown, not yet undoable.
+    LiveClip(Box<Clip>),
+    /// The drag ended: `before` back, then `after` as one undo step.
+    CommitClip { before: Box<Clip>, after: Box<Clip> },
+    /// The whole song on screen at once.
+    ZoomToFit,
+    /// The selected clips earlier/later: a Snap step, or with `bar` a bar.
+    NudgeClips { dir: i64, bar: bool },
     TrimClip { clip: ClipId, start: Ticks, length: Ticks },
     /// The piano roll's pattern control: makes a MIDI clip loop a pattern
     /// `bars` long (at least 1), growing the clip if it's shorter.
@@ -485,6 +518,8 @@ pub enum TimelineEvent {
     SplitAllAt(Ticks),
     /// Takes `start..end` out of the whole song; what's after moves back.
     RemoveTime { start: Ticks, end: Ticks },
+    /// Opens `length` of empty time at `at` in the whole song.
+    InsertTime { at: Ticks, length: Ticks },
     /// The piano roll's Unloop: every repeat of a looping clip written out
     /// as notes of its own, so one can change without the others.
     UnloopClip(ClipId),
@@ -722,7 +757,7 @@ impl TimelineState {
                             start: start.max(0),
                             length,
                             name: name.clone(),
-                            content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+                            content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
                             recording: false,
                             gain_db: 0.0,
                             swing: 0.0,
@@ -757,7 +792,7 @@ impl TimelineState {
                         start: start.max(0),
                         length,
                         name: name.clone(),
-                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
                         recording: false,
                         gain_db: 0.0,
                         swing: 0.0,
@@ -823,11 +858,54 @@ impl TimelineState {
 impl Model for TimelineState {
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
         event.map(|event, _| match event {
-            TimelineEvent::MoveClip { clip, track, start } => {
+            TimelineEvent::MoveClips { moves, copy } => {
                 let snap_grid = self.snap.get();
                 let bypass = cx.modifiers().alt();
-                let start = snap(*start, snap_grid, bypass);
-                self.do_command(Command::MoveClip { clip: *clip, track: *track, start });
+                let mut copies = HashSet::new();
+                self.with_arrangement(|arr, stack| {
+                    let commands = moves
+                        .iter()
+                        .flat_map(|&(clip, track, start)| {
+                            let start = snap(start.max(0), snap_grid, bypass);
+                            if *copy {
+                                let new_id = arr.alloc_id();
+                                copies.insert(new_id);
+                                vec![
+                                    Command::DuplicateClip { clip, new_id, offset: 0 },
+                                    Command::MoveClip { clip: new_id, track, start },
+                                ]
+                            } else {
+                                vec![Command::MoveClip { clip, track, start }]
+                            }
+                        })
+                        .collect();
+                    stack.do_command(Command::Batch(commands), arr);
+                });
+                if *copy {
+                    self.selection.set(Selection { clips: copies, ..Default::default() });
+                }
+            }
+            TimelineEvent::NudgeClips { dir, bar } => {
+                let arr = self.arrangement.get();
+                let step = if *bar {
+                    arr.tempo_map.time_signature_at(0).ticks_per_bar()
+                } else {
+                    self.snap.get().ticks().unwrap_or(shared::arrangement::PPQ / 4)
+                };
+                let selected = self.selection.get().clips;
+                let moves: Vec<_> = arr
+                    .clips
+                    .iter()
+                    .filter(|c| selected.contains(&c.id))
+                    .map(|c| (c.id, c.track, c.start + dir * step))
+                    .collect();
+                // None goes before the song's start.
+                if !moves.is_empty() && moves.iter().all(|m| m.2 >= 0) {
+                    self.with_arrangement(|arr, stack| {
+                        let commands = moves.into_iter().map(|(clip, track, start)| Command::MoveClip { clip, track, start }).collect();
+                        stack.do_command(Command::Batch(commands), arr);
+                    });
+                }
             }
             TimelineEvent::TrimClip { clip, start, length } => {
                 let snap_grid = self.snap.get();
@@ -887,6 +965,10 @@ impl Model for TimelineState {
                     self.do_command(Command::Replace(Box::new(next)));
                     self.selection.set(Selection::default());
                 }
+            }
+            TimelineEvent::InsertTime { at, length } => {
+                let next = shared::arrangement::insert_time(&self.arrangement.get(), *at, *length);
+                self.do_command(Command::Replace(Box::new(next)));
             }
             TimelineEvent::UnloopClip(clip) => {
                 let arr = self.arrangement.get();
@@ -1304,6 +1386,85 @@ impl Model for TimelineState {
                 self.transform.update(|t| t.zoom_at(*cursor_x, *factor));
                 self.clamp_scroll();
             }
+            TimelineEvent::ReverseClip(id) => {
+                let arr = self.arrangement.get();
+                let Some(clip) = arr.clip(*id).cloned() else { return };
+                let Some((frames, spec)) = audio_region(&arr, &clip) else { return };
+                let ClipContent::Audio { source, fade_in, fade_out, .. } = &clip.content else { return };
+                let channels = spec.channels.max(1) as usize;
+                let reversed: Vec<f32> = frames.chunks(channels).rev().flatten().copied().collect();
+                let stem = std::path::Path::new(&**source).file_stem().and_then(|s| s.to_str()).unwrap_or("audio").to_string();
+                let dir = crate::paths::recordings_dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let name = (1..).map(|n| format!("{stem}_reversed{n}.wav")).find(|n| !dir.join(n).exists()).expect("a free name");
+                let out_spec = hound::WavSpec { channels: spec.channels, sample_rate: spec.sample_rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
+                let written = hound::WavWriter::create(dir.join(&name), out_spec).and_then(|mut w| {
+                    for s in &reversed {
+                        w.write_sample(*s)?;
+                    }
+                    w.finalize()
+                });
+                if let Err(e) = written {
+                    tracing::warn!("reverse: couldn't write {name}: {e}");
+                    return;
+                }
+                let new_source: Arc<str> = name.into();
+                let mut next = clip.clone();
+                next.content = ClipContent::Audio {
+                    source: new_source.clone(),
+                    peaks: None,
+                    source_offset_samples: 0,
+                    // What faded in now fades out.
+                    fade_in: *fade_out,
+                    fade_out: *fade_in,
+                };
+                self.do_command(Command::ReplaceClip { clip: Box::new(next) });
+                if let Some(tx) = &self.decode_request_tx {
+                    let _ = tx.send(new_source.clone());
+                }
+                crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &crate::timeline::assets_dir(), new_source);
+            }
+            TimelineEvent::NormalizeClip(id) => {
+                let arr = self.arrangement.get();
+                let Some(clip) = arr.clip(*id).cloned() else { return };
+                let Some((frames, _)) = audio_region(&arr, &clip) else { return };
+                let peak = frames.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                if peak <= 1e-6 {
+                    return;
+                }
+                let mut next = clip;
+                next.gain_db = ((-1.0 - 20.0 * peak.log10()) * 10.0).round() / 10.0;
+                next.gain_db = next.gain_db.clamp(-48.0, 24.0);
+                self.do_command(Command::ReplaceClip { clip: Box::new(next) });
+            }
+            TimelineEvent::LiveClip(clip) => {
+                self.with_arrangement(|arr, _| {
+                    if let Some(c) = arr.clips.iter_mut().find(|c| c.id == clip.id) {
+                        *c = (**clip).clone();
+                    }
+                });
+            }
+            TimelineEvent::CommitClip { before, after } => {
+                self.with_arrangement(|arr, stack| {
+                    if let Some(c) = arr.clips.iter_mut().find(|c| c.id == before.id) {
+                        *c = (**before).clone();
+                    }
+                    stack.do_command(Command::ReplaceClip { clip: after.clone() }, arr);
+                });
+            }
+            TimelineEvent::ZoomToFit => {
+                let arr = self.arrangement.get();
+                let bar = arr.tempo_map.time_signature_at(0).ticks_per_bar();
+                let end = arr.clips.iter().map(|c| c.end()).max().unwrap_or(0).max(bar * 4) + bar;
+                let beats = end as f64 / shared::arrangement::PPQ as f64;
+                let width = self.viewport.0.max(100.0);
+                self.transform.update(|t| {
+                    t.pixels_per_beat = (width / beats)
+                        .clamp(shared::arrangement::MIN_PIXELS_PER_BEAT, shared::arrangement::MAX_PIXELS_PER_BEAT);
+                    t.scroll_x = 0.0;
+                });
+                self.clamp_scroll();
+            }
             TimelineEvent::ScrollBy { dx, dy } => {
                 self.transform.update(|t| {
                     t.scroll_x += dx;
@@ -1633,7 +1794,7 @@ impl Model for TimelineState {
                         start: *start,
                         length: *length,
                         name: "Take".to_string(),
-                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0 },
+                        content: ClipContent::Audio { source: source.clone(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
                         recording: false,
                         gain_db: 0.0,
                         swing: 0.0,
@@ -1719,6 +1880,8 @@ impl Model for TimelineState {
                                         source: hit.sample.into(),
                                         peaks: None,
                                         source_offset_samples: 0,
+                                        fade_in: 0,
+                                        fade_out: 0,
                                     },
                                     recording: false,
                                     gain_db: 0.0,
@@ -1869,6 +2032,8 @@ impl Model for TimelineState {
                             source: source.clone(),
                             peaks: cached_peaks.clone(),
                             source_offset_samples: 0,
+                            fade_in: 0,
+                            fade_out: 0,
                         },
                         recording: false,
                         // A touch of per-hit level variation so the same
