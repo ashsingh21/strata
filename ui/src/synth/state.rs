@@ -60,6 +60,9 @@ pub enum SynthEvent {
     /// that track's own Carve.
     NoteOn(TrackId, u8, u8),
     NoteOff(TrackId, u8),
+    /// The transport stopped: every instrument lets go of whatever it
+    /// still holds, so nothing drones on after Stop.
+    AllNotesOff,
     /// A track was selected (header click, clip click, clip opened): the
     /// panel now shows and edits that track's instrument.
     SelectTrack(TrackId),
@@ -471,6 +474,13 @@ impl Model for SynthModel {
             }
             SynthEvent::NoteOn(track, note, velocity) => self.sound_on(Some(*track), *note, *velocity),
             SynthEvent::NoteOff(track, note) => self.sound_off(Some(*track), *note),
+            SynthEvent::AllNotesOff => {
+                for (i, slot) in self.slots.iter().enumerate() {
+                    if slot.is_some() {
+                        let _ = self.note_tx.push(NoteEvent { slot: i as u8, note: ALL_NOTES_OFF, on: false, velocity: 0 });
+                    }
+                }
+            }
             SynthEvent::SelectTrack(track) => {
                 if self.selected_track.get() != Some(*track) {
                     self.store_state();

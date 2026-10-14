@@ -70,11 +70,11 @@ pub fn timeline_view(
                 // Select (rubber-band selection, drag clips) vs Draw
                 // (click/drag empty space on a MIDI track to create a clip).
                 // The same segmented control as every other mode switch.
-                let tools = [TimelineTool::Select, TimelineTool::Draw];
+                let tools = [TimelineTool::Select, TimelineTool::Draw, TimelineTool::Split];
                 crate::synth::segmented::segmented(
                     cx,
-                    2,
-                    |cx, i| Label::new(cx, if i == 0 { "Select" } else { "Draw" }),
+                    3,
+                    |cx, i| Label::new(cx, ["Select", "Draw", "Split"][i]),
                     move |i| tool.map(move |t| *t == tools[i]),
                     move |cx, i| cx.emit(TimelineEvent::SetTool(tools[i])),
                 );

@@ -16,9 +16,13 @@ const BAR_TICK_HEIGHT: f32 = 10.0;
 const BEAT_TICK_HEIGHT: f32 = 4.0;
 const MIN_BEAT_PX: f64 = 6.0;
 const EDGE_HIT_PX: f64 = 5.0;
+/// How close to the playhead a press grabs it rather than drawing a loop.
+const PLAYHEAD_HIT_PX: f64 = 6.0;
 
 #[derive(Clone, Copy)]
 enum Drag {
+    /// The playhead itself, dragged along the ruler.
+    Playhead,
     LoopStart,
     LoopEnd,
     LoopMiddle { grab_offset: Ticks },
@@ -68,6 +72,9 @@ impl Ruler {
     fn cursor_at(&self, x: f64) -> CursorIcon {
         let transform = self.transform.get();
         let tick = transform.x_to_tick(x);
+        if (transform.tick_to_x(self.playhead.get()) - x).abs() <= PLAYHEAD_HIT_PX {
+            return CursorIcon::Grab;
+        }
         match self.arrangement.get().loop_range {
             Some(r) if (transform.tick_to_x(r.start) - x).abs() <= EDGE_HIT_PX => CursorIcon::EwResize,
             Some(r) if (transform.tick_to_x(r.end) - x).abs() <= EDGE_HIT_PX => CursorIcon::EwResize,
@@ -102,7 +109,9 @@ impl View for Ruler {
                 let transform = self.transform.get();
                 let tick = transform.x_to_tick(x);
 
+                let on_playhead = (transform.tick_to_x(self.playhead.get()) - x).abs() <= PLAYHEAD_HIT_PX;
                 self.drag = Some(match self.arrangement.get().loop_range {
+                    _ if on_playhead => Drag::Playhead,
                     Some(range) if (transform.tick_to_x(range.start) - x).abs() <= EDGE_HIT_PX => {
                         Drag::LoopStart
                     }
@@ -123,7 +132,7 @@ impl View for Ruler {
                 if matches!(self.drag, Some(Drag::CreateLoop { .. })) {
                     cx.emit(crate::app::AppEvent::Seek(tick.max(0)));
                 }
-                if matches!(self.drag, Some(Drag::LoopMiddle { .. })) {
+                if matches!(self.drag, Some(Drag::LoopMiddle { .. }) | Some(Drag::Playhead)) {
                     self.set_cursor(cx, CursorIcon::Grabbing);
                 }
                 cx.capture();
@@ -166,6 +175,9 @@ impl View for Ruler {
                     let tick = snap(transform.x_to_tick(local_x), shared::arrangement::SnapGrid::Sixteenth, bypass);
 
                     match drag {
+                        Drag::Playhead => {
+                            cx.emit(crate::app::AppEvent::Seek(transform.x_to_tick(local_x).max(0)));
+                        }
                         Drag::LoopStart => {
                             let end = self.loop_range().map(|r| r.end).unwrap_or(tick + 1);
                             self.loop_preview = Some(LoopRange { start: tick.min(end - 1).max(0), end });

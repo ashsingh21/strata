@@ -172,6 +172,7 @@ pub fn commands() -> Vec<Command> {
         command("Record on / off", "Transport", "", "arm take", |cx| cx.emit(AppEvent::ToggleArm)),
         command("Tap tempo", "Transport", "", "bpm speed", |cx| cx.emit(AppEvent::Tap)),
         command("Draw tool", "Timeline", "", "pencil make clip", |cx| cx.emit(TimelineEvent::SetTool(TimelineTool::Draw))),
+        command("Split tool", "Timeline", "", "cut scissors razor blade", |cx| cx.emit(TimelineEvent::SetTool(TimelineTool::Split))),
         command("Select tool", "Timeline", "", "pointer arrow", |cx| cx.emit(TimelineEvent::SetTool(TimelineTool::Select))),
         command("Follow playhead", "Timeline", "F", "scroll", |cx| cx.emit(TimelineEvent::ToggleFollow)),
         command("Show / hide sidebar", "View", "Ctrl+B", "browser panel library", |cx| cx.emit(AppEvent::ToggleSidebar)),

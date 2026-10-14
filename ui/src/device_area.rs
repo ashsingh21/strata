@@ -57,6 +57,7 @@ pub struct DeviceAreaProps {
     pub draw_chord: Signal<crate::piano_roll::state::ChordShape>,
     pub snap: Signal<SnapGrid>,
     pub playhead: Signal<Ticks>,
+    pub loop_on: Signal<bool>,
     // Interval Input.
     pub key: Signal<u8>,
     pub scale_mask: Signal<u16>,
@@ -133,6 +134,7 @@ pub fn device_area(cx: &mut Context, p: DeviceAreaProps) {
                 p.key,
                 p.scale_mask,
                 p.playhead,
+                p.loop_on,
                 p.rows_octave,
                 p.draw_chord,
             );

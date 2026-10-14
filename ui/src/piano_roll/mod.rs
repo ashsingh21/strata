@@ -101,6 +101,7 @@ pub fn piano_roll_view(
     key: Signal<u8>,
     scale_mask: Signal<u16>,
     playhead: Signal<Ticks>,
+    loop_on: Signal<bool>,
     octave: Signal<i32>,
     chord: Signal<ChordShape>,
 ) {
@@ -170,6 +171,53 @@ pub fn piano_roll_view(
                 .on_press(move |cx| {
                     if let Some(clip) = open_clip.get() {
                         cx.emit(TimelineEvent::SetPatternBars { clip, bars: pattern_bars.get() + 1 });
+                    }
+                });
+
+            // Loop: plays the bars you're working on over and over - the
+            // selected notes' bars, or the whole clip. Again to stop.
+            let loop_target = Memo::new(move |_| {
+                let arr = arrangement.get();
+                let clip = arr.clip(open_clip.get()?)?;
+                let bar = arr.tempo_map.time_signature_at(clip.start).ticks_per_bar();
+                let picked = selected.get();
+                let range = if picked.is_empty() {
+                    shared::arrangement::LoopRange { start: clip.start, end: clip.end() }
+                } else {
+                    let ClipContent::Midi { notes, .. } = &clip.content else { return None };
+                    let chosen = notes.iter().filter(|n| picked.contains(&(n.start, n.pitch)));
+                    let lo = chosen.clone().map(|n| n.start).min()?;
+                    let hi = chosen.map(|n| n.start + n.length).max()?;
+                    let start = clip.start + lo.div_euclid(bar) * bar;
+                    let end = clip.start + (hi + bar - 1).div_euclid(bar) * bar;
+                    shared::arrangement::LoopRange { start, end: end.min(clip.end()).max(start + 1) }
+                };
+                Some(range)
+            });
+            let looping = Memo::new(move |_| {
+                loop_on.get() && loop_target.get().is_some_and(|r| arrangement.get().loop_range == Some(r))
+            });
+            Button::new(cx, |cx| Label::new(cx, "Loop"))
+                .class("btn")
+                .class("sm")
+                .class("quiet")
+                .toggle_class("is-mod", looping)
+                .tooltip(|cx| {
+                    Tooltip::new(cx, |cx| {
+                        Label::new(cx, "Plays this clip over and over while you work - or just the bars of the notes you've selected. Click again to stop looping.");
+                    })
+                    .arrow(false)
+                })
+                .on_press(move |cx| {
+                    if looping.get() {
+                        cx.emit(crate::app::AppEvent::SetLoop(false));
+                    } else if let Some(range) = loop_target.get() {
+                        cx.emit(TimelineEvent::SetLoopRange(Some(range)));
+                        cx.emit(crate::app::AppEvent::SetLoop(true));
+                        let at = playhead.get();
+                        if at < range.start || at >= range.end {
+                            cx.emit(crate::app::AppEvent::Seek(range.start));
+                        }
                     }
                 });
 

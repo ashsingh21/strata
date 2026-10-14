@@ -693,6 +693,7 @@ fn main() -> Result<(), ApplicationError> {
                                     draw_chord: piano_roll_chord,
                                     snap: tl_snap,
                                     playhead: tl_playhead,
+                                    loop_on,
                                     key: interval_key,
                                     scale_mask: interval_scale_mask,
                                     interval_open,

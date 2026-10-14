@@ -90,6 +90,8 @@ pub enum AppEvent {
     /// One tap of tap-tempo.
     Tap,
     ToggleLoop,
+    /// Turns looping on or off (the piano roll's Loop button).
+    SetLoop(bool),
     ToggleArm,
     ToggleClick,
     /// Mirrors TimelineEvent::SetTempo into the engine's own Params, so the
@@ -248,6 +250,9 @@ impl Model for AppData {
             }
             AppEvent::ToggleLoop => {
                 self.loop_on.update(|v| *v = !*v);
+            }
+            AppEvent::SetLoop(on) => {
+                self.loop_on.set(*on);
             }
             AppEvent::ToggleArm => {
                 self.record_armed.update(|v| *v = !*v);

@@ -330,6 +330,11 @@ impl LaneArea {
                     .find(|c| tick >= c.start && tick < c.end());
 
                 if let Some(clip) = hit {
+                    if self.tool.get() == TimelineTool::Split {
+                        let at = snap(tick, SnapGrid::Sixteenth, cx.modifiers().alt());
+                        cx.emit(TimelineEvent::SplitClipAt { clip: clip.id, at });
+                        return;
+                    }
                     let is_double = self
                         .last_click
                         .map(|(t, px, py)| t.elapsed() < DOUBLE_CLICK && (px - lx).abs() < 8.0 && (py - ly).abs() < 8.0)
@@ -497,23 +502,24 @@ impl LaneArea {
         cx.emit(TimelineEvent::OpenContextMenu(ContextMenu { target, x: window_x, y: window_y }));
     }
 
+    /// The clip under a point on the lanes, topmost first.
+    fn clip_at(&self, lx: f32, ly: f32) -> Option<Clip> {
+        let transform = self.transform.get();
+        let arr = self.arrangement.get();
+        let rows = build_rows(&arr);
+        let tick = transform.x_to_tick(lx as f64);
+        let row_index = row_at_y(&rows, ly + transform.scroll_y as f32)?;
+        let RowKind::Track(track_id) = rows[row_index].kind else { return None };
+        arr.clips.iter().filter(|c| c.track == track_id).rev().find(|c| tick >= c.start && tick < c.end()).cloned()
+    }
+
     /// Whether (lx, ly) (local, unscrolled) sits over a clip's trim edge -
     /// a read-only query shared by the hover cursor and (via its own
     /// independent copy of this hit-test) `on_mouse_down`'s decision to
     /// start a `Drag::TrimClip`.
     fn edge_hover_at(&self, lx: f32, ly: f32) -> bool {
         let transform = self.transform.get();
-        let arr = self.arrangement.get();
-        let rows = build_rows(&arr);
-        let y_scrolled = ly + transform.scroll_y as f32;
-        let tick = transform.x_to_tick(lx as f64);
-        let Some(row_index) = row_at_y(&rows, y_scrolled) else { return false };
-        let RowKind::Track(track_id) = rows[row_index].kind else { return false };
-        let Some(clip) =
-            arr.clips.iter().filter(|c| c.track == track_id).rev().find(|c| tick >= c.start && tick < c.end())
-        else {
-            return false;
-        };
+        let Some(clip) = self.clip_at(lx, ly) else { return false };
         let start_x = transform.tick_to_x(clip.start) as f32;
         let end_x = transform.tick_to_x(clip.end()) as f32;
         let grab_px = EDGE_GRAB_PX.min((end_x - start_x) / 4.0).max(1.0);
@@ -524,7 +530,13 @@ impl LaneArea {
         if self.drag.is_none() {
             let bounds = cx.lbounds();
             let (lx, ly) = (x - bounds.x, y - bounds.y);
-            let icon = if self.edge_hover_at(lx, ly) { CursorIcon::EwResize } else { CursorIcon::Default };
+            let icon = if self.tool.get() == TimelineTool::Split && self.clip_at(lx, ly).is_some() {
+                CursorIcon::Crosshair
+            } else if self.edge_hover_at(lx, ly) {
+                CursorIcon::EwResize
+            } else {
+                CursorIcon::Default
+            };
             if self.hover_cursor.get() != icon {
                 self.hover_cursor.set(icon);
                 // The reactive `.cursor(hover_cursor)` binding alone
@@ -670,6 +682,9 @@ impl LaneArea {
                 let (x0, x1) = (anchor.0.min(current.0), anchor.0.max(current.0));
                 let (y0, y1) = (anchor.1.min(current.1), anchor.1.max(current.1));
                 if (x1 - x0).abs() < 2.0 && (y1 - y0).abs() < 2.0 {
+                    // A plain click on empty space moves the playhead there.
+                    let tick = self.transform.get().x_to_tick(anchor.0 as f64).max(0);
+                    cx.emit(crate::app::AppEvent::Seek(tick));
                     return;
                 }
                 let tick0 = transform.x_to_tick(x0 as f64);

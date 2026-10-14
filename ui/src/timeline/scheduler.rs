@@ -15,7 +15,7 @@ use vizia::prelude::*;
 
 use shared::arrangement::TrackId;
 
-use shared::arrangement::{notes_in_range, Arrangement, Ticks};
+use shared::arrangement::{timed_notes_in_range, Arrangement, Ticks};
 
 use crate::synth::state::SynthEvent;
 
@@ -39,6 +39,7 @@ impl MidiScheduler {
         if !playing {
             if self.was_playing.get() {
                 self.release_all(cx);
+                cx.emit(SynthEvent::AllNotesOff);
             }
             self.was_playing.set(false);
             self.last_tick.set(tick);
@@ -60,23 +61,26 @@ impl MidiScheduler {
         let from = self.last_tick.get();
         self.last_tick.set(tick);
 
-        let scheduled = notes_in_range(arrangement, from, tick);
+        // In time order: when a frame runs long (the UI stalled, or a short
+        // note) a note can start and end inside one frame, and handling
+        // every off before every on left that note held - a Mono bass
+        // then slid back to it under the next notes and droned on.
         let mut held = self.held.borrow_mut();
-        for (track, pitch) in scheduled.note_off {
-            if let Some(count) = held.get_mut(&(track, pitch)) {
+        for event in timed_notes_in_range(arrangement, from, tick) {
+            let key = (event.track, event.pitch);
+            if event.on {
+                let count = held.entry(key).or_insert(0);
+                if *count == 0 {
+                    cx.emit(SynthEvent::NoteOn(event.track, event.pitch, event.velocity));
+                }
+                *count += 1;
+            } else if let Some(count) = held.get_mut(&key) {
                 *count = count.saturating_sub(1);
                 if *count == 0 {
-                    held.remove(&(track, pitch));
-                    cx.emit(SynthEvent::NoteOff(track, pitch));
+                    held.remove(&key);
+                    cx.emit(SynthEvent::NoteOff(event.track, event.pitch));
                 }
             }
-        }
-        for (track, pitch, velocity) in scheduled.note_on {
-            let count = held.entry((track, pitch)).or_insert(0);
-            if *count == 0 {
-                cx.emit(SynthEvent::NoteOn(track, pitch, velocity));
-            }
-            *count += 1;
         }
     }
 

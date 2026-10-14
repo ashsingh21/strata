@@ -33,12 +33,14 @@ pub struct Selection {
 /// roll's own Select/Draw toggle. `Select` is every existing behavior
 /// (rubber-band selection); `Draw` is new: click or drag empty space on a
 /// MIDI track to create a clip there directly, instead of the only route
-/// being step-entry recording.
+/// being step-entry recording. `Split` cuts a clip in two where you click
+/// it (snapped like a drag, Alt for free).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TimelineTool {
     #[default]
     Select,
     Draw,
+    Split,
 }
 
 /// One 16th note at 4/4 - the step-entry recorder's fixed grid.
@@ -413,6 +415,8 @@ pub enum TimelineEvent {
     /// longer repeats its pattern, shorter trims it.
     SetClipBars { clip: ClipId, bars: i64 },
     SplitAtPlayhead,
+    /// The Split tool: cuts `clip` in two at `at`.
+    SplitClipAt { clip: ClipId, at: Ticks },
     DeleteSelected,
     DuplicateSelected,
     /// Duplicates the selected MIDI clips as linked copies: editing the
@@ -814,6 +818,18 @@ impl Model for TimelineState {
                     });
                 }
             }
+            TimelineEvent::SplitClipAt { clip, at } => {
+                let arr = self.arrangement.get();
+                let Some(c) = arr.clip(*clip) else { return };
+                if *at <= c.start || *at >= c.end() {
+                    return;
+                }
+                let (clip, at) = (*clip, *at);
+                self.with_arrangement(|arr, stack| {
+                    let new_id = arr.alloc_id();
+                    stack.do_command(Command::SplitClip { clip, at, new_id }, arr);
+                });
+            }
             TimelineEvent::DeleteSelected => {
                 let piano_roll_selected = self.piano_roll_selected.get();
                 if let (Some(clip), false) =
@@ -1069,8 +1085,18 @@ impl Model for TimelineState {
             TimelineEvent::HumanizeTrack(track) => {
                 let arr = self.arrangement.get();
                 let mut batch = Vec::new();
+                // Linked copies share their notes: humanizing one moves
+                // them all, so a second pass over a copy would look for
+                // notes that are already gone (and panic).
+                let mut done_links = Vec::new();
                 for c in arr.clips.iter().filter(|c| c.track == *track) {
-                    let ClipContent::Midi { notes, .. } = &c.content else { continue };
+                    let ClipContent::Midi { notes, link, .. } = &c.content else { continue };
+                    if let Some(link) = link {
+                        if done_links.contains(link) {
+                            continue;
+                        }
+                        done_links.push(*link);
+                    }
                     let len = c.content_len();
                     let moved: Vec<(MidiNote, MidiNote)> = notes.iter().map(|n| (*n, humanized(n, len))).collect();
                     batch.extend(moved.iter().map(|(from, _)| Command::RemoveMidiNote { clip: c.id, start: from.start, pitch: from.pitch }));
