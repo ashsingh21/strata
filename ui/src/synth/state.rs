@@ -268,7 +268,7 @@ impl SynthModel {
                 .map(|(index, t)| {
                     let peak = if t.instrument.is_some() {
                         self.slot_of(t.id).map(|s| slot_peaks[s as usize])
-                    } else if t.kind == TrackKind::Audio {
+                    } else if t.kind == TrackKind::Audio || t.kind == TrackKind::Bus {
                         bus.get(index).copied()
                     } else {
                         None

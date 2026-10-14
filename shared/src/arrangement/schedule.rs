@@ -25,13 +25,12 @@ pub fn notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> ScheduledNot
         return result;
     }
 
-    let any_solo = arr.tracks.iter().any(|t| t.solo);
     for clip in &arr.clips {
         if !matches!(clip.content, ClipContent::Midi { .. }) {
             continue;
         }
         let Some(track) = arr.track(clip.track) else { continue };
-        if track.mute || (any_solo && !track.solo) {
+        if !arr.is_audible(track) {
             continue;
         }
         // Skip clips entirely outside the range before expanding loops.
@@ -70,13 +69,12 @@ pub fn timed_notes_in_range(arr: &Arrangement, from: Ticks, to: Ticks) -> Vec<Ti
     if to <= from {
         return events;
     }
-    let any_solo = arr.tracks.iter().any(|t| t.solo);
     for clip in &arr.clips {
         if !matches!(clip.content, ClipContent::Midi { .. }) || clip.end() < from || clip.start > to {
             continue;
         }
         let Some(track) = arr.track(clip.track) else { continue };
-        if track.mute || (any_solo && !track.solo) {
+        if !arr.is_audible(track) {
             continue;
         }
         for note in &clip.played_notes() {

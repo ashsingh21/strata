@@ -101,6 +101,8 @@ pub enum Command {
     /// Swaps in a whole arrangement - for an edit made elsewhere as a
     /// finished result (a lesson's "Show me"), undone in one step.
     Replace(Box<Arrangement>),
+    /// Sends `track` into `bus` (`None`: straight to the master).
+    SetRoute { track: TrackId, bus: Option<TrackId> },
     /// Tempo changes added, moved or removed: the whole map swapped.
     SetTempoMap(TempoMap),
 }
@@ -504,6 +506,14 @@ impl Command {
                 let old_sig = arr.tempo_map.time_signature_at(0);
                 arr.tempo_map.set_time_signature(TimeSignature { numerator, denominator });
                 Command::SetTimeSignature { numerator: old_sig.numerator, denominator: old_sig.denominator }
+            }
+
+            Command::SetRoute { track, bus } => {
+                let previous = match bus {
+                    Some(bus) => arr.routes.insert(track, bus),
+                    None => arr.routes.remove(&track),
+                };
+                Command::SetRoute { track, bus: previous }
             }
 
             Command::SetTempoMap(map) => Command::SetTempoMap(std::mem::replace(&mut arr.tempo_map, map)),

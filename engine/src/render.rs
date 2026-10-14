@@ -14,7 +14,7 @@ use shared::synth::{NoteEvent, SynthState, MAX_INSTRUMENTS};
 use crate::drums::DrumEngine;
 use crate::effects::EffectChain;
 use crate::synth::SynthEngine;
-use crate::{clip_fade_samples, db_to_gain, mix_audio_clips, SmoothedGain};
+use crate::{clip_fade_samples, db_to_gain, mix_audio_clips, mix_buses, SmoothedGain};
 
 /// Samples per render block: how often automation and instrument settings
 /// are re-read (~2.7 ms at 48 kHz - finer than live playback's frame).
@@ -75,6 +75,7 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
     let mut is_drums = vec![false; slots.len()];
     let mut slot_fx: Vec<EffectChain> = slots.iter().map(|_| EffectChain::new(srf)).collect();
     let mut slot_gain = vec![1.0f32; slots.len()];
+    let mut slot_route = vec![shared::playback::NO_ROUTE; slots.len()];
     let mut slot_smooth = vec![SmoothedGain::new(srf); slots.len()];
     let mut bus_fx: Vec<EffectChain> = (0..MAX_BUS_TRACKS).map(|_| EffectChain::new(srf)).collect();
     let mut bus_smooth = [SmoothedGain::new(srf); MAX_BUS_TRACKS];
@@ -107,6 +108,7 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
         for (i, &track) in slots.iter().enumerate() {
             if let Some(p) = instrument_params(arr, &automated, track, i as u8, job.patches.get(&track), tick) {
                 slot_gain[i] = db_to_gain(p.gain_db);
+                slot_route[i] = p.route_bus;
                 slot_fx[i].set_state(p.effect_count, &p.effects, &mut guitar_pool);
                 is_drums[i] = p.drums;
                 drums[i].set_pads(p.drum_pads);
@@ -118,6 +120,11 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
             for clip in &plan.clips {
                 if let Some(chain) = bus_fx.get_mut(clip.bus_slot as usize) {
                     chain.set_state(clip.effect_count, &clip.effects, &mut guitar_pool);
+                }
+            }
+            for bus in &plan.buses {
+                if let Some(chain) = bus_fx.get_mut(bus.bus_slot as usize) {
+                    chain.set_state(bus.effect_count, &bus.effects, &mut guitar_pool);
                 }
             }
             master_fx.set_state(plan.master_effect_count, &plan.master_effects, &mut guitar_pool);
@@ -186,15 +193,26 @@ fn render_samples(job: &RenderJob, start: u64, end: u64, mut progress: impl FnMu
             }
 
             let (mut l, mut r) = (0.0f32, 0.0f32);
+            let mut bus_in = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
             for i in 0..slots.len() {
                 let raw = if is_drums[i] { drums[i].process(&job.sources) } else { synths[i].process() };
                 let (fl, fr) = slot_fx[i].process(raw.0, raw.1);
                 let g = slot_smooth[i].next(slot_gain[i]);
-                l += fl * g;
-                r += fr * g;
+                match slot_route[i] as usize {
+                    bus if bus < MAX_BUS_TRACKS => {
+                        bus_in[bus].0 += fl * g;
+                        bus_in[bus].1 += fr * g;
+                    }
+                    _ => {
+                        l += fl * g;
+                        r += fr * g;
+                    }
+                }
             }
-            let (cl, cr) = mix_audio_clips(&plan, &job.sources, sample as i64, &mut bus_fx, &mut bus_smooth, clip_fade_samples(srf), &mut [(0.0, 0.0); MAX_BUS_TRACKS]);
-            let (ol, or) = master_fx.process(l + cl, r + cr);
+            let mut peaks = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
+            let (cl, cr) = mix_audio_clips(&plan, &job.sources, sample as i64, &mut bus_fx, &mut bus_smooth, clip_fade_samples(srf), &mut peaks, &mut bus_in);
+            let (bl, br) = mix_buses(&plan, &bus_in, &mut bus_fx, &mut bus_smooth, &mut peaks);
+            let (ol, or) = master_fx.process(l + cl + bl, r + cr + br);
             let (ol, or) = master_limiter.process(ol, or);
             if sample >= start + latency {
                 out.push(ol);

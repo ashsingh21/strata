@@ -173,6 +173,22 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
 
                 item(cx, "Rename...", move |cx| cx.emit(TimelineEvent::BeginRenameTrack(track_id)));
                 separator(cx);
+                // Where its sound goes: a bus, or straight to the master.
+                let is_bus = track.as_ref().is_some_and(|t| t.kind == TrackKind::Bus);
+                if !is_bus {
+                    let current = arr.route_of(track_id);
+                    for bus in arr.tracks.iter().filter(|t| t.kind == TrackKind::Bus) {
+                        let (bus_id, name) = (bus.id, bus.name.clone());
+                        let label = if current == Some(bus_id) { format!("Sent to {name}") } else { format!("Send to {name}") };
+                        item(cx, label, move |cx| cx.emit(TimelineEvent::SetRoute { track: track_id, bus: Some(bus_id) }));
+                    }
+                    if current.is_some() {
+                        item(cx, "Send to the master", move |cx| cx.emit(TimelineEvent::SetRoute { track: track_id, bus: None }));
+                    }
+                    if arr.tracks.iter().any(|t| t.kind == TrackKind::Bus) {
+                        separator(cx);
+                    }
+                }
                 item(cx, if muted { "Unmute" } else { "Mute" }, move |cx| cx.emit(TimelineEvent::ToggleMute(track_id)));
                 item(cx, if soloed { "Unsolo" } else { "Solo" }, move |cx| cx.emit(TimelineEvent::ToggleSolo(track_id)));
                 let gain_automated = arr

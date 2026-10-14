@@ -20,6 +20,10 @@ pub type MarkerId = u32;
 pub enum TrackKind {
     Audio,
     Midi,
+    /// No clips of its own: other tracks are sent into it (see
+    /// `Arrangement::routes`), and it runs them through its effects and
+    /// fader together - all the drums into one compressor.
+    Bus,
 }
 
 /// One of the six `clip-*` design tokens. Also used as a track's colour
@@ -437,7 +441,7 @@ impl Instrument {
     pub fn default_for(kind: TrackKind) -> Option<Instrument> {
         match kind {
             TrackKind::Midi => Some(Instrument::Carve),
-            TrackKind::Audio => None,
+            TrackKind::Audio | TrackKind::Bus => None,
         }
     }
 }
@@ -802,6 +806,10 @@ pub struct Arrangement {
     /// existed still load.
     #[serde(default)]
     pub master_effects: EffectGraph,
+    /// Tracks sent into a bus instead of straight to the master: track ->
+    /// bus track. Buses themselves always go to the master.
+    #[serde(default)]
+    pub routes: std::collections::BTreeMap<TrackId, TrackId>,
     next_id: u32,
 }
 
@@ -815,6 +823,7 @@ impl Arrangement {
             loop_range: None,
             markers: Vec::new(),
             master_effects: EffectGraph::new(),
+            routes: Default::default(),
             next_id: 1,
         }
     }
@@ -852,6 +861,7 @@ impl Arrangement {
         let prefix = match kind {
             TrackKind::Audio => "Audio",
             TrackKind::Midi => "MIDI",
+            TrackKind::Bus => "Bus",
         };
         let taken: std::collections::HashSet<u32> = self
             .tracks
@@ -925,6 +935,26 @@ impl Arrangement {
     /// How many clips share `link`.
     pub fn link_count(&self, link: LinkId) -> usize {
         self.clips.iter().filter(|c| matches!(c.content, ClipContent::Midi { link: Some(k), .. } if k == link)).count()
+    }
+
+    /// Whether `track` is heard: not muted, and when anything is soloed,
+    /// soloed itself - or sent into a soloed bus, or (a bus) fed by a
+    /// soloed track.
+    pub fn is_audible(&self, track: &Track) -> bool {
+        if track.mute {
+            return false;
+        }
+        if !self.tracks.iter().any(|t| t.solo) || track.solo {
+            return true;
+        }
+        let bus_soloed = self.route_of(track.id).and_then(|b| self.track(b)).is_some_and(|b| b.solo);
+        let feeds_soloed = track.kind == TrackKind::Bus && self.tracks.iter().any(|t| t.solo && self.route_of(t.id) == Some(track.id));
+        bus_soloed || feeds_soloed
+    }
+
+    /// The bus `track` is sent to, if it's sent to one that still exists.
+    pub fn route_of(&self, track: TrackId) -> Option<TrackId> {
+        self.routes.get(&track).copied().filter(|bus| self.track(*bus).is_some_and(|t| t.kind == TrackKind::Bus))
     }
 
     pub fn clips_on_track(&self, track: TrackId) -> impl Iterator<Item = &Clip> {

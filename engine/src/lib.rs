@@ -400,6 +400,8 @@ where
     // until the first `SynthParams` snapshot for that slot arrives, so a
     // freshly added track isn't silent before the UI's first tick.
     let mut slot_gain = [1.0f32; MAX_INSTRUMENTS];
+    // Where each instrument's output goes: a bus slot, or NO_ROUTE.
+    let mut slot_route = [shared::playback::NO_ROUTE; MAX_INSTRUMENTS];
     // What each slot's / bus's gain is actually at, gliding towards the
     // latest target (see `SmoothedGain`).
     let mut slot_gain_smooth = [SmoothedGain::new(sample_rate); MAX_INSTRUMENTS];
@@ -450,6 +452,9 @@ where
                     if let Some(gain) = slot_gain.get_mut(next.slot as usize) {
                         *gain = db_to_gain(next.gain_db);
                     }
+                    if let Some(route) = slot_route.get_mut(next.slot as usize) {
+                        *route = next.route_bus;
+                    }
                     if let Some(chain) = slot_effects.get_mut(next.slot as usize) {
                         chain.set_state(next.effect_count, &next.effects, &mut guitar_pool);
                     }
@@ -490,6 +495,12 @@ where
                         if let Some(chain) = bus_effects.get_mut(clip.bus_slot as usize) {
                             chain.set_state(clip.effect_count, &clip.effects, &mut guitar_pool);
                             in_plan[clip.bus_slot as usize] = true;
+                        }
+                    }
+                    for bus in &current_plan.buses {
+                        if let Some(chain) = bus_effects.get_mut(bus.bus_slot as usize) {
+                            chain.set_state(bus.effect_count, &bus.effects, &mut guitar_pool);
+                            in_plan[bus.bus_slot as usize] = true;
                         }
                     }
                     // A track with no clips left gives its guitar units back.
@@ -538,6 +549,7 @@ where
                     &mut drum_engines,
                     &slot_is_drums,
                     &slot_gain,
+                    &slot_route,
                     &mut slot_gain_smooth,
                     &mut bus_gain_smooth,
                     &mut slot_effects,
@@ -606,6 +618,7 @@ fn write_block<T>(
     drum_engines: &mut [DrumEngine],
     slot_is_drums: &[bool],
     slot_gain: &[f32],
+    slot_route: &[u8],
     slot_gain_smooth: &mut [SmoothedGain],
     bus_gain_smooth: &mut [SmoothedGain],
     slot_effects: &mut [EffectChain],
@@ -661,6 +674,8 @@ fn write_block<T>(
     }
 
     for frame in output.chunks_mut(channels) {
+        // What tracks sent into a bus add up to, this sample.
+        let mut bus_in = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
 
         let mut synth_l = 0.0f32;
         let mut synth_r = 0.0f32;
@@ -674,8 +689,16 @@ fn write_block<T>(
             bad.scrub(&mut fx_l, &mut fx_r, shared::diag::STAGE_SLOT_EFFECTS + i as u32);
             let gain = slot_gain_smooth[i].next(slot_gain[i]);
             let (l, r) = (fx_l * gain, fx_r * gain);
-            synth_l += l;
-            synth_r += r;
+            match slot_route.get(i).copied().filter(|r| (*r as usize) < MAX_BUS_TRACKS) {
+                Some(bus) => {
+                    bus_in[bus as usize].0 += l;
+                    bus_in[bus as usize].1 += r;
+                }
+                None => {
+                    synth_l += l;
+                    synth_r += r;
+                }
+            }
             let peak = &mut synth_peaks[i];
             peak.0 = peak.0.max(l.abs());
             peak.1 = peak.1.max(r.abs());
@@ -698,11 +721,15 @@ fn write_block<T>(
         }
         *click_env *= click_decay_coeff;
 
-        let (mut clip_l, mut clip_r) = if playing {
-            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth, clip_fade_samples(sample_rate), &mut bus_peaks)
+        let (clip_l, clip_r) = if playing {
+            mix_audio_clips(plan, sources, *sample_counter as i64, bus_effects, bus_gain_smooth, clip_fade_samples(sample_rate), &mut bus_peaks, &mut bus_in)
         } else {
             (0.0, 0.0)
         };
+        // The bus tracks: what was sent in, through their effects and
+        // faders (tails ring on after Stop, as on any track).
+        let (bus_l, bus_r) = mix_buses(plan, &bus_in, bus_effects, bus_gain_smooth, &mut bus_peaks);
+        let (mut clip_l, mut clip_r) = (clip_l + bus_l, clip_r + bus_r);
         bad.scrub(&mut clip_l, &mut clip_r, shared::diag::STAGE_AUDIO_CLIPS);
         let (mon_l, mon_r) = match plan.monitor.as_ref().filter(|_| live) {
             Some(m) => {
@@ -814,7 +841,7 @@ pub(crate) fn clip_fade_samples(sample_rate: f32) -> i64 {
 /// Every audio clip playing at sample `pos`, through its track's effects
 /// and fader. Sources are already at the engine's rate (converted when
 /// decoded), so a clip reads one source frame per output sample.
-fn mix_audio_clips(
+pub(crate) fn mix_audio_clips(
     plan: &PlaybackPlan,
     sources: &[DecodedSource],
     pos: i64,
@@ -822,6 +849,7 @@ fn mix_audio_clips(
     bus_gain_smooth: &mut [SmoothedGain],
     fade: i64,
     bus_peaks: &mut [(f32, f32); MAX_BUS_TRACKS],
+    bus_in: &mut [(f32, f32); MAX_BUS_TRACKS],
 ) -> (f32, f32) {
     let mut bus_raw = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
     let mut bus_gain_db = [0.0f32; MAX_BUS_TRACKS];
@@ -877,6 +905,39 @@ fn mix_audio_clips(
         let (raw_l, raw_r) = bus_raw[slot];
         let (fx_l, fx_r) = bus_effects[slot].process(raw_l, raw_r);
         let gain = bus_gain_smooth[slot].next(db_to_gain(bus_gain_db[slot]));
+        let (l, r) = (fx_l * gain, fx_r * gain);
+        match plan.routes[slot] as usize {
+            bus if bus < MAX_BUS_TRACKS => {
+                bus_in[bus].0 += l;
+                bus_in[bus].1 += r;
+            }
+            _ => {
+                out_l += l;
+                out_r += r;
+            }
+        }
+        let peak = &mut bus_peaks[slot];
+        peak.0 = peak.0.max(l.abs());
+        peak.1 = peak.1.max(r.abs());
+    }
+    (out_l, out_r)
+}
+
+/// Every bus track: what was sent into it (`bus_in`) through its own
+/// effects and fader, summed for the master.
+pub(crate) fn mix_buses(
+    plan: &PlaybackPlan,
+    bus_in: &[(f32, f32); MAX_BUS_TRACKS],
+    bus_effects: &mut [EffectChain],
+    bus_gain_smooth: &mut [SmoothedGain],
+    bus_peaks: &mut [(f32, f32); MAX_BUS_TRACKS],
+) -> (f32, f32) {
+    let (mut out_l, mut out_r) = (0.0f32, 0.0f32);
+    for bus in &plan.buses {
+        let slot = (bus.bus_slot as usize).min(MAX_BUS_TRACKS - 1);
+        let (in_l, in_r) = bus_in[slot];
+        let (fx_l, fx_r) = bus_effects[slot].process(in_l, in_r);
+        let gain = bus_gain_smooth[slot].next(db_to_gain(bus.gain_db));
         let (l, r) = (fx_l * gain, fx_r * gain);
         out_l += l;
         out_r += r;
@@ -964,10 +1025,62 @@ mod track_meter_tests {
         let mut smooth = [SmoothedGain::new(sr as f32); MAX_BUS_TRACKS];
         let mut peaks = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
         for pos in 0..4800 {
-            mix_audio_clips(&plan, &sources, pos, &mut fx, &mut smooth, clip_fade_samples(sr as f32), &mut peaks);
+            mix_audio_clips(&plan, &sources, pos, &mut fx, &mut smooth, clip_fade_samples(sr as f32), &mut peaks, &mut [(0.0, 0.0); MAX_BUS_TRACKS]);
         }
         assert!(peaks[0] == (0.0, 0.0), "the MIDI track has no audio");
         // 0.5 through a -6 dB fader (after its glide from unity).
         assert!((0.24..=0.5).contains(&peaks[1].0), "{:?}", peaks[1]);
+    }
+
+    /// An audio track sent into a bus: none of it reaches the master
+    /// directly; it all comes out of the bus, through the bus's fader.
+    #[test]
+    fn a_track_sent_into_a_bus_is_heard_through_it() {
+        let mut arr = empty_arrangement();
+        for (id, kind, gain_db) in [(1, TrackKind::Audio, 0.0), (2, TrackKind::Bus, -6.0)] {
+            arr.tracks.push(Track {
+                id,
+                name: format!("T{id}"),
+                color: ClipColor::Coral,
+                kind,
+                mute: false,
+                solo: false,
+                arm: false,
+                gain_db,
+                height: DEFAULT_TRACK_HEIGHT,
+                instrument: None,
+                effects: vec![],
+                effect_slots: vec![],
+                fx: EffectGraph::new(),
+                drum_pads: Default::default(),
+            });
+        }
+        arr.routes.insert(1, 2);
+        arr.clips.push(Clip {
+            id: 10,
+            track: 1,
+            start: 0,
+            length: 4 * PPQ,
+            name: "Take".into(),
+            content: ClipContent::Audio { source: "take.wav".into(), peaks: None, source_offset_samples: 0, fade_in: 0, fade_out: 0 },
+            recording: false,
+            gain_db: 0.0,
+            swing: 0.0,
+        });
+        let sr = 48_000;
+        let plan = PlaybackPlan::from_arrangement(&arr, sr);
+        let sources = [DecodedSource { source: "take.wav".into(), sample_rate: sr, channels: 1, samples: vec![0.5f32; sr as usize].into() }];
+        let mut fx: Vec<EffectChain> = (0..MAX_BUS_TRACKS).map(|_| EffectChain::new(sr as f32)).collect();
+        let mut smooth = [SmoothedGain::new(sr as f32); MAX_BUS_TRACKS];
+        let mut peaks = [(0.0f32, 0.0f32); MAX_BUS_TRACKS];
+        let mut last = (0.0, 0.0);
+        for pos in 0..9600 {
+            let mut bus_in = [(0.0, 0.0); MAX_BUS_TRACKS];
+            let direct = mix_audio_clips(&plan, &sources, pos, &mut fx, &mut smooth, clip_fade_samples(sr as f32), &mut peaks, &mut bus_in);
+            assert_eq!(direct, (0.0, 0.0), "nothing goes straight to the master");
+            last = mix_buses(&plan, &bus_in, &mut fx, &mut smooth, &mut peaks);
+        }
+        // 0.5 through the bus's -6 dB fader, once it has settled.
+        assert!((last.0 - 0.25).abs() < 0.01, "{last:?}");
     }
 }

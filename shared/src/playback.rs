@@ -18,6 +18,29 @@ use crate::synth::{EffectUnitState, MAX_EFFECTS_PER_CHAIN};
 /// own "generous, not exact" sizing for synth slots.
 pub const MAX_BUS_TRACKS: usize = 32;
 
+/// No bus: a track's output goes straight to the master.
+pub const NO_ROUTE: u8 = u8::MAX;
+
+/// A track's slot in the engine's per-track arrays: its place in the
+/// track list (clamped to `MAX_BUS_TRACKS`).
+pub fn bus_slot_of(arr: &Arrangement, track: TrackId) -> u8 {
+    arr.tracks.iter().position(|t| t.id == track).unwrap_or(0).min(MAX_BUS_TRACKS - 1) as u8
+}
+
+/// The bus slot `track` is sent into, or `NO_ROUTE`.
+pub fn route_slot(arr: &Arrangement, track: TrackId) -> u8 {
+    arr.route_of(track).map(|bus| bus_slot_of(arr, bus)).unwrap_or(NO_ROUTE)
+}
+
+/// A bus track: what's sent into it runs through its effects and fader.
+#[derive(Clone, Copy, Debug)]
+pub struct BusPlan {
+    pub bus_slot: u8,
+    pub gain_db: f32,
+    pub effect_count: u8,
+    pub effects: [EffectUnitState; MAX_EFFECTS_PER_CHAIN],
+}
+
 /// One audio clip's position and source, already converted from ticks to
 /// samples at the engine's real output sample rate.
 #[derive(Clone, Debug)]
@@ -89,6 +112,10 @@ pub struct PlaybackPlan {
     /// The armed audio track's live input, if there is one (and it isn't
     /// muted). Whether it's actually fed is `RecordParams::monitoring`.
     pub monitor: Option<MonitorPlan>,
+    /// Bus tracks, and where each track's audio goes (by bus slot:
+    /// `routes[slot]` is the bus slot it's sent into, or `NO_ROUTE`).
+    pub buses: Vec<BusPlan>,
+    pub routes: [u8; MAX_BUS_TRACKS],
 }
 
 impl Default for PlaybackPlan {
@@ -98,6 +125,8 @@ impl Default for PlaybackPlan {
             master_effect_count: 0,
             master_effects: [EffectUnitState::Compressor(CompressorState::bypass()); MAX_EFFECTS_PER_CHAIN],
             monitor: None,
+            buses: Vec::new(),
+            routes: [NO_ROUTE; MAX_BUS_TRACKS],
         }
     }
 }
@@ -154,6 +183,7 @@ pub fn instrument_params(
     };
     params.slot = slot;
     params.gain_db = t.gain_db;
+    params.route_bus = route_slot(arr, track);
     let (count, effects) = build_effect_units(&t.fx);
     params.effect_count = count;
     params.effects = effects;
@@ -166,13 +196,12 @@ impl PlaybackPlan {
     /// clips on a muted track, or on any track when some other track is
     /// soloed and this one isn't.
     pub fn from_arrangement(arrangement: &Arrangement, sample_rate: u32) -> Self {
-        let any_solo = arrangement.tracks.iter().any(|t| t.solo);
         let clips = arrangement
             .clips
             .iter()
             .filter_map(|clip| {
                 let track = arrangement.track(clip.track)?;
-                if track.mute || (any_solo && !track.solo) {
+                if !arrangement.is_audible(track) {
                     return None;
                 }
                 let ClipContent::Audio { source, source_offset_samples, fade_in, fade_out, .. } = &clip.content else {
@@ -211,12 +240,25 @@ impl PlaybackPlan {
             .iter()
             .enumerate()
             .find(|(_, t)| t.arm && t.kind == crate::arrangement::TrackKind::Audio)
-            .filter(|(_, t)| !t.mute && !(any_solo && !t.solo))
+            .filter(|(_, t)| arrangement.is_audible(t))
             .map(|(i, t)| {
                 let (effect_count, effects) = build_effect_units(&t.fx);
                 MonitorPlan { bus_slot: i.min(MAX_BUS_TRACKS - 1) as u8, gain_db: t.gain_db, effect_count, effects }
             });
-        Self { clips, master_effect_count, master_effects, monitor }
+        let buses = arrangement
+            .tracks
+            .iter()
+            .filter(|t| t.kind == crate::arrangement::TrackKind::Bus && arrangement.is_audible(t))
+            .map(|t| {
+                let (effect_count, effects) = build_effect_units(&t.fx);
+                BusPlan { bus_slot: bus_slot_of(arrangement, t.id), gain_db: t.gain_db, effect_count, effects }
+            })
+            .collect();
+        let mut routes = [NO_ROUTE; MAX_BUS_TRACKS];
+        for t in &arrangement.tracks {
+            routes[bus_slot_of(arrangement, t.id) as usize] = route_slot(arrangement, t.id);
+        }
+        Self { clips, master_effect_count, master_effects, monitor, buses, routes }
     }
 }
 

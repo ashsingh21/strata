@@ -196,10 +196,18 @@ pub fn track_header<'a>(
         arr.track(track_id).map(|t| t.name.clone()).unwrap_or_default()
     });
     // An audio track says so; a MIDI track names what it plays through.
-    let kind_label = arrangement.map(move |arr| match arr.track(track_id) {
-        Some(t) if t.kind == TrackKind::Audio => "Audio",
-        Some(t) => t.instrument.map(|i| i.name()).unwrap_or("No instrument"),
-        None => "",
+    // ... and, when it's sent into a bus, which one.
+    let kind_label = arrangement.map(move |arr| {
+        let what = match arr.track(track_id) {
+            Some(t) if t.kind == TrackKind::Audio => "Audio",
+            Some(t) if t.kind == TrackKind::Bus => "Bus",
+            Some(t) => t.instrument.map(|i| i.name()).unwrap_or("No instrument"),
+            None => "",
+        };
+        match arr.route_of(track_id).and_then(|b| arr.track(b)) {
+            Some(bus) => format!("{what} \u{2192} {}", bus.name),
+            None => what.to_string(),
+        }
     });
     let color = arrangement.map(move |arr| {
         arr.track(track_id).map(|t| t.color).unwrap_or(ClipColor::Coral)
@@ -331,10 +339,12 @@ pub fn track_header<'a>(
                     .lesson_target(crate::lessons::Target::Solo(track_id))
                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleSolo(track_id)));
 
+                let is_bus = arrangement.map(move |arr| arr.track(track_id).is_some_and(|t| t.kind == TrackKind::Bus));
                 Button::new(cx, |cx| Label::new(cx, "\u{25CF}"))
                     .class("btn")
                     .class("sm")
                     .toggle_class("is-rec", arm)
+                    .toggle_class("hidden", is_bus)
                     .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "Arm: record onto this track"); }).arrow(false))
                     .on_press(move |cx| cx.emit(TimelineEvent::ToggleArm(track_id)));
 

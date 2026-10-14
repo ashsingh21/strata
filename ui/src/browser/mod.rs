@@ -385,6 +385,8 @@ impl BrowserModel {
         use crate::synth::state::SynthEvent;
         use crate::timeline::state::TimelineEvent;
         let arr = self.arrangement.get();
+        // A bus has no clips of its own: dropped there, a sample gets a track.
+        let track = track.filter(|t| arr.track(*t).is_some_and(|t| t.kind != shared::arrangement::TrackKind::Bus));
         let target = track.and_then(|t| arr.track(t)).cloned();
         match &item.kind {
             Kind::Sample(s) | Kind::ProjectAudio(s) => cx.emit(TimelineEvent::AddSampleAt { source: s.clone(), track, start: tick }),

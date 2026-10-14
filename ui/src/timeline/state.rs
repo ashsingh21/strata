@@ -518,6 +518,8 @@ pub enum TimelineEvent {
     SplitAllAt(Ticks),
     /// Takes `start..end` out of the whole song; what's after moves back.
     RemoveTime { start: Ticks, end: Ticks },
+    /// Sends a track into a bus (`None`: straight to the master).
+    SetRoute { track: TrackId, bus: Option<TrackId> },
     /// A tempo change from `tick` on (added, or its tempo changed).
     SetTempoAt { tick: Ticks, bpm: f64 },
     RemoveTempoAt(Ticks),
@@ -830,7 +832,7 @@ impl TimelineState {
             let color = COLORS[index % COLORS.len()];
             let name = match kind {
                 TrackKind::Midi => arr.name_for_instrument(instrument),
-                TrackKind::Audio => arr.next_track_name(kind),
+                TrackKind::Audio | TrackKind::Bus => arr.next_track_name(kind),
             };
             let track = Track {
                 id,
@@ -967,6 +969,11 @@ impl Model for TimelineState {
                     let next = shared::arrangement::remove_time(&self.arrangement.get(), *start, *end);
                     self.do_command(Command::Replace(Box::new(next)));
                     self.selection.set(Selection::default());
+                }
+            }
+            TimelineEvent::SetRoute { track, bus } => {
+                if self.arrangement.get().route_of(*track) != *bus {
+                    self.do_command(Command::SetRoute { track: *track, bus: *bus });
                 }
             }
             TimelineEvent::SetTempoAt { tick, bpm } => {

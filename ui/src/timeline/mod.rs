@@ -146,6 +146,9 @@ pub fn timeline_view(
                         add_track_button(cx, theme, IconKind::Effect, "Guitar")
                             .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "An armed audio track with a gate, amp and cabinet. Plug in and press Monitor to hear yourself (headphones: a mic near speakers will howl)"); }).arrow(false))
                             .on_press(|cx| cx.emit(TimelineEvent::AddGuitarTrack));
+                        add_track_button(cx, theme, IconKind::Effect, "Bus")
+                            .tooltip(|cx| Tooltip::new(cx, |cx| { Label::new(cx, "A track other tracks are sent into, to share its effects and fader - all the drums through one compressor. Right-click a track: Send to Bus"); }).arrow(false))
+                            .on_press(|cx| cx.emit(TimelineEvent::AddTrack(shared::arrangement::TrackKind::Bus)));
                     })
                     .class("synth-seg")
                     .width(Auto)
