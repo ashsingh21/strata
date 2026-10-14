@@ -112,6 +112,11 @@ pub struct TimelineState {
     /// The clip currently being extended, if the next committed step
     /// lands right at its end.
     step_entry_clip: Option<ClipId>,
+    /// Notes being played in while recording (see `advance_live_take`).
+    live_take: Option<shared::arrangement::LiveTake>,
+    /// Where the take started, and the last tick it heard, while it runs.
+    live_start: Ticks,
+    live_last_tick: Ticks,
 
     // The piano roll's own state (not reactive here): when it's open with
     // a note selection, Delete/Backspace removes those notes instead of
@@ -242,6 +247,9 @@ impl TimelineState {
             record_armed,
             playing,
             step_entry_clip: None,
+            live_take: None,
+            live_start: 0,
+            live_last_tick: 0,
             piano_roll_open_clip,
             piano_roll_selected,
             selected_track,
@@ -376,6 +384,44 @@ impl TimelineState {
     /// long, then advances the playhead by one step. A no-op unless
     /// record is armed, the transport is stopped, and some MIDI track is
     /// armed.
+    /// Live MIDI recording, once a frame: Record on, playing and a MIDI
+    /// track armed starts a take; what you play goes into it; when any of
+    /// those stops, the take becomes a clip (one undo step). A loop coming
+    /// round keeps the same take, so each pass layers onto the last.
+    fn advance_live_take(&mut self, cx: &mut EventContext, tick: Ticks, playing: bool) {
+        use crate::recorder::{RecorderModelEvent, RecordingPreview};
+        let track = (self.record_armed.get() && playing)
+            .then(|| self.arrangement.get().tracks.iter().find(|t| t.arm && t.kind == TrackKind::Midi).map(|t| t.id))
+            .flatten();
+        let running = self.live_take.as_ref().map(|t| t.track);
+        if running.is_some() && running != track {
+            let take = self.live_take.take().expect("running");
+            let end = self.live_last_tick;
+            self.with_arrangement(|arr, stack| {
+                let bar = arr.tempo_map.time_signature_at(0).ticks_per_bar();
+                let id = arr.alloc_id();
+                if let Some(clip) = take.into_clip(id, bar, end) {
+                    stack.do_command(Command::InsertClip { clip: Box::new(clip) }, arr);
+                }
+            });
+            cx.emit(RecorderModelEvent::SetPreview(None));
+        }
+        let Some(track) = track else { return };
+        match &mut self.live_take {
+            None => {
+                self.live_take = Some(shared::arrangement::LiveTake::new(track));
+                self.live_start = tick;
+            }
+            // The loop jumped back: keys still down end where it was.
+            Some(take) if tick < self.live_last_tick => take.release_all(self.live_last_tick),
+            Some(_) => {}
+        }
+        self.live_start = self.live_start.min(tick);
+        self.live_last_tick = tick;
+        let length = (tick - self.live_start).max(1);
+        cx.emit(RecorderModelEvent::SetPreview(Some(RecordingPreview { track, start: self.live_start, length })));
+    }
+
     fn commit_step(&mut self, pitches: &HashSet<u8>) {
         if !self.record_armed.get() || self.playing.get() {
             return;
@@ -404,8 +450,26 @@ impl TimelineState {
     }
 }
 
+/// The piano roll's note tools (see `shared::arrangement::note_tools`):
+/// on the selected notes, or the whole clip when none are selected.
+#[derive(Clone, Copy, Debug)]
+pub enum NoteTool {
+    /// Toward the Snap grid: 1.0 all the way, 0.5 halfway.
+    Quantize(f32),
+    /// Later (or earlier) by this many Snap steps.
+    Nudge(i64),
+    Transpose(i32),
+    FitToScale { key: u8, mask: u16 },
+    Legato,
+    /// Into repeats one Snap step long.
+    Chop,
+    Strum,
+    Reverse,
+}
+
 #[derive(Debug)]
 pub enum TimelineEvent {
+    NoteTool(NoteTool),
     MoveClip { clip: ClipId, track: TrackId, start: Ticks },
     TrimClip { clip: ClipId, start: Ticks, length: Ticks },
     /// The piano roll's pattern control: makes a MIDI clip loop a pattern
@@ -500,6 +564,8 @@ pub enum TimelineEvent {
     /// is played via Space): commits `pitches` (possibly empty, for a
     /// rest) as one step of a step-entry recording.
     CommitStepChord(HashSet<u8>),
+    /// A key played (or let go) by the player, for live recording.
+    LiveNote { pitch: u8, velocity: u8, on: bool },
 
     /// The piano roll's own note add/remove. A Draw click adds one note
     /// or a whole chord - every note that isn't already there, as one undo
@@ -1253,6 +1319,7 @@ impl Model for TimelineState {
                 self.playhead_ticks.set((*ticks).max(0));
             }
             TimelineEvent::SyncPlayhead { ticks, playing } => {
+                self.advance_live_take(cx, *ticks, *playing);
                 if *playing {
                     self.playhead_ticks.set(*ticks);
                     if self.follow.get() {
@@ -1264,6 +1331,16 @@ impl Model for TimelineState {
                                 t.scroll_x = (t.scroll_x + x - width * 0.1).max(0.0);
                             }
                         });
+                    }
+                }
+            }
+            TimelineEvent::LiveNote { pitch, velocity, on } => {
+                let at = self.playhead_ticks.get();
+                if let Some(take) = &mut self.live_take {
+                    if *on {
+                        take.press(*pitch, *velocity, at);
+                    } else {
+                        take.release(*pitch, at);
                     }
                 }
             }
@@ -1510,6 +1587,34 @@ impl Model for TimelineState {
                 cx.emit(crate::piano_roll::state::PianoRollEvent::SetSelection(
                     moved.iter().map(|(_, to)| (to.start, to.pitch)).collect(),
                 ));
+            }
+            TimelineEvent::NoteTool(tool) => {
+                use shared::arrangement::note_tools as nt;
+                let Some(clip_id) = self.piano_roll_open_clip.get() else { return };
+                let arr = self.arrangement.get();
+                let Some(clip) = arr.clip(clip_id) else { return };
+                let ClipContent::Midi { notes, .. } = &clip.content else { return };
+                let selected = self.piano_roll_selected.get();
+                let step = self.snap.get().ticks().unwrap_or(shared::arrangement::PPQ / 4);
+                let edited = match *tool {
+                    NoteTool::Quantize(strength) => nt::quantize(notes, &selected, step, strength),
+                    NoteTool::Nudge(steps) => nt::nudge(notes, &selected, steps * step),
+                    NoteTool::Transpose(semitones) => nt::transpose(notes, &selected, semitones),
+                    NoteTool::FitToScale { key, mask } => nt::fit_to_scale(notes, &selected, key, mask),
+                    NoteTool::Legato => nt::legato(notes, &selected),
+                    NoteTool::Chop => nt::chop(notes, &selected, step),
+                    NoteTool::Strum => nt::strum(notes, &selected, shared::arrangement::PPQ / 24),
+                    NoteTool::Reverse => nt::reverse(notes, &selected),
+                };
+                if edited.notes == *notes {
+                    return;
+                }
+                let mut next = clip.clone();
+                if let ClipContent::Midi { notes, .. } = &mut next.content {
+                    *notes = edited.notes;
+                }
+                self.do_command(Command::ReplaceClip { clip: Box::new(next) });
+                cx.emit(crate::piano_roll::state::PianoRollEvent::SetSelection(edited.chosen));
             }
             TimelineEvent::RemoveMidiNotes { clip, notes } => {
                 let commands =

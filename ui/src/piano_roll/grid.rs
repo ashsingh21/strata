@@ -210,6 +210,8 @@ pub struct Grid {
     wheel: f32,
     wheel_at: Option<std::time::Instant>,
     wheel_moved: bool,
+    /// The note sounding while the mouse is down on the grid.
+    audition: Option<(shared::arrangement::TrackId, u8)>,
 }
 
 impl Grid {
@@ -230,7 +232,7 @@ impl Grid {
         chord: Signal<ChordShape>,
         new_length: Signal<Option<(SnapGrid, Ticks)>>,
     ) -> Handle<'_, Self> {
-        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, new_length, resize: None, scrub: false, cursor: CursorIcon::Default, vel_drag: None, paint: None, wheel: 0.0, wheel_at: None, wheel_moved: false }
+        Self { arrangement, open_clip, mode, label_mode, selected, snap, key, scale_mask, playhead, theme, octave, chord, new_length, resize: None, scrub: false, cursor: CursorIcon::Default, vel_drag: None, paint: None, wheel: 0.0, wheel_at: None, wheel_moved: false, audition: None }
             .build(cx, |_| {})
             .bind(arrangement, |mut h| h.needs_redraw())
             .bind(open_clip, |mut h| h.needs_redraw())
@@ -438,6 +440,15 @@ impl View for Grid {
                 let px_per_tick = grid_w as f64 / clip_length as f64;
                 let rows_h = rows.len() as f32 * ROW_H;
 
+                // Pressing a row sounds its note until the mouse comes up.
+                if ly < rows_h {
+                    let track = self.arrangement.get().clip(clip_id).map(|c| c.track);
+                    if let (Some(&pitch), Some(track)) = (rows.get((ly / ROW_H) as usize), track) {
+                        cx.emit(crate::synth::state::SynthEvent::NoteOn(track, pitch, shared::arrangement::DEFAULT_VELOCITY));
+                        self.audition = Some((track, pitch));
+                    }
+                }
+
                 // Velocity lane: grab the nearest stem.
                 if ly >= rows_h {
                     let lane_top = bounds.y + RULER_H + rows_h;
@@ -559,8 +570,22 @@ impl View for Grid {
                 }
                 meta.consume();
                 let dir = if *code == Code::ArrowUp { 1 } else { -1 };
+                // Alt: a semitone, in or out of the scale.
+                if cx.modifiers().alt() {
+                    cx.emit(TimelineEvent::NoteTool(crate::timeline::state::NoteTool::Transpose(dir)));
+                    return;
+                }
                 let (octaves, steps) = if cx.modifiers().shift() { (dir, 0) } else { (0, dir) };
                 cx.emit(TimelineEvent::MoveSelectedNotes { octaves, steps, key: self.key.get(), mask: self.scale_mask.get() });
+            }
+            // Selected notes: earlier/later by one Snap step.
+            WindowEvent::KeyDown(code @ (Code::ArrowLeft | Code::ArrowRight), _) => {
+                if self.selected.get().is_empty() {
+                    return;
+                }
+                meta.consume();
+                let dir = if *code == Code::ArrowRight { 1 } else { -1 };
+                cx.emit(TimelineEvent::NoteTool(crate::timeline::state::NoteTool::Nudge(dir)));
             }
             WindowEvent::MouseMove(x, y) => {
                 if self.scrub {
@@ -631,6 +656,9 @@ impl View for Grid {
             }
             WindowEvent::MouseLeave => self.set_cursor(cx, CursorIcon::Default),
             WindowEvent::MouseUp(MouseButton::Left) => {
+                if let Some((track, pitch)) = self.audition.take() {
+                    cx.emit(crate::synth::state::SynthEvent::NoteOff(track, pitch));
+                }
                 if self.scrub {
                     self.scrub = false;
                     cx.release();
@@ -909,6 +937,33 @@ impl View for Grid {
             edge.set_path_effect(vg::PathEffect::dash(&[4.0, 3.0], 0.0));
             canvas.draw_path(&vg::Path::rect(rect.with_inset((0.75, 0.75)), None), &edge);
         }
+        // What the other tracks play under this clip, faint in their own
+        // colours - a bassline written against the chords it sits under.
+        if !drums {
+            let arr = self.arrangement.get();
+            for other in arr.clips.iter().filter(|c| c.id != clip_id && c.start < clip_start + clip_length && c.end() > clip_start) {
+                let Some(track) = arr.track(other.track) else { continue };
+                if track.instrument == Some(shared::arrangement::Instrument::Drums) {
+                    continue;
+                }
+                let c = crate::timeline::header::clip_color_to_rgb(track.color);
+                let ghost = Color::rgba(c.r(), c.g(), c.b(), 60);
+                for n in other.played_notes() {
+                    let start = other.start + n.start - clip_start;
+                    let end = (start + n.length).min(clip_length);
+                    if end <= 0 || start >= clip_length {
+                        continue;
+                    }
+                    let Some(row) = rows.iter().position(|&r| r == n.pitch) else { continue };
+                    let y0 = top + row as f32 * ROW_H + 3.0;
+                    let x0 = tick_to_x(start.max(0)) + 1.0;
+                    let x1 = tick_to_x(end).min(gx + gw);
+                    if x1 > x0 {
+                        fill(canvas, vg::Rect::new(x0, y0, x1, y0 + ROW_H - 7.0), ghost);
+                    }
+                }
+            }
+        }
         for note in &notes {
             if self.paint.as_ref().is_some_and(|p| p.pitch == note.pitch) && erasing.contains(&note.start) {
                 continue;
@@ -930,7 +985,9 @@ impl View for Grid {
             } else if muted_pads.contains(&note.pitch) {
                 Color::rgba(clip_color.r(), clip_color.g(), clip_color.b(), 70)
             } else {
-                clip_color
+                // Softer notes paler: loud and quiet tell apart at a glance.
+                let alpha = 110 + (note.velocity.min(127) as u32 * 145 / 127) as u8;
+                Color::rgba(clip_color.r(), clip_color.g(), clip_color.b(), alpha)
             };
             fill(canvas, rect, color);
             // The right edge, a darker lip: the handle that resizes.

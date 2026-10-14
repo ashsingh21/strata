@@ -388,9 +388,10 @@ impl SynthModel {
 
     /// A note the player actually pressed (mouse or computer keyboard):
     /// sounds it and marks it as part of the in-progress step-entry chord.
-    fn note_on(&mut self, note: u8, velocity: u8) {
+    fn note_on(&mut self, cx: &mut EventContext, note: u8, velocity: u8) {
         self.sound_on(self.selected_track.get(), note, velocity);
         self.step_record_pitches.insert(note);
+        cx.emit(TimelineEvent::LiveNote { pitch: note, velocity, on: true });
     }
 
     /// The player-pressed counterpart to `note_on`: once every held note
@@ -398,6 +399,7 @@ impl SynthModel {
     /// step-entry recorder (a no-op there unless it's actually armed).
     fn note_off(&mut self, cx: &mut EventContext, note: u8) {
         self.sound_off(self.selected_track.get(), note);
+        cx.emit(TimelineEvent::LiveNote { pitch: note, velocity: 0, on: false });
         if self.state.get().held_notes.is_empty() && !self.step_record_pitches.is_empty() {
             let pitches = std::mem::take(&mut self.step_record_pitches);
             cx.emit(TimelineEvent::CommitStepChord(pitches));
@@ -452,12 +454,12 @@ impl Model for SynthModel {
             SynthEvent::SetVoiceMode(m) => self.state.update(|s| s.voice_mode = *m),
             SynthEvent::KeyPress(note) => {
                 if !self.state.get().held_notes.contains(note) {
-                    self.note_on(*note, shared::arrangement::DEFAULT_VELOCITY);
+                    self.note_on(cx, *note, shared::arrangement::DEFAULT_VELOCITY);
                 }
             }
             SynthEvent::PlayNote(note, velocity) => {
                 if !self.state.get().held_notes.contains(note) {
-                    self.note_on(*note, *velocity);
+                    self.note_on(cx, *note, *velocity);
                 }
             }
             SynthEvent::KeyRelease(note) => {
@@ -469,7 +471,7 @@ impl Model for SynthModel {
                 if self.state.get().held_notes.contains(note) {
                     self.note_off(cx, *note);
                 } else {
-                    self.note_on(*note, shared::arrangement::DEFAULT_VELOCITY);
+                    self.note_on(cx, *note, shared::arrangement::DEFAULT_VELOCITY);
                 }
             }
             SynthEvent::NoteOn(track, note, velocity) => self.sound_on(Some(*track), *note, *velocity),
@@ -619,7 +621,7 @@ impl Model for SynthModel {
                             let note = (KEYBOARD_BASE_NOTE + self.octave_shift.get() as i32 * 12 + offset)
                                 .clamp(0, 127) as u8;
                             self.held_computer_keys.insert(*code, note);
-                            self.note_on(note, shared::arrangement::DEFAULT_VELOCITY);
+                            self.note_on(cx, note, shared::arrangement::DEFAULT_VELOCITY);
                         }
                     }
                 }

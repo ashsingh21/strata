@@ -475,6 +475,38 @@ pub fn piano_roll_view(
             .gap(Pixels(tokens::SPACE_2))
             .alignment(Alignment::Left)
             .size(Auto);
+            // Note tools: on the selected notes, or the whole clip.
+            HStack::new(cx, move |cx| {
+                use crate::timeline::state::NoteTool;
+                Element::new(cx).class("hairline").width(Pixels(1.0)).height(Pixels(20.0));
+                let tools: [(&str, &str, fn(u8, u16, bool) -> NoteTool); 6] = [
+                    ("Quantize", "Moves notes onto the Snap grid, so what you played lands in time. Shift-click: only halfway, to keep some feel.", |_, _, shift| NoteTool::Quantize(if shift { 0.5 } else { 1.0 })),
+                    ("Legato", "Holds each note until the next one starts - no gaps.", |_, _, _| NoteTool::Legato),
+                    ("Chop", "Cuts each note into repeats one Snap step long, like a drum roll.", |_, _, _| NoteTool::Chop),
+                    ("Strum", "Spreads each chord out from the lowest note up, like a strum on a guitar.", |_, _, _| NoteTool::Strum),
+                    ("Reverse", "Plays the notes backwards.", |_, _, _| NoteTool::Reverse),
+                    ("Fit to key", "Moves every note that's outside the key to the nearest note inside it.", |key, mask, _| NoteTool::FitToScale { key, mask }),
+                ];
+                for (name, tip, make) in tools {
+                    Button::new(cx, move |cx| Label::new(cx, name))
+                        .class("btn")
+                        .class("sm")
+                        .class("quiet")
+                        .tooltip(move |cx| {
+                            Tooltip::new(cx, move |cx| {
+                                Label::new(cx, format!("{tip} Works on the selected notes, or the whole clip if none are selected."));
+                            })
+                            .arrow(false)
+                        })
+                        .on_press(move |cx| {
+                            let shift = cx.modifiers().shift();
+                            cx.emit(TimelineEvent::NoteTool(make(key.get(), scale_mask.get(), shift)));
+                        });
+                }
+            })
+            .gap(Pixels(tokens::SPACE_1))
+            .alignment(Alignment::Left)
+            .size(Auto);
             Button::new(cx, |cx| Label::new(cx, "Close"))
                 .class("btn")
                 .class("quiet")
