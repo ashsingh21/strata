@@ -868,6 +868,15 @@ impl LaneArea {
                         (original_start, new_length)
                     }
                 };
+                // Ctrl (Cmd on a Mac) on an audio clip's end: stretch what's
+                // in it to the new length instead of cutting or extending.
+                let stretching = (cx.modifiers().ctrl() || cx.modifiers().logo())
+                    && matches!(edge, Edge::End)
+                    && self.arrangement.get().clip(clip).is_some_and(|c| matches!(c.content, ClipContent::Audio { .. }));
+                if stretching {
+                    cx.emit(TimelineEvent::StretchClip { clip, factor: length as f64 / original_length.max(1) as f64 });
+                    return;
+                }
                 cx.emit(TimelineEvent::TrimClip { clip, start, length });
             }
             Drag::RubberBand { anchor, current } => {

@@ -30,6 +30,7 @@ pub mod project;
 pub mod recorder;
 pub mod riyaz;
 pub mod sections;
+pub mod stretch;
 pub mod synth;
 pub mod theory;
 

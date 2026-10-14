@@ -213,6 +213,29 @@ pub fn content_height(arr: &Arrangement) -> f64 {
 /// How far right there's anything to scroll to, in unscrolled px: the end
 /// of the last clip plus eight bars of empty room to write into (at least
 /// 32 bars).
+/// `samples` saved beside your recordings as a new file named after
+/// `source` ("loop_stretched1.wav"), for a clip to play instead.
+fn write_derived_audio(source: &str, what: &str, samples: &[f32], spec: hound::WavSpec) -> Option<Arc<str>> {
+    let stem = std::path::Path::new(source).file_stem().and_then(|s| s.to_str()).unwrap_or("audio").to_string();
+    let dir = crate::paths::recordings_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let name = (1..).map(|n| format!("{stem}_{what}{n}.wav")).find(|n| !dir.join(n).exists())?;
+    let out_spec = hound::WavSpec { channels: spec.channels, sample_rate: spec.sample_rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
+    let written = hound::WavWriter::create(dir.join(&name), out_spec).and_then(|mut w| {
+        for s in samples {
+            w.write_sample(*s)?;
+        }
+        w.finalize()
+    });
+    match written {
+        Ok(()) => Some(name.into()),
+        Err(e) => {
+            tracing::warn!("couldn't write {name}: {e}");
+            None
+        }
+    }
+}
+
 /// The part of an audio clip's file it plays, read from disk: its frames
 /// (interleaved, silence past the file's end) and the file's format.
 /// Offsets are kept at 48 kHz, as `Command::SplitClip` counts them.
@@ -494,6 +517,9 @@ pub enum TimelineEvent {
     /// An audio clip played backwards: its part of the file written out
     /// reversed as a new file (the original is untouched; undo goes back).
     ReverseClip(ClipId),
+    /// An audio clip's sound made `factor` times as long at the same
+    /// pitch, written as a new file (the original is untouched).
+    StretchClip { clip: ClipId, factor: f64 },
     /// An audio clip's gain set so its loudest peak reaches -1 dB.
     NormalizeClip(ClipId),
     /// A clip changed while a handle is dragged - shown, not yet undoable.
@@ -1413,22 +1439,7 @@ impl Model for TimelineState {
                 let ClipContent::Audio { source, fade_in, fade_out, .. } = &clip.content else { return };
                 let channels = spec.channels.max(1) as usize;
                 let reversed: Vec<f32> = frames.chunks(channels).rev().flatten().copied().collect();
-                let stem = std::path::Path::new(&**source).file_stem().and_then(|s| s.to_str()).unwrap_or("audio").to_string();
-                let dir = crate::paths::recordings_dir();
-                let _ = std::fs::create_dir_all(&dir);
-                let name = (1..).map(|n| format!("{stem}_reversed{n}.wav")).find(|n| !dir.join(n).exists()).expect("a free name");
-                let out_spec = hound::WavSpec { channels: spec.channels, sample_rate: spec.sample_rate, bits_per_sample: 32, sample_format: hound::SampleFormat::Float };
-                let written = hound::WavWriter::create(dir.join(&name), out_spec).and_then(|mut w| {
-                    for s in &reversed {
-                        w.write_sample(*s)?;
-                    }
-                    w.finalize()
-                });
-                if let Err(e) = written {
-                    tracing::warn!("reverse: couldn't write {name}: {e}");
-                    return;
-                }
-                let new_source: Arc<str> = name.into();
+                let Some(new_source) = write_derived_audio(source, "reversed", &reversed, spec) else { return };
                 let mut next = clip.clone();
                 next.content = ClipContent::Audio {
                     source: new_source.clone(),
@@ -1437,6 +1448,34 @@ impl Model for TimelineState {
                     // What faded in now fades out.
                     fade_in: *fade_out,
                     fade_out: *fade_in,
+                };
+                self.do_command(Command::ReplaceClip { clip: Box::new(next) });
+                if let Some(tx) = &self.decode_request_tx {
+                    let _ = tx.send(new_source.clone());
+                }
+                crate::timeline::peaks_loader::spawn_peak_loader_for_source(cx, &crate::timeline::assets_dir(), new_source);
+            }
+            TimelineEvent::StretchClip { clip: id, factor } => {
+                let arr = self.arrangement.get();
+                let Some(clip) = arr.clip(*id).cloned() else { return };
+                let Some((frames, spec)) = audio_region(&arr, &clip) else { return };
+                let ClipContent::Audio { source, fade_in, fade_out, .. } = &clip.content else { return };
+                let channels = spec.channels.max(1) as usize;
+                let stretched = shared::stretch::stretch(&frames, channels, spec.sample_rate, *factor);
+                let Some(new_source) = write_derived_audio(source, "stretched", &stretched, spec) else { return };
+                // As long as the stretched sound lasts, from where it starts.
+                let start_seconds = arr.tempo_map.ticks_to_seconds(clip.start);
+                let seconds = (stretched.len() / channels) as f64 / spec.sample_rate.max(1) as f64;
+                let length = (arr.tempo_map.seconds_to_ticks(start_seconds + seconds) - clip.start).max(1);
+                let scale = |t: Ticks| (t as f64 * factor) as Ticks;
+                let mut next = clip.clone();
+                next.length = length;
+                next.content = ClipContent::Audio {
+                    source: new_source.clone(),
+                    peaks: None,
+                    source_offset_samples: 0,
+                    fade_in: scale(*fade_in),
+                    fade_out: scale(*fade_out),
                 };
                 self.do_command(Command::ReplaceClip { clip: Box::new(next) });
                 if let Some(tx) = &self.decode_request_tx {

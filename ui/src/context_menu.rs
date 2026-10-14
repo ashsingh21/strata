@@ -159,6 +159,17 @@ fn items(cx: &mut Context, arrangement: Signal<Arrangement>, menu: Signal<Option
                 } else {
                     separator(cx);
                     item(cx, "Reverse", move |cx| cx.emit(TimelineEvent::ReverseClip(clip_id)));
+                    // A loop whose name gives its tempo ("..._120_bpm"):
+                    // stretched to play in time with the song.
+                    let fit = arr.clip(clip_id).and_then(|c| match &c.content {
+                        ClipContent::Audio { source, .. } => crate::browser::items::bpm_in_name(source).map(|bpm| (bpm as f64, arr.tempo_map.bpm_at(c.start))),
+                        _ => None,
+                    });
+                    if let Some((from, to)) = fit.filter(|(from, to)| (from - to).abs() > 0.05) {
+                        item(cx, format!("Fit to song tempo ({from:.0} \u{2192} {to:.0} bpm)"), move |cx| {
+                            cx.emit(TimelineEvent::StretchClip { clip: clip_id, factor: from / to })
+                        });
+                    }
                     item(cx, "Normalize", move |cx| cx.emit(TimelineEvent::NormalizeClip(clip_id)));
                 }
                 separator(cx);
