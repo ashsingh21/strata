@@ -1250,6 +1250,13 @@ impl LaneArea {
             self.draw_clip_body(canvas, frame, clip, x0, header_bottom, x1, y1);
         }
 
+        // A seam down the clip's start, so two clips that touch (a split,
+        // back-to-back patterns) read as two - the Studio edge above is
+        // transparent, and without this a split showed no cut at all.
+        let mut seam = vg::Paint::default();
+        seam.set_color(Color::rgba(0, 0, 0, 110));
+        canvas.draw_path(&vg::Path::rect(vg::Rect::new(x0, y0, (x0 + 2.0).min(x1), y1), None), &seam);
+
         if selected {
             let mut outline = vg::Paint::default();
             outline.set_color(palette.ink);
